@@ -1,0 +1,132 @@
+Ты — AI-ассистент для Product Owner в B2B SaaS продукте TaskFlow AI.
+
+Твоя задача: ответить на вопрос пользователя строго на основе предоставленного контекста.
+
+Правила:
+- Отвечай на русском языке.
+- Не выдумывай факты, которых нет в контексте.
+- Не используй нерелевантные chunks как доказательства.
+- Если chunk явно помечен как distractor или относится к другой feature, игнорируй его для основного ответа.
+- В списке использованных источников указывай только chunks, которые реально использовал как доказательства.
+- Если данных недостаточно, явно скажи, чего не хватает.
+- Сначала дай краткий вывод для Product Owner.
+- Затем перечисли доказательства из контекста.
+- Затем предложи 3 практических next steps.
+- В конце отдельно укажи риски, если проблему не поднять в roadmap.
+
+Persona:
+- Роль пользователя: Product Owner.
+- Пользователя интересуют business impact, adoption, NPS, churn risk, enterprise retention и приоритизация roadmap.
+- Технические детали нужны только если они объясняют бизнес-влияние.
+
+Контекст:
+
+[CHUNK 1: business_metrics | feature=notifications | period=2026-01 | segment=enterprise]
+В январе 2026 adoption функции notifications в enterprise-сегменте был 64%.
+NPS по enterprise-клиентам, активно использующим notifications, был 43.
+Количество support tickets по notifications составило 16.
+Средняя оценка удовлетворенности по notifications tickets была 4.2 из 5.
+
+[CHUNK 2: business_metrics | feature=notifications | period=2026-02 | segment=enterprise]
+В феврале 2026 adoption функции notifications в enterprise-сегменте был 61%.
+NPS по enterprise-клиентам, активно использующим notifications, был 41.
+Количество support tickets по notifications составило 18.
+Средняя оценка удовлетворенности по notifications tickets была 4.1 из 5.
+
+[CHUNK 3: business_metrics | feature=notifications | period=2026-03 | segment=enterprise]
+В марте 2026 adoption функции notifications в enterprise-сегменте снизился с 61% до 48%.
+Количество связанных support tickets по notifications выросло с 18 до 47.
+NPS по enterprise-клиентам, активно использующим notifications, снизился с 41 до 32.
+Средняя оценка удовлетворенности по тикетам, связанным с задержкой уведомлений, снизилась до 3.2 из 5.
+
+[CHUNK 4: user_feedback | ticket_id=TCK-0001 | feature=notifications | priority=high | sentiment=negative]
+Enterprise-клиент сообщил, что Slack-уведомления после обновления задачи приходят через 15-20 минут.
+Project Manager клиента написал, что команда пропускает срочные изменения и из-за этого теряет доверие к TaskFlow AI как к рабочему инструменту для ежедневной координации.
+Тикет был закрыт через 31 час, satisfaction score: 2 из 5.
+
+[CHUNK 5: user_feedback | ticket_id=TCK-0047 | feature=notifications | priority=critical | sentiment=negative]
+Enterprise-клиент с 240 пользователями сообщил, что уведомления о нарушении SLA приходят слишком поздно.
+Из-за задержки команда поддержки клиента не успела отреагировать на несколько критичных задач.
+Клиент попросил временный workaround и заявил, что рассматривает отключение Slack integration для части проектов.
+
+[CHUNK 6: user_feedback | ticket_id=TCK-0052 | feature=notifications | priority=high | sentiment=negative]
+Product Owner enterprise-аккаунта сообщил, что его команда раньше использовала TaskFlow AI как основной центр операционной координации.
+После задержек notifications команда стала чаще переходить напрямую в Slack threads и вручную проверять задачи.
+Клиент попросил добавить прозрачный delivery status и объяснение задержек внутри интерфейса.
+
+[CHUNK 7: user_feedback | review_id=REV-0012 | feature=notifications | sentiment=negative]
+Product Owner из enterprise-команды написал, что notifications раньше были одной из причин ежедневного использования TaskFlow AI.
+После мартовских задержек команда стала чаще проверять задачи вручную и реже доверять автоматическим уведомлениям.
+Клиент просит прозрачный статус доставки и объяснение задержек в интерфейсе.
+
+[CHUNK 8: tech_knowledge | doc=notifications_architecture.md | feature=notifications,integrations,webhooks]
+Notification service доставляет события TaskFlow AI во внешние каналы: Slack, Telegram и email.
+События создаются при создании задачи, изменении статуса, назначении исполнителя, приближении due date, нарушении SLA и новом комментарии.
+Для Slack и Telegram создается delivery job, который обрабатывается delivery worker.
+Если внешний API возвращает временную ошибку, delivery worker делает повторные попытки.
+Для ошибок 429 используется увеличенный backoff, потому что это rate limit.
+
+[CHUNK 9: incident_note | doc=incident_notifications_delay_2026_03.md | feature=notifications,integrations,webhooks]
+В период с 2026-03-10 по 2026-03-18 часть enterprise-клиентов столкнулась с задержкой Slack notifications на 15-20 минут.
+Основная причина: Slack rate limits на workspace с большим количеством событий.
+Delivery worker повторял отправку слишком агрессивно, что увеличивало очередь вместо стабилизации доставки.
+Временная mitigation: увеличить backoff для ошибок 429 и предлагать email notifications как workaround для критичных проектов.
+
+[CHUNK 10: release_note | doc=release_2026_03.md | feature=notifications,reports]
+В релизе 2026.03 команда добавила улучшенные notification settings и новые SLA reports.
+Known issue: для enterprise workspace с высокой активностью Slack notifications могут задерживаться при rate limit.
+Команда планирует добавить UI-индикатор delayed delivery и отдельную метрику notification delivery delay в monthly report.
+
+[CHUNK 11: support_playbook | doc=notifications_support_macro.md | feature=notifications]
+Support-команде рекомендовано отвечать enterprise-клиентам, что проблема задержек Slack notifications связана с rate limits и очередью доставки.
+Временный workaround: включить email notifications для критичных проектов и проверить project-level notification settings.
+Тикеты с priority high или critical нужно эскалировать в integrations team.
+
+[CHUNK 12: roadmap_note | doc=notifications_reliability_proposal.md | feature=notifications]
+Предложение для roadmap: выделить отдельную инициативу Notification Reliability.
+Состав инициативы: адаптивный backoff для Slack rate limits, UI delivery status, метрика delivery delay, alerting для очереди delivery worker.
+Ожидаемый эффект: снизить количество high-priority support tickets и восстановить доверие enterprise-команд к автоматическим уведомлениям.
+
+[CHUNK 13: distractor | feature=csv_import | source_type=rfc]
+CSV Import V2 позволяет массово создавать задачи из CSV-файла.
+Импорт возвращает validation error, если отсутствует title, project_key не существует или assignee_email не принадлежит workspace.
+Пользователи часто путают assignee_email и assignee_name.
+Этот chunk не связан с проблемой notifications.
+
+[CHUNK 14: distractor | feature=search | source_type=incident_note]
+В марте 2026 часть пользователей mid-market сегмента жаловалась, что поиск по assignee возвращает неполный список задач после массового импорта.
+Проблема связана с задержкой индексации search service.
+Это влияет на feature search и не объясняет падение adoption notifications.
+
+[CHUNK 15: distractor | feature=permissions,reports | source_type=support_ticket]
+Несколько enterprise-менеджеров сообщили, что не видят SLA report из-за project-level permissions.
+Проблема связана с ролью viewer и доступом к отчетам.
+Этот chunk относится к reports и permissions, но не к задержкам notifications.
+
+[CHUNK 16: distractor | feature=billing | source_type=business_metrics]
+В марте 2026 количество billing tickets снизилось с 14 до 9.
+NPS billing-сценариев вырос с 38 до 44.
+Эти данные не связаны с notifications, Slack integration или enterprise retention по рабочим уведомлениям.
+
+[CHUNK 17: background | feature=projects,sprints | source_type=product_requirements]
+TaskFlow AI используется командами для управления задачами, проектами и спринтами.
+Enterprise-клиенты часто используют notifications как слой оперативной координации поверх задач и проектов.
+Если уведомления теряют надежность, команды начинают возвращаться к ручной проверке задач и Slack threads.
+
+[CHUNK 18: background | feature=integrations | source_type=architecture_note]
+Slack integration использует workspace-level API limits.
+Большие enterprise workspace могут генерировать большое количество событий при массовом обновлении задач.
+Без адаптивного backoff delivery queue может расти быстрее, чем worker успевает стабилизировать отправку.
+
+[CHUNK 19: distractor | feature=csv_import,reports | source_type=business_metrics]
+В марте 2026 failed imports по csv_import выросли с 34 до 96 в mid-market сегменте.
+Это привело к росту support tickets по CSV validation.
+Эти данные важны для отдельного roadmap обсуждения CSV Import V2, но не должны использоваться как доказательство проблемы notifications.
+
+[CHUNK 20: distractor | feature=mobile_app | source_type=user_feedback]
+Пользователь startup-сегмента попросил темную тему в мобильном приложении.
+Запрос получил низкий приоритет, так как не связан с enterprise retention.
+Этот chunk не относится к notifications.
+
+Вопрос пользователя:
+На основе контекста оцени, нужно ли Product Owner поднять проблему notifications reliability в roadmap на высокий приоритет. Какие evidence strongest, какие риски для enterprise retention, и какие next steps стоит предложить?

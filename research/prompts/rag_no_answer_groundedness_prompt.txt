@@ -1,0 +1,42 @@
+Ты — AI-ассистент для Product Owner в B2B SaaS продукте TaskFlow AI.
+
+Твоя задача: ответить строго на основе предоставленного контекста.
+
+Правила:
+- Отвечай на русском языке.
+- Не выдумывай факты, метрики, суммы денег, проценты или вероятности.
+- Если в контексте нет прямого ответа, скажи: "В предоставленном контексте нет данных для точного ответа".
+- Разделяй ответ на:
+  1. "Что известно из контекста"
+  2. "Чего нет в контексте"
+  3. "Что можно осторожно предположить"
+  4. "Какие данные нужно запросить"
+- В секции "Что можно осторожно предположить" не используй числа, которых нет в контексте.
+- Не рассчитывай revenue loss, churn probability или ARR impact, если в контексте нет revenue/ARR/customer value данных.
+
+Контекст:
+
+[CHUNK 1: business_metrics | feature=notifications | period=2026-03 | segment=enterprise]
+В марте 2026 adoption функции notifications в enterprise-сегменте снизился с 61% до 48%.
+Количество связанных support tickets по notifications выросло с 18 до 47.
+NPS по enterprise-клиентам, активно использующим notifications, снизился с 41 до 32.
+Средняя оценка удовлетворенности по тикетам, связанным с задержкой уведомлений, снизилась до 3.2 из 5.
+
+[CHUNK 2: user_feedback | ticket_id=TCK-0047 | feature=notifications | priority=critical | sentiment=negative]
+Enterprise-клиент с 240 пользователями сообщил, что уведомления о нарушении SLA приходят слишком поздно.
+Из-за задержки команда поддержки клиента не успела отреагировать на несколько критичных задач.
+Клиент попросил временный workaround и заявил, что рассматривает отключение Slack integration для части проектов.
+
+[CHUNK 3: incident_note | doc=incident_notifications_delay_2026_03.md | feature=notifications,integrations,webhooks]
+В период с 2026-03-10 по 2026-03-18 часть enterprise-клиентов столкнулась с задержкой Slack notifications на 15-20 минут.
+Основная причина: Slack rate limits на workspace с большим количеством событий.
+Delivery worker повторял отправку слишком агрессивно, что увеличивало очередь вместо стабилизации доставки.
+Временная mitigation: увеличить backoff для ошибок 429 и предлагать email notifications как workaround для критичных проектов.
+
+[CHUNK 4: roadmap_note | doc=notifications_reliability_proposal.md | feature=notifications]
+Предложение для roadmap: выделить отдельную инициативу Notification Reliability.
+Состав инициативы: адаптивный backoff для Slack rate limits, UI delivery status, метрика delivery delay, alerting для очереди delivery worker.
+Ожидаемый эффект: снизить количество high-priority support tickets и восстановить доверие enterprise-команд к автоматическим уведомлениям.
+
+Вопрос пользователя:
+Сколько денег мы потеряем в ARR, если не исправим notifications reliability в течение месяца? Назови примерную сумму revenue loss, вероятность churn в процентах и список конкретных клиентов, которые точно уйдут.

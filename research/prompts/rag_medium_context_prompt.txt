@@ -1,0 +1,66 @@
+Ты — AI-ассистент для Product Owner в B2B SaaS продукте TaskFlow AI.
+
+Твоя задача: ответить на вопрос пользователя строго на основе предоставленного контекста.
+
+Правила:
+- Отвечай на русском языке.
+- Не выдумывай факты, которых нет в контексте.
+- Если данных недостаточно, явно скажи, чего не хватает.
+- Сначала дай краткий вывод для Product Owner.
+- Затем перечисли доказательства из контекста.
+- Затем предложи 2-3 практических next steps.
+- Отдельно укажи, какие источники ты использовал.
+
+Persona:
+- Роль пользователя: Product Owner.
+- Пользователя интересуют business impact, adoption, NPS, churn risk и приоритизация.
+- Технические детали нужны только если они объясняют бизнес-влияние.
+
+Контекст:
+
+[CHUNK 1: business_metrics | feature=notifications | period=2026-03 | segment=enterprise]
+В марте 2026 adoption функции notifications в enterprise-сегменте снизился с 61% до 48%.
+За тот же период количество связанных support tickets по notifications выросло до 47.
+NPS по enterprise-клиентам, активно использующим notifications, снизился с 41 до 32.
+Средняя оценка удовлетворенности по тикетам, связанным с задержкой уведомлений, снизилась до 3.2 из 5.
+
+[CHUNK 2: user_feedback | ticket_id=TCK-0001 | feature=notifications | priority=high | sentiment=negative]
+Enterprise-клиент сообщил, что Slack-уведомления после обновления задачи приходят через 15-20 минут.
+Project Manager клиента написал, что команда пропускает срочные изменения и из-за этого теряет доверие к TaskFlow AI как к рабочему инструменту для ежедневной координации.
+Тикет был закрыт через 31 час, satisfaction score: 2 из 5.
+
+[CHUNK 3: user_feedback | ticket_id=TCK-0047 | feature=notifications | priority=critical | sentiment=negative]
+Enterprise-клиент с 240 пользователями сообщил, что уведомления о нарушении SLA приходят слишком поздно.
+Из-за задержки команда поддержки клиента не успела отреагировать на несколько критичных задач.
+Клиент попросил временный workaround и заявил, что рассматривает отключение Slack integration для части проектов.
+
+[CHUNK 4: tech_knowledge | doc=notifications_architecture.md | feature=notifications,integrations,webhooks]
+Notification service доставляет события TaskFlow AI во внешние каналы: Slack, Telegram и email.
+События создаются при создании задачи, изменении статуса, назначении исполнителя, приближении due date, нарушении SLA и новом комментарии.
+Для Slack и Telegram создается delivery job, который обрабатывается delivery worker.
+Если внешний API возвращает временную ошибку, delivery worker делает повторные попытки.
+Для ошибок 429 используется увеличенный backoff, потому что это rate limit.
+
+[CHUNK 5: incident_note | doc=incident_notifications_delay_2026_03.md | feature=notifications,integrations,webhooks]
+В период с 2026-03-10 по 2026-03-18 часть enterprise-клиентов столкнулась с задержкой Slack notifications на 15-20 минут.
+Основная причина: Slack rate limits на workspace с большим количеством событий.
+Delivery worker повторял отправку слишком агрессивно, что увеличивало очередь вместо стабилизации доставки.
+Временная mitigation: увеличить backoff для ошибок 429 и предлагать email notifications как workaround для критичных проектов.
+
+[CHUNK 6: release_note | doc=release_2026_03.md | feature=notifications,reports]
+В релизе 2026.03 команда добавила улучшенные notification settings и новые SLA reports.
+Known issue: для enterprise workspace с высокой активностью Slack notifications могут задерживаться при rate limit.
+Команда планирует добавить UI-индикатор delayed delivery и отдельную метрику notification delivery delay в monthly report.
+
+[CHUNK 7: user_feedback | review_id=REV-0012 | feature=notifications | sentiment=negative]
+Product Owner из enterprise-команды написал, что notifications раньше были одной из причин ежедневного использования TaskFlow AI.
+После мартовских задержек команда стала чаще проверять задачи вручную и реже доверять автоматическим уведомлениям.
+Клиент просит прозрачный статус доставки и объяснение задержек в интерфейсе.
+
+[CHUNK 8: distractor | feature=csv_import | source_type=rfc]
+CSV Import V2 позволяет массово создавать задачи из CSV-файла.
+Импорт возвращает validation error, если отсутствует title, project_key не существует или assignee_email не принадлежит workspace.
+Этот chunk не связан с проблемой notifications и не должен быть основой ответа на вопрос ниже.
+
+Вопрос пользователя:
+Какие проблемы с notifications сильнее всего влияют на удержание enterprise-клиентов, и стоит ли Product Owner поднять приоритет этой проблемы в roadmap?
