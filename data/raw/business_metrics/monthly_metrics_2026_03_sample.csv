@@ -1,0 +1,8 @@
+period,feature,metric_type,value,previous_value,unit,segment,related_ticket_count
+2026-03,notifications,adoption,48,61,percent,enterprise,47
+2026-03,notifications,nps,32,41,score,enterprise,47
+2026-03,csv_import,failed_imports,96,34,count,mid_market,29
+2026-03,reports,adoption,39,52,percent,enterprise,21
+2026-03,permissions,support_tickets,33,12,count,enterprise,33
+2026-03,search,satisfaction_score,3.1,4.0,score,mid_market,18
+2026-03,webhooks,resolution_time,38,21,hours,enterprise,16

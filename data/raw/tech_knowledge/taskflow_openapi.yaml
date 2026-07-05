@@ -1,0 +1,149 @@
+openapi: 3.0.3
+info:
+  title: TaskFlow AI API
+  version: 0.1.0
+  description: Minimal seed OpenAPI specification for TaskFlow AI RAG experiments.
+servers:
+  - url: https://api.taskflow.local
+paths:
+  /api/v1/tasks:
+    get:
+      tags:
+        - Tasks
+      operationId: listTasks
+      summary: List tasks
+      parameters:
+        - name: assignee_id
+          in: query
+          schema:
+            type: string
+        - name: project_id
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task list returned successfully.
+    post:
+      tags:
+        - Tasks
+      operationId: createTask
+      summary: Create task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskRequest"
+      responses:
+        "201":
+          description: Task created.
+        "400":
+          description: Validation error.
+  /api/v1/imports/csv:
+    post:
+      tags:
+        - CSV Import
+      operationId: createCsvImport
+      summary: Import tasks from CSV
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - project_id
+                - file
+              properties:
+                project_id:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+                rollback_on_error:
+                  type: boolean
+                  default: true
+      responses:
+        "202":
+          description: Import job accepted.
+        "400":
+          description: CSV validation failed.
+        "403":
+          description: User has no permission to import tasks.
+  /api/v1/reports/sla:
+    get:
+      tags:
+        - Reports
+      operationId: getSlaReport
+      summary: Get SLA report
+      parameters:
+        - name: project_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: SLA report returned.
+        "403":
+          description: User role cannot access this report.
+  /api/v1/webhooks/retry:
+    post:
+      tags:
+        - Webhooks
+      operationId: retryWebhookDelivery
+      summary: Retry failed webhook delivery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - delivery_id
+              properties:
+                delivery_id:
+                  type: string
+      responses:
+        "200":
+          description: Retry scheduled.
+        "404":
+          description: Delivery not found.
+        "429":
+          description: Retry limit exceeded.
+  /api/v1/notifications/settings:
+    get:
+      tags:
+        - Notifications
+      operationId: getNotificationSettings
+      summary: Get notification settings
+      responses:
+        "200":
+          description: Notification settings returned.
+components:
+  schemas:
+    CreateTaskRequest:
+      type: object
+      required:
+        - project_id
+        - title
+      properties:
+        project_id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        assignee_id:
+          type: string
+        due_date:
+          type: string
+          format: date
+        priority:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+            - critical

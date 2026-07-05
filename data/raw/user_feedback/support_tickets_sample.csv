@@ -1,0 +1,6 @@
+ticket_id,created_at,customer_segment,customer_role,channel,priority,status,feature,sentiment,subject,body,satisfaction_score,resolution_time_hours
+TCK-0001,2026-03-12,enterprise,Project Manager,chat,high,resolved,notifications,negative,"Slack уведомления приходят слишком поздно","После обновления задачи уведомление в Slack приходит через 15-20 минут, команда пропускает срочные изменения.",2,31
+TCK-0002,2026-03-14,mid_market,Product Owner,email,high,open,csv_import,negative,"CSV import отклоняет корректные строки","При импорте задач система показывает validation error для поля assignee, хотя пользователь существует в проекте.",2,18
+TCK-0003,2026-03-15,enterprise,Support Manager,portal,medium,escalated,permissions,negative,"Менеджеры не видят SLA report","Пользователи с ролью manager не могут открыть SLA report после изменения project permissions.",3,26
+TCK-0004,2026-03-17,startup,Developer,chat,medium,resolved,webhooks,neutral,"Webhook retry непонятно работает","После ошибки 429 webhook не был доставлен повторно, в UI нет объяснения retry status.",3,12
+TCK-0005,2026-03-19,mid_market,Project Manager,email,medium,resolved,search,negative,"Поиск не находит задачи по исполнителю","Фильтр assignee возвращает неполный список задач, особенно после массового импорта.",2,22
