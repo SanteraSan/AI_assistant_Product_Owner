@@ -53,4 +53,5 @@ class RagChatResponse(ChatResponse):
     retrieval: dict[str, Any] = Field(default_factory=dict)
     query_hints: dict[str, Any] = Field(default_factory=dict)
     context_policy: dict[str, Any] = Field(default_factory=dict)
+    conversation_context: dict[str, Any] = Field(default_factory=dict)
     prompt_tokens_estimate: int | None = None

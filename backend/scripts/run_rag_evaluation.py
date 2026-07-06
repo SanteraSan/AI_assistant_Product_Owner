@@ -21,6 +21,7 @@ class EvaluationScenario:
     id: str
     name: str
     prompt: str
+    turns: tuple[str, ...] = ()
 
 
 SCENARIOS = [
@@ -64,6 +65,30 @@ SCENARIOS = [
         name="Incident Summary",
         prompt="Что случилось с notifications в мартовском инциденте и какой был impact?",
     ),
+    EvaluationScenario(
+        id="follow_up_continuation",
+        name="Follow-Up Continuation",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2: А какие из этих проблем самые критичные?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "А какие из этих проблем самые критичные?",
+        ),
+    ),
+    EvaluationScenario(
+        id="topic_switch",
+        name="Topic Switch",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2: А что с csv_import?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "А что с csv_import?",
+        ),
+    ),
 ]
 
 
@@ -103,14 +128,12 @@ async def main() -> None:
             for scenario in selected_scenarios:
                 for model in selected_models:
                     try:
-                        payload = {
-                            "message": scenario.prompt,
-                            "model": model,
-                            "top_k": args.top_k,
-                        }
-                        response = await client.post("/rag/chat", json=payload)
-                        response.raise_for_status()
-                        data = response.json()
+                        data = await _run_scenario(
+                            client=client,
+                            scenario=scenario,
+                            model=model,
+                            top_k=args.top_k,
+                        )
                         await evaluation_service.add_result(
                             run_id=run_id,
                             scenario_id=scenario.id,
@@ -123,7 +146,7 @@ async def main() -> None:
                             score_threshold=data.get("score_threshold"),
                             source_count=len(data.get("sources") or []),
                             sources=_summarize_sources(data.get("sources") or []),
-                            retrieval=data.get("retrieval") or {},
+                            retrieval=_build_retrieval_snapshot(data),
                             query_hints=data.get("query_hints") or {},
                             context_policy=data.get("context_policy") or {},
                             quality_flags=_build_quality_flags(scenario, data),
@@ -200,6 +223,34 @@ def _select_scenarios(
     return scenarios
 
 
+async def _run_scenario(
+    *,
+    client: httpx.AsyncClient,
+    scenario: EvaluationScenario,
+    model: str,
+    top_k: int,
+) -> dict[str, Any]:
+    session_id: str | None = None
+    data: dict[str, Any] | None = None
+    turns = scenario.turns or (scenario.prompt,)
+    for turn in turns:
+        payload = {
+            "message": turn,
+            "model": model,
+            "top_k": top_k,
+        }
+        if session_id:
+            payload["session_id"] = session_id
+        response = await client.post("/rag/chat", json=payload)
+        response.raise_for_status()
+        data = response.json()
+        session_id = data.get("session_id") or session_id
+
+    if data is None:
+        raise RuntimeError(f"Scenario has no turns: {scenario.id}")
+    return data
+
+
 def _summarize_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
@@ -214,6 +265,14 @@ def _summarize_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _build_retrieval_snapshot(data: dict[str, Any]) -> dict[str, object]:
+    retrieval = dict(data.get("retrieval") or {})
+    conversation_context = data.get("conversation_context") or {}
+    if conversation_context:
+        retrieval["conversation_context"] = conversation_context
+    return retrieval
+
+
 def _build_quality_flags(
     scenario: EvaluationScenario,
     data: dict[str, Any],
@@ -222,11 +281,18 @@ def _build_quality_flags(
     sources = data.get("sources") or []
     query_hints = data.get("query_hints") or {}
     context_policy = data.get("context_policy") or {}
+    conversation_context = data.get("conversation_context") or {}
     source_types = {
         source.get("source_type")
         for source in sources
         if source.get("source_type")
     }
+    source_features = {
+        feature
+        for source in sources
+        for feature in (source.get("feature") or [])
+    }
+    response_features = set(data.get("features") or [])
 
     flags: dict[str, object] = {
         "non_empty_response": bool(response.strip()),
@@ -280,6 +346,24 @@ def _build_quality_flags(
     elif scenario.id == "incident_summary":
         flags["incident_intent_ok"] = query_hints.get("incident_intent") is True
         flags["has_incident_source"] = "incident_note" in source_types
+    elif scenario.id == "follow_up_continuation":
+        flags["conversation_context_used"] = conversation_context.get("used") is True
+        flags["follow_up_detected"] = (
+            conversation_context.get("follow_up_detected") is True
+        )
+        flags["has_final_sources"] = (data.get("retrieval") or {}).get("final_top_k", 0) > 0
+        flags["notifications_context_ok"] = (
+            "notifications" in response_features
+            or "notifications" in source_features
+            or "notifications" in str(conversation_context.get("retrieval_query", "")).lower()
+        )
+    elif scenario.id == "topic_switch":
+        flags["topic_switch_not_rewritten"] = conversation_context.get("used") is not True
+        flags["csv_import_context_ok"] = (
+            "csv_import" in response_features
+            or "csv_import" in source_features
+            or "csv_import" in str(conversation_context.get("retrieval_query", "")).lower()
+        )
 
     return flags
 

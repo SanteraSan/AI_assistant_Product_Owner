@@ -14,6 +14,7 @@ from app.db.session import (
 )
 from app.models.chat import ChatRequest, ChatResponse, RagChatRequest, RagChatResponse
 from app.services.chat_history_service import ChatExchangeRecord, ChatHistoryService
+from app.services.conversation_context_service import ConversationContextService
 from app.services.feature_extractor import FeatureExtractor
 from app.services.ollama_client import OllamaClient
 from app.services.query_router import QueryRouter
@@ -48,6 +49,9 @@ rag_service = RagService(
 )
 rag_log_service = RagLogService(session_factory=db_session_factory)
 chat_history_service = ChatHistoryService(session_factory=db_session_factory)
+conversation_context_service = ConversationContextService(
+    feature_extractor=feature_extractor,
+)
 
 
 @app.on_event("startup")
@@ -125,9 +129,16 @@ async def rag_chat(request: RagChatRequest) -> RagChatResponse:
         )
 
     try:
+        conversation_context = await _build_conversation_context(
+            session_id=request.session_id,
+            message=request.message,
+        )
         response = await rag_service.answer(
             message=request.message,
             model=request.model,
+            retrieval_query=str(
+                conversation_context.get("retrieval_query") or request.message
+            ),
             top_k=request.top_k,
             score_threshold=request.score_threshold,
             features=request.features,
@@ -136,6 +147,7 @@ async def rag_chat(request: RagChatRequest) -> RagChatResponse:
             max_sources_per_source_type=request.max_sources_per_source_type,
             max_sources_per_source_path=request.max_sources_per_source_path,
         )
+        response.conversation_context = conversation_context
         chat_exchange = await _try_save_chat_exchange(
             session_id=request.session_id,
             user_message=request.message,
@@ -146,6 +158,7 @@ async def rag_chat(request: RagChatRequest) -> RagChatResponse:
                 "retrieval": response.retrieval,
                 "query_hints": response.query_hints,
                 "context_policy": response.context_policy,
+                "conversation_context": response.conversation_context,
             },
         )
         _attach_chat_exchange(response, chat_exchange)
@@ -176,6 +189,33 @@ def _qdrant_collection_exists() -> bool:
         return qdrant_store.collection_exists()
     except Exception:
         return False
+
+
+async def _build_conversation_context(
+    *,
+    session_id: str | None,
+    message: str,
+) -> dict[str, object]:
+    try:
+        recent_messages = await chat_history_service.get_recent_messages(
+            session_id=session_id,
+            limit=4,
+        )
+        return conversation_context_service.build_context(
+            message=message,
+            recent_messages=recent_messages,
+        ).to_dict()
+    except Exception:
+        logger.exception("Conversation context build failed")
+        return {
+            "used": False,
+            "mode": "error",
+            "follow_up_detected": False,
+            "history_messages_used": 0,
+            "retrieval_query": message,
+            "carried_features": [],
+            "current_features": feature_extractor.extract(message),
+        }
 
 
 async def _try_save_chat_exchange(

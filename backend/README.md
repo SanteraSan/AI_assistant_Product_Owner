@@ -403,3 +403,38 @@ python -m scripts.report_evaluation_runs summary --run-id <EVALUATION_RUN_ID>
 ```
 
 `summary` показывает агрегаты по моделям и сценариям: среднюю latency, среднее число sources, ошибки, zero-source cases и failed quality flags.
+
+## M4.1: Follow-Up Aware RAG
+
+Backend умеет использовать recent chat history для коротких follow-up вопросов внутри одной `session_id`.
+
+Пример:
+
+```bash
+FIRST_RESPONSE=$(curl -s -X POST http://localhost:8000/rag/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Какие проблемы с notifications влияют на enterprise-клиентов?","model":"qwen2.5:7b-instruct-q8_0","top_k":5}')
+
+SESSION_ID=$(echo "$FIRST_RESPONSE" | jq -r '.session_id')
+
+curl -s -X POST http://localhost:8000/rag/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"session_id\":\"$SESSION_ID\",\"message\":\"А какие из этих проблем самые критичные?\",\"model\":\"qwen2.5:7b-instruct-q8_0\",\"top_k\":5}" | \
+  jq '{session_id,conversation_context,retrieval,response}'
+```
+
+`conversation_context` показывает, использовалась ли история:
+
+```json
+{
+  "used": true,
+  "mode": "follow_up_rewrite",
+  "follow_up_detected": true,
+  "history_messages_used": 2,
+  "retrieval_query": "А какие из этих проблем самые критичные? Предыдущая тема: Какие проблемы с notifications влияют на enterprise-клиентов? Ключевые features из предыдущего контекста: notifications.",
+  "carried_features": ["notifications"],
+  "current_features": []
+}
+```
+
+M4.1 намеренно использует rule-based rewrite, а не LLM-based rewrite. История влияет на retrieval query, но не заменяет оригинальный вопрос пользователя в prompt. Если текущий вопрос явно содержит новую feature, например `А что с csv_import?`, backend считает это topic switch и не переносит старую тему `notifications`.

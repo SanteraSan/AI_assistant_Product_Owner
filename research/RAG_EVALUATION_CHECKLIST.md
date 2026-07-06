@@ -194,6 +194,41 @@ python -m scripts.run_rag_evaluation \
 - ответ должен описать что случилось, impact, mitigation/follow-up;
 - ответ не должен превращаться только в technical root-cause или release notes summary.
 
+## Test 9: Follow-Up Continuation
+
+Запросы в одной `session_id`:
+
+```text
+Q1: Какие проблемы с notifications влияют на enterprise-клиентов?
+Q2: А какие из этих проблем самые критичные?
+```
+
+Ожидания:
+
+- `conversation_context.used=true`;
+- `conversation_context.mode="follow_up_rewrite"`;
+- `conversation_context.follow_up_detected=true`;
+- `conversation_context.carried_features` содержит `notifications`;
+- `retrieval.final_top_k > 0`;
+- sources остаются связаны с `notifications`.
+
+## Test 10: Topic Switch
+
+Запросы в одной `session_id`:
+
+```text
+Q1: Какие проблемы с notifications влияют на enterprise-клиентов?
+Q2: А что с csv_import?
+```
+
+Ожидания:
+
+- backend не переносит старую тему `notifications` в retrieval query;
+- `conversation_context.used=false`;
+- `conversation_context.mode="topic_switch_or_standalone"`;
+- `conversation_context.current_features` содержит `csv_import`;
+- sources переключаются на `csv_import`.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

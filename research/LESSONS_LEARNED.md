@@ -1239,3 +1239,40 @@ Stability / Latency:
 - compact reporting уже окупился: он поймал regression, направил точечную правку и подтвердил clean full run;
 - для metric questions нужен не только broad source filter, но и обязательный metric evidence floor;
 - full five-model run теперь можно считать новым baseline перед следующим крупным этапом: multi-turn memory/context policy.
+
+## 2026-07-06: M4.1 Follow-Up Aware RAG
+
+Контекст:
+
+- single-turn RAG был стабилен, но короткий follow-up вроде `А какие из этих проблем самые критичные?` терял тему `notifications`;
+- PostgreSQL уже хранил `chat_sessions` и `chat_messages`, поэтому можно было использовать recent session history без добавления long-term memory;
+- цель M4.1 — улучшить retrieval для follow-up, не добавляя summary, embeddings истории или LLM-based rewrite.
+
+Решение:
+
+- добавить `ConversationContextService`;
+- использовать только rule-based follow-up detection и feature carry-over;
+- строить `retrieval_query` из текущего follow-up и последних user messages;
+- не подменять оригинальный вопрос пользователя в prompt;
+- если текущий вопрос явно содержит новую feature (`csv_import`), считать это topic switch и не переносить старую тему;
+- добавить `conversation_context` в `/rag/chat` response;
+- сохранять `conversation_context` в evaluation result retrieval snapshot.
+
+Диагностика:
+
+- первый debug snapshot показал шум: `carried_features` извлекались из assistant response и подхватывали лишние features из sources;
+- исправление: извлекать carried features только из последних user messages;
+- после narrowing `carried_features=["notifications"]` для follow-up continuation.
+
+Результат:
+
+- targeted run `dd57af1d-c66b-4180-a9eb-9a841da436fb`: 5 моделей x 2 сценария (`follow_up_continuation`, `topic_switch`), `errors=0`, `zero_sources=0`, `failed_flags=0`;
+- final full run `4b6f2905-c8a8-45a2-99f2-d210080568b7`: 5 моделей x 10 сценариев = 50 результатов;
+- full regression: `errors=0`, `zero_sources=0`, `failed_flags=0`;
+- средняя latency на full run: `qwen2.5:7b-instruct-q8_0` около `8.3s`, `qwen3:14b` около `9.8s`, `qwen2.5:14b` около `9.7s`, `qwen3.5:9b` около `10.2s`, `gemma4:12b` около `11.8s`.
+
+Вывод:
+
+- первый слой conversational context можно считать успешным;
+- rule-based approach оказался достаточным для базовых follow-up и topic switch сценариев;
+- следующий memory шаг стоит делать отдельно: topic switch расширение, conversation summary или LLM-based rewrite только после нового targeted plan/evaluation.

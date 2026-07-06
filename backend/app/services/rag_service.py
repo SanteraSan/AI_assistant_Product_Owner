@@ -34,6 +34,7 @@ class RagService:
         self,
         message: str,
         model: str | None = None,
+        retrieval_query: str | None = None,
         top_k: int | None = None,
         score_threshold: float | None = None,
         features: list[str] | None = None,
@@ -44,16 +45,17 @@ class RagService:
     ) -> RagChatResponse:
         selected_model = model or self._default_model
         selected_top_k = top_k or self._default_top_k
+        selected_retrieval_query = retrieval_query or message
         selected_score_threshold = (
             score_threshold if score_threshold is not None else self._default_score_threshold
         )
         candidate_k = selected_top_k * 3
         selected_features = _normalize_features(features or [])
         if not selected_features:
-            selected_features = self._feature_extractor.extract(message)
+            selected_features = self._feature_extractor.extract(selected_retrieval_query)
         selected_source_types = _normalize_values(source_types or [])
         routing_decision = self._query_router.route(
-            message=message,
+            message=selected_retrieval_query,
             source_types=selected_source_types,
             score_threshold=selected_score_threshold,
             user_provided_source_types=bool(source_types),
@@ -63,7 +65,10 @@ class RagService:
         selected_score_threshold = routing_decision.score_threshold
         started_at = perf_counter()
 
-        query_vector = await self._ollama_client.embed(self._embedding_model, message)
+        query_vector = await self._ollama_client.embed(
+            self._embedding_model,
+            selected_retrieval_query,
+        )
         sources = self._qdrant_store.search(
             query_vector=query_vector,
             limit=candidate_k,
@@ -128,6 +133,7 @@ class RagService:
             retrieval={
                 "requested_top_k": selected_top_k,
                 "candidate_k": candidate_k,
+                "retrieval_query": selected_retrieval_query,
                 "required_source_types": required_source_types,
                 "final_top_k": len(sources),
             },

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import ChatMessage, ChatSession
@@ -11,6 +11,12 @@ class ChatExchangeRecord:
     session_id: str
     user_message_id: str
     assistant_message_id: str
+
+
+@dataclass(frozen=True)
+class ChatHistoryMessage:
+    role: str
+    content: str
 
 
 class ChatHistoryService:
@@ -61,6 +67,31 @@ class ChatHistoryService:
                 user_message_id=user_entry.id,
                 assistant_message_id=assistant_entry.id,
             )
+
+    async def get_recent_messages(
+        self,
+        *,
+        session_id: str | None,
+        limit: int = 4,
+    ) -> list[ChatHistoryMessage]:
+        if not session_id:
+            return []
+
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == session_id)
+                .order_by(desc(ChatMessage.created_at))
+                .limit(limit)
+            )
+            messages = [
+                ChatHistoryMessage(
+                    role=message.role,
+                    content=message.content,
+                )
+                for message in result.scalars()
+            ]
+        return list(reversed(messages))
 
     async def _get_or_create_session(
         self,
