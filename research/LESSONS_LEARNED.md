@@ -1276,3 +1276,38 @@ Stability / Latency:
 - первый слой conversational context можно считать успешным;
 - rule-based approach оказался достаточным для базовых follow-up и topic switch сценариев;
 - следующий memory шаг стоит делать отдельно: topic switch расширение, conversation summary или LLM-based rewrite только после нового targeted plan/evaluation.
+
+## 2026-07-06: M4.2 Follow-Up Policy Hardening
+
+Контекст:
+
+- M4.1 доказал, что recent history помогает базовым follow-up вопросам;
+- перед переходом к summary или long-term memory нужно укрепить short-context policy, чтобы меньше ловить неявные баги позже;
+- реальные follow-up часто смешивают intents: action plan, metrics, no-metrics, incident или явный topic switch.
+
+Диагностика:
+
+- вопрос `А какие метрики по ним изменились?` находил `reports` через слово `метрики`, хотя это не topic switch, а metric intent внутри предыдущей темы;
+- поэтому `reports` стал soft follow-up feature: если вопрос похож на follow-up, один `reports` не должен отменять carry-over;
+- explicit switch `Ок, забудь notifications, а теперь про permissions` содержал старую feature в forget-clause, поэтому retrieval query нужно санитизировать.
+
+Решение:
+
+- расширить follow-up markers: action plan, recommendations, no-metrics, metric follow-up;
+- добавить topic switch markers: `а теперь про`, `перейдем к`, `забудь`, `сравни с`;
+- добавить `topic_switch_detected` и `decision_reason` в `conversation_context`;
+- для explicit topic switch строить sanitized retrieval query, например `а теперь про permissions`;
+- пересчитывать `current_features` по sanitized topic-switch query, чтобы debug показывал новую тему, а не forget-clause.
+
+Evaluation:
+
+- targeted run `4a9b54a6-b30b-452c-9770-99db61088341`: 5 моделей x 5 новых сценариев, `errors=0`, `zero_sources=0`, `failed_flags=0`;
+- full run `ef92858c-99b0-4898-a623-9a3663bba165`: 5 моделей x 15 сценариев = 75 результатов;
+- full regression: `errors=0`, `zero_sources=0`, `failed_flags=0`;
+- средняя latency на full run: `qwen2.5:7b-instruct-q8_0` около `6.2s`, `qwen3:14b` около `7.4s`, `qwen3.5:9b` около `8.2s`, `qwen2.5:14b` около `8.7s`, `gemma4:12b` около `9.9s`.
+
+Вывод:
+
+- M4.2 укрепил short-context policy без добавления новой памяти;
+- explicit topic switch теперь наблюдаем и чище влияет на retrieval;
+- следующий этап можно выбирать осознанно: либо еще расширять policy edge cases, либо переходить к M4.3 conversation summary.

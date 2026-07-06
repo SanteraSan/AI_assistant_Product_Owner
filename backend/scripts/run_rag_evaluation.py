@@ -89,6 +89,66 @@ SCENARIOS = [
             "А что с csv_import?",
         ),
     ),
+    EvaluationScenario(
+        id="follow_up_action_plan",
+        name="Follow-Up Action Plan",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2: Что с этим делать в первую очередь?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "Что с этим делать в первую очередь?",
+        ),
+    ),
+    EvaluationScenario(
+        id="explicit_topic_switch",
+        name="Explicit Topic Switch",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2: Ок, забудь notifications, а теперь про permissions"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "Ок, забудь notifications, а теперь про permissions",
+        ),
+    ),
+    EvaluationScenario(
+        id="follow_up_metric_intent",
+        name="Follow-Up Metric Intent",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2: А какие метрики по ним изменились?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "А какие метрики по ним изменились?",
+        ),
+    ),
+    EvaluationScenario(
+        id="follow_up_negative_metric",
+        name="Follow-Up Negative Metric",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2: А можешь без метрик?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "А можешь без метрик?",
+        ),
+    ),
+    EvaluationScenario(
+        id="follow_up_incident",
+        name="Follow-Up Incident",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2: А что было в мартовском инциденте?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "А что было в мартовском инциденте?",
+        ),
+    ),
 ]
 
 
@@ -364,8 +424,67 @@ def _build_quality_flags(
             or "csv_import" in source_features
             or "csv_import" in str(conversation_context.get("retrieval_query", "")).lower()
         )
+    elif scenario.id == "follow_up_action_plan":
+        flags["conversation_context_used"] = conversation_context.get("used") is True
+        flags["follow_up_detected"] = (
+            conversation_context.get("follow_up_detected") is True
+        )
+        flags["notifications_context_ok"] = _has_context_feature(
+            feature="notifications",
+            response_features=response_features,
+            source_features=source_features,
+            conversation_context=conversation_context,
+        )
+    elif scenario.id == "explicit_topic_switch":
+        flags["topic_switch_detected"] = (
+            conversation_context.get("topic_switch_detected") is True
+        )
+        flags["conversation_context_not_used"] = conversation_context.get("used") is not True
+        flags["permissions_context_ok"] = _has_context_feature(
+            feature="permissions",
+            response_features=response_features,
+            source_features=source_features,
+            conversation_context=conversation_context,
+        )
+    elif scenario.id == "follow_up_metric_intent":
+        flags["conversation_context_used"] = conversation_context.get("used") is True
+        flags["metric_intent_ok"] = query_hints.get("metric_intent") is True
+        flags["has_metric_row_source"] = "metric_row" in source_types
+        flags["notifications_context_ok"] = _has_context_feature(
+            feature="notifications",
+            response_features=response_features,
+            source_features=source_features,
+            conversation_context=conversation_context,
+        )
+    elif scenario.id == "follow_up_negative_metric":
+        flags["conversation_context_used"] = conversation_context.get("used") is True
+        flags["negative_marker_ok"] = query_hints.get("metric_negative_marker") is True
+        flags["numeric_sanitization_ok"] = (
+            context_policy.get("numeric_line_sanitization") is True
+        )
+        flags["no_percent_symbol"] = "%" not in response
+    elif scenario.id == "follow_up_incident":
+        flags["conversation_context_used"] = conversation_context.get("used") is True
+        flags["incident_intent_ok"] = query_hints.get("incident_intent") is True
+        flags["has_incident_source"] = "incident_note" in source_types
 
     return flags
+
+
+def _has_context_feature(
+    *,
+    feature: str,
+    response_features: set[str],
+    source_features: set[str],
+    conversation_context: dict[str, Any],
+) -> bool:
+    return (
+        feature in response_features
+        or feature in source_features
+        or feature in str(conversation_context.get("retrieval_query", "")).lower()
+        or feature in (conversation_context.get("carried_features") or [])
+        or feature in (conversation_context.get("current_features") or [])
+    )
 
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:

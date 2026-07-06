@@ -229,6 +229,88 @@ Q2: А что с csv_import?
 - `conversation_context.current_features` содержит `csv_import`;
 - sources переключаются на `csv_import`.
 
+## Test 11: Follow-Up Action Plan
+
+Запросы в одной `session_id`:
+
+```text
+Q1: Какие проблемы с notifications влияют на enterprise-клиентов?
+Q2: Что с этим делать в первую очередь?
+```
+
+Ожидания:
+
+- `conversation_context.used=true`;
+- `conversation_context.carried_features` содержит `notifications`;
+- `retrieval.final_top_k > 0`;
+- ответ продолжает тему `notifications`, а не превращается в generic advice.
+
+## Test 12: Explicit Topic Switch
+
+Запросы в одной `session_id`:
+
+```text
+Q1: Какие проблемы с notifications влияют на enterprise-клиентов?
+Q2: Ок, забудь notifications, а теперь про permissions
+```
+
+Ожидания:
+
+- `conversation_context.used=false`;
+- `conversation_context.topic_switch_detected=true`;
+- `conversation_context.retrieval_query` не должен тянуть старую тему из forget-clause;
+- `conversation_context.current_features` содержит `permissions`;
+- sources переключаются на `permissions`.
+
+## Test 13: Follow-Up Metric Intent
+
+Запросы в одной `session_id`:
+
+```text
+Q1: Какие проблемы с notifications влияют на enterprise-клиентов?
+Q2: А какие метрики по ним изменились?
+```
+
+Ожидания:
+
+- `conversation_context.used=true`;
+- `query_hints.metric_intent=true`;
+- `query_hints.required_source_types` содержит `metric_row`;
+- sources содержат `metric_row`;
+- carried context сохраняет `notifications`.
+
+## Test 14: Follow-Up Negative Metric
+
+Запросы в одной `session_id`:
+
+```text
+Q1: Какие проблемы с notifications влияют на enterprise-клиентов?
+Q2: А можешь без метрик?
+```
+
+Ожидания:
+
+- `conversation_context.used=true`;
+- `query_hints.metric_negative_marker=true`;
+- `context_policy.numeric_line_sanitization=true`;
+- ответ не должен содержать numeric KPI/percent-style метрики.
+
+## Test 15: Follow-Up Incident
+
+Запросы в одной `session_id`:
+
+```text
+Q1: Какие проблемы с notifications влияют на enterprise-клиентов?
+Q2: А что было в мартовском инциденте?
+```
+
+Ожидания:
+
+- `conversation_context.used=true`;
+- `query_hints.incident_intent=true`;
+- sources содержат `incident_note`;
+- ответ фокусируется на мартовском incident context.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

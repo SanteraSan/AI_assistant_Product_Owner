@@ -438,3 +438,30 @@ curl -s -X POST http://localhost:8000/rag/chat \
 ```
 
 M4.1 намеренно использует rule-based rewrite, а не LLM-based rewrite. История влияет на retrieval query, но не заменяет оригинальный вопрос пользователя в prompt. Если текущий вопрос явно содержит новую feature, например `А что с csv_import?`, backend считает это topic switch и не переносит старую тему `notifications`.
+
+## M4.2: Follow-Up Policy Hardening
+
+M4.2 укрепляет M4.1 без добавления long-term memory или summary.
+
+Что покрыто:
+
+- action-plan follow-up: `Что с этим делать в первую очередь?`;
+- explicit topic switch: `Ок, забудь notifications, а теперь про permissions`;
+- follow-up metric intent: `А какие метрики по ним изменились?`;
+- follow-up no-metrics: `А можешь без метрик?`;
+- follow-up incident: `А что было в мартовском инциденте?`.
+
+Для явного topic switch backend может санитизировать retrieval query. Например исходное сообщение `Ок, забудь notifications, а теперь про permissions` превращается в retrieval query `а теперь про permissions`, чтобы слово `notifications` из forget-clause не загрязняло поиск.
+
+Debug metadata стало чуть богаче:
+
+```json
+{
+  "topic_switch_detected": true,
+  "decision_reason": "current_message_has_explicit_topic_feature",
+  "retrieval_query": "а теперь про permissions",
+  "current_features": ["permissions"]
+}
+```
+
+Full regression M4.2: 5 моделей x 15 сценариев = 75 результатов, `errors=0`, `zero_sources=0`, `failed_flags=0`.
