@@ -99,6 +99,7 @@ class RagService:
             prompt=prompt,
             keep_alive="10m",
             options={"temperature": 0.1, "top_p": 0.9},
+            think=False,
         )
 
         latency_ms = int((perf_counter() - started_at) * 1000)

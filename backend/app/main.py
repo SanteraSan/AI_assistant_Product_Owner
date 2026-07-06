@@ -55,7 +55,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
     started_at = perf_counter()
 
     try:
-        result = await ollama_client.generate(model=model, prompt=request.message)
+        result = await ollama_client.generate(
+            model=model,
+            prompt=request.message,
+            think=False,
+        )
     except httpx.ConnectError as exc:
         raise HTTPException(
             status_code=503,

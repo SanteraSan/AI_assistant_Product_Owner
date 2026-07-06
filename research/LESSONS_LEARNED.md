@@ -944,3 +944,64 @@ Latency / Stability:
 - `qwen3:14b` стоит добавить как нового кандидата для следующих сравнений;
 - `gemma4:12b` можно держать как strict grounded/no-answer candidate;
 - `qwen3.5:9b-q8_0` нужно отдельно диагностировать перед дальнейшим сравнением.
+
+## 2026-07-06: Qwen3.5 Empty Response Diagnosis
+
+Контекст:
+
+- в mini-evaluation `qwen3.5:9b-q8_0` вернул пустой `response` в 4 из 5 RAG scenarios;
+- прямой `/api/generate` на коротких prompt отвечал нормально;
+- responses Ollama содержали отдельное поле `thinking`, а backend читал только `response`.
+
+Диагностика:
+
+- `/api/chat` с `think:false` возвращал нормальный `message.content` и не генерировал `thinking`;
+- `/api/generate` также принимает `think:false`;
+- на RAG-like prompt `think:false` убрал `thinking` и резко сократил генерацию.
+
+Решение:
+
+- добавить параметр `think` в `OllamaClient.generate`;
+- передавать `think=False` в `/rag/chat`;
+- также передавать `think=False` в простой `/chat`, чтобы thinking-модели не отдавали внутренние рассуждения пользователю.
+
+Результат Retest:
+
+- `qwen3.5:9b-q8_0` перестал возвращать пустые RAG responses;
+- latency на проверенных scenarios снизилась примерно до `6.6-8.9s`;
+- качество требует отдельной повторной model evaluation, потому что теперь модель начала реально отвечать.
+
+Вывод:
+
+- проблема была не только в качестве модели, а в режиме thinking/template;
+- для пользовательского PO-assistant default policy должна быть "не показывать thinking";
+- `qwen3.5:9b-q8_0` снова стоит рассматривать как candidate после повторного evaluation.
+
+## 2026-07-06: Qwen3.5 9B Evaluation After Think=False
+
+Контекст:
+
+- после диагностики `qwen3.5:9b-q8_0` был добавлен backend default `think=False`;
+- дополнительно скачан и протестирован `qwen3.5:9b` как более легкий/default quantized вариант;
+- цель: проверить, решает ли `think=False` проблему пустых ответов и насколько 9B practical по latency/quality.
+
+Результат:
+
+- `qwen3.5:9b` прошел 5/5 RAG scenarios без пустых ответов;
+- средняя latency около `4.6s`, что быстрее `qwen2.5:14b`, `qwen3:14b`, `gemma4:12b` и ранее проверенного `qwen3.5:9b-q8_0`;
+- policy layers сработали корректно: metric intent, negative metric, support feedback, technical/root-cause, no-answer ARR.
+
+Наблюдения По Качеству:
+
+- metric intent: модель нашла `notification_delivery_delay`, но также добавила adoption/support tickets из incident context как дополнительные данные;
+- negative metric: no-metrics policy соблюдена, ответ без числовых KPI;
+- support feedback: ответ полезный, но довольно длинный и включает много смежных деталей;
+- technical/root-cause: сильный ответ по retry/backoff, 429, exponential backoff и queue growth;
+- no-answer ARR: корректно отказалась считать ARR loss и запросила revenue/contract/customer data.
+
+Вывод:
+
+- `qwen3.5:9b` стал неожиданно сильным кандидатом для fast/default RAG model;
+- по скорости он выглядит лучше текущего `qwen2.5:14b`;
+- по строгости нужно проверить дополнительные negative/groundedness cases, потому что модель склонна расширять ответ смежными метриками;
+- следующий честный comparison: `qwen2.5:14b` vs `qwen3:14b` vs `qwen3.5:9b` на полном checklist после `think=False`.

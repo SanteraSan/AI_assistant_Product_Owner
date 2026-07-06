@@ -23,6 +23,7 @@ class OllamaClient:
         *,
         keep_alive: str | int | None = None,
         options: dict[str, Any] | None = None,
+        think: bool | None = None,
     ) -> dict[str, Any]:
         payload = {
             "model": model,
@@ -33,6 +34,8 @@ class OllamaClient:
             payload["keep_alive"] = keep_alive
         if options is not None:
             payload["options"] = options
+        if think is not None:
+            payload["think"] = think
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(f"{self._base_url}/api/generate", json=payload)
