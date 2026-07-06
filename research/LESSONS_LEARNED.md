@@ -1163,3 +1163,25 @@ Stability / Latency:
 - теперь backend умеет хранить историю общения, но RAG behavior остается прежним;
 - это правильная промежуточная ступень перед conversation context: сначала собрать данные и понять форму сессий, потом проектировать memory summarization/context window;
 - перед production-like этапом понадобится Alembic, чтобы безопасно добавлять связи и индексы к уже существующим таблицам.
+
+## 2026-07-06: Evaluation Runs В PostgreSQL
+
+Контекст:
+
+- после стабилизации router roadmap мы начали регулярно сравнивать модели на одном и том же RAG checklist;
+- локальные `.jsonl` файлы полезны как быстрый artifact, но их неудобно сравнивать, фильтровать и связывать с моделью/сценарием;
+- нужен PostgreSQL слой для evaluation history, но без превращения evaluation в часть пользовательского chat history.
+
+Решение:
+
+- добавить таблицу `evaluation_runs` как шапку одного прогона: название, checklist version, список моделей, статус, notes;
+- добавить таблицу `evaluation_results` как строку на пару scenario/model;
+- сохранять prompt, response, latency, sources summary, retrieval, query_hints, context_policy и quality_flags;
+- сделать CLI script `python -m scripts.run_rag_evaluation`, который вызывает реальный `/rag/chat` API, а не внутренний service напрямую;
+- оставить `quality_flags` эвристическими: они ловят очевидные regressions, но не заменяют ручную оценку groundedness/persona fit.
+
+Вывод:
+
+- теперь модельные сравнения можно хранить как историю экспериментов, а не как разрозненные локальные файлы;
+- запуск через API path проверяет больше системы: request schema, router, retrieval, LLM call, response schema и DB persistence;
+- следующий шаг после накопления нескольких runs — сделать compact report/query layer, чтобы сравнивать модели по latency, source_count и failed flags.

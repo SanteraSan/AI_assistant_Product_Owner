@@ -84,6 +84,63 @@ class ChatMessage(Base):
     session: Mapped[ChatSession] = relationship(back_populates="messages")
 
 
+class EvaluationRun(Base):
+    __tablename__ = "evaluation_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    name: Mapped[str] = mapped_column(String(255))
+    checklist_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    models: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    scenario_count: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32), default="running")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    results: Mapped[list["EvaluationResult"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+
+
+class EvaluationResult(Base):
+    __tablename__ = "evaluation_results"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("evaluation_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    scenario_id: Mapped[str] = mapped_column(String(64))
+    scenario_name: Mapped[str] = mapped_column(String(255))
+    prompt: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(String(255))
+    provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    score_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source_count: Mapped[int] = mapped_column(Integer, default=0)
+    sources: Mapped[list[dict[str, object]]] = mapped_column(JSONB, default=list)
+    retrieval: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    query_hints: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    context_policy: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    quality_flags: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    run: Mapped[EvaluationRun] = relationship(back_populates="results")
+
+
 class RagSourceLog(Base):
     __tablename__ = "rag_source_logs"
 

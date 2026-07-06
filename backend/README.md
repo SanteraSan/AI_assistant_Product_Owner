@@ -351,3 +351,43 @@ curl -s -X POST http://localhost:8000/rag/chat \
 ```
 
 Важно: на текущем этапе `session_id` только связывает записи в PostgreSQL. Backend еще не использует прошлые сообщения как context для следующего RAG prompt.
+
+## M3: RAG Evaluation Runs В PostgreSQL
+
+Evaluation layer сохраняет результаты модельных прогонов в PostgreSQL вместо локальных одноразовых `.jsonl` файлов.
+
+Новые таблицы:
+
+- `evaluation_runs` - один запуск evaluation: название, checklist version, список моделей, статус, notes;
+- `evaluation_results` - результат одного scenario/model: prompt, response, latency, sources summary, retrieval/router/context policy и quality flags.
+
+Для запуска нужен поднятый backend, потому что script проверяет полный API path через `/rag/chat`:
+
+```bash
+cd /home/santera/Projects/backend
+source .venv/bin/activate
+python -m scripts.run_rag_evaluation --models gemma3:12b --limit-scenarios 1 --top-k 3
+```
+
+Полный прогон по нескольким моделям:
+
+```bash
+python -m scripts.run_rag_evaluation \
+  --models qwen2.5:7b-instruct-q8_0 qwen2.5:14b gemma3:12b \
+  --top-k 5 \
+  --notes "Manual full checklist run"
+```
+
+Посмотреть последние evaluation runs:
+
+```bash
+docker exec -it taskflow-postgres psql -U po_user -d po_assistant \
+  -c "select id, name, status, models, scenario_count, started_at, completed_at from evaluation_runs order by started_at desc limit 5;"
+```
+
+Посмотреть результаты последнего run:
+
+```bash
+docker exec -it taskflow-postgres psql -U po_user -d po_assistant \
+  -c "select scenario_id, model, latency_ms, source_count, quality_flags, error from evaluation_results where run_id = (select id from evaluation_runs order by started_at desc limit 1) order by created_at;"
+```

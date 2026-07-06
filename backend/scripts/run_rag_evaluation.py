@@ -1,0 +1,275 @@
+import argparse
+import asyncio
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
+
+from app.core.config import get_settings
+from app.db.session import (
+    create_engine,
+    create_session_factory,
+    database_available,
+    init_db,
+)
+from app.services.evaluation_service import EvaluationService
+
+
+@dataclass(frozen=True)
+class EvaluationScenario:
+    id: str
+    name: str
+    prompt: str
+
+
+SCENARIOS = [
+    EvaluationScenario(
+        id="metric_intent",
+        name="Metric Intent",
+        prompt="Какие метрики по notifications изменились у enterprise-клиентов?",
+    ),
+    EvaluationScenario(
+        id="negative_metric_intent",
+        name="Negative Metric Intent",
+        prompt="Какие проблемы с notifications важны для enterprise-клиентов, без метрик?",
+    ),
+    EvaluationScenario(
+        id="general_po_summary",
+        name="General PO Problem Summary",
+        prompt="Какие проблемы с notifications влияют на enterprise-клиентов?",
+    ),
+    EvaluationScenario(
+        id="source_diversity_stress",
+        name="Source Diversity Stress",
+        prompt="Какие жалобы клиентов чаще всего встречаются по notifications?",
+    ),
+    EvaluationScenario(
+        id="technical_root_cause",
+        name="Technical Root Cause",
+        prompt="Какая техническая причина задержек Slack notifications?",
+    ),
+    EvaluationScenario(
+        id="release_notes_focus",
+        name="Release Notes Focus",
+        prompt="Какие изменения по notifications были в release notes?",
+    ),
+    EvaluationScenario(
+        id="no_answer_groundedness",
+        name="No-Answer Groundedness",
+        prompt="Сколько ARR мы потеряем из-за проблем с notifications?",
+    ),
+    EvaluationScenario(
+        id="incident_summary",
+        name="Incident Summary",
+        prompt="Что случилось с notifications в мартовском инциденте и какой был impact?",
+    ),
+]
+
+
+async def main() -> None:
+    args = _parse_args()
+    settings = get_settings()
+    selected_models = args.models or [settings.default_rag_model]
+    selected_scenarios = _select_scenarios(args.scenarios, args.limit_scenarios)
+
+    engine = create_engine(settings.postgres_dsn)
+    try:
+        if not await database_available(engine):
+            raise RuntimeError("PostgreSQL is not available. Start docker compose first.")
+        await init_db(engine)
+        session_factory = create_session_factory(engine)
+        evaluation_service = EvaluationService(session_factory=session_factory)
+
+        run_id = await evaluation_service.create_run(
+            name=args.name or _default_run_name(),
+            checklist_version=args.checklist_version,
+            models=selected_models,
+            scenario_count=len(selected_scenarios),
+            notes=args.notes,
+            metadata={
+                "base_url": args.base_url,
+                "top_k": args.top_k,
+                "scenario_ids": [scenario.id for scenario in selected_scenarios],
+            },
+        )
+        print(f"evaluation_run_id={run_id}")
+
+        status = "completed"
+        async with httpx.AsyncClient(
+            base_url=args.base_url,
+            timeout=args.timeout_seconds,
+        ) as client:
+            for scenario in selected_scenarios:
+                for model in selected_models:
+                    try:
+                        payload = {
+                            "message": scenario.prompt,
+                            "model": model,
+                            "top_k": args.top_k,
+                        }
+                        response = await client.post("/rag/chat", json=payload)
+                        response.raise_for_status()
+                        data = response.json()
+                        await evaluation_service.add_result(
+                            run_id=run_id,
+                            scenario_id=scenario.id,
+                            scenario_name=scenario.name,
+                            prompt=scenario.prompt,
+                            model=model,
+                            provider=data.get("provider"),
+                            response=data.get("response"),
+                            latency_ms=data.get("latency_ms"),
+                            score_threshold=data.get("score_threshold"),
+                            source_count=len(data.get("sources") or []),
+                            sources=_summarize_sources(data.get("sources") or []),
+                            retrieval=data.get("retrieval") or {},
+                            query_hints=data.get("query_hints") or {},
+                            context_policy=data.get("context_policy") or {},
+                            quality_flags=_build_quality_flags(scenario, data),
+                        )
+                        print(
+                            "ok "
+                            f"scenario={scenario.id} model={model} "
+                            f"latency_ms={data.get('latency_ms')} "
+                            f"sources={len(data.get('sources') or [])}"
+                        )
+                    except Exception as exc:
+                        status = "failed"
+                        await evaluation_service.add_result(
+                            run_id=run_id,
+                            scenario_id=scenario.id,
+                            scenario_name=scenario.name,
+                            prompt=scenario.prompt,
+                            model=model,
+                            error=str(exc),
+                            quality_flags={"error": True},
+                        )
+                        print(f"error scenario={scenario.id} model={model}: {exc}")
+
+        await evaluation_service.complete_run(run_id=run_id, status=status)
+        print(f"evaluation_status={status}")
+    finally:
+        await engine.dispose()
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run RAG evaluation and persist results.")
+    parser.add_argument(
+        "--base-url",
+        default="http://localhost:8000",
+        help="Backend base URL.",
+    )
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        help="Ollama model names. Defaults to DEFAULT_RAG_MODEL.",
+    )
+    parser.add_argument(
+        "--scenarios",
+        nargs="+",
+        help="Scenario ids to run. Defaults to all scenarios.",
+    )
+    parser.add_argument(
+        "--limit-scenarios",
+        type=int,
+        default=None,
+        help="Run only first N selected scenarios for smoke tests.",
+    )
+    parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--timeout-seconds", type=float, default=180.0)
+    parser.add_argument("--name", default=None)
+    parser.add_argument("--checklist-version", default="RAG_EVALUATION_CHECKLIST.md")
+    parser.add_argument("--notes", default=None)
+    return parser.parse_args()
+
+
+def _select_scenarios(
+    scenario_ids: list[str] | None,
+    limit: int | None,
+) -> list[EvaluationScenario]:
+    scenarios = SCENARIOS
+    if scenario_ids:
+        requested_ids = set(scenario_ids)
+        scenarios = [scenario for scenario in scenarios if scenario.id in requested_ids]
+        missing_ids = requested_ids - {scenario.id for scenario in scenarios}
+        if missing_ids:
+            raise ValueError(f"Unknown scenario ids: {sorted(missing_ids)}")
+    if limit is not None:
+        scenarios = scenarios[:limit]
+    return scenarios
+
+
+def _summarize_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": source.get("id"),
+            "score": source.get("score"),
+            "title": source.get("title"),
+            "source_type": source.get("source_type"),
+            "source_path": source.get("source_path"),
+            "feature": source.get("feature") or [],
+        }
+        for source in sources
+    ]
+
+
+def _build_quality_flags(
+    scenario: EvaluationScenario,
+    data: dict[str, Any],
+) -> dict[str, object]:
+    response = (data.get("response") or "").lower()
+    sources = data.get("sources") or []
+    query_hints = data.get("query_hints") or {}
+    context_policy = data.get("context_policy") or {}
+    source_types = {
+        source.get("source_type")
+        for source in sources
+        if source.get("source_type")
+    }
+
+    flags: dict[str, object] = {
+        "non_empty_response": bool(response.strip()),
+        "has_sources": bool(sources),
+    }
+
+    if scenario.id == "metric_intent":
+        flags["metric_intent_ok"] = query_hints.get("metric_intent") is True
+        flags["has_metric_row_source"] = "metric_row" in source_types
+    elif scenario.id == "negative_metric_intent":
+        flags["negative_marker_ok"] = query_hints.get("metric_negative_marker") is True
+        flags["numeric_sanitization_ok"] = (
+            context_policy.get("numeric_line_sanitization") is True
+        )
+        flags["no_percent_symbol"] = "%" not in response
+    elif scenario.id == "source_diversity_stress":
+        flags["support_feedback_intent_ok"] = (
+            query_hints.get("support_feedback_intent") is True
+        )
+        flags["has_support_ticket_source"] = "support_ticket" in source_types
+    elif scenario.id == "technical_root_cause":
+        flags["technical_root_cause_intent_ok"] = (
+            query_hints.get("technical_root_cause_intent") is True
+        )
+    elif scenario.id == "release_notes_focus":
+        flags["release_notes_intent_ok"] = query_hints.get("release_notes_intent") is True
+        flags["has_release_note_source"] = "release_note" in source_types
+    elif scenario.id == "no_answer_groundedness":
+        flags["refusal_or_missing_data_ok"] = any(
+            marker in response
+            for marker in ("нет данных", "не хватает", "недостаточно", "нет информации")
+        )
+    elif scenario.id == "incident_summary":
+        flags["incident_intent_ok"] = query_hints.get("incident_intent") is True
+        flags["has_incident_source"] = "incident_note" in source_types
+
+    return flags
+
+
+def _default_run_name() -> str:
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return f"RAG evaluation {timestamp}"
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

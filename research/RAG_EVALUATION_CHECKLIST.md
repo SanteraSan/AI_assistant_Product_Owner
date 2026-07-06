@@ -22,6 +22,27 @@ jq '{model,response,latency_ms,score_threshold,source_types,query_hints,context_
 - `retrieval.final_top_k`;
 - `diversity`.
 
+## Автоматизированный Прогон
+
+Backend script `scripts.run_rag_evaluation` прогоняет сценарии из этого checklist через реальный `/rag/chat` API и сохраняет результаты в PostgreSQL:
+
+```bash
+cd /home/santera/Projects/backend
+source .venv/bin/activate
+python -m scripts.run_rag_evaluation --models gemma3:12b --limit-scenarios 1 --top-k 3
+```
+
+Для полного сравнения можно передать несколько моделей:
+
+```bash
+python -m scripts.run_rag_evaluation \
+  --models qwen2.5:7b-instruct-q8_0 qwen2.5:14b gemma3:12b \
+  --top-k 5 \
+  --notes "Full checklist run"
+```
+
+Важно: автоматические `quality_flags` являются быстрыми эвристиками, а не заменой ручной оценки. Они помогают найти очевидные регрессии: пустой ответ, неправильный router intent, отсутствие expected source type или нарушение простого negative constraint.
+
 ## Базовые Критерии
 
 - `groundedness`: ответ не выдумывает факты вне context.
