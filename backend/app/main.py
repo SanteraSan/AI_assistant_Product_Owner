@@ -1,3 +1,4 @@
+import logging
 from time import perf_counter
 
 import httpx
@@ -5,15 +6,25 @@ from fastapi import FastAPI, HTTPException
 
 from app.clients.qdrant_store import QdrantStore
 from app.core.config import get_settings
+from app.db.session import (
+    create_engine,
+    create_session_factory,
+    database_available,
+    init_db,
+)
 from app.models.chat import ChatRequest, ChatResponse, RagChatRequest, RagChatResponse
 from app.services.feature_extractor import FeatureExtractor
 from app.services.ollama_client import OllamaClient
 from app.services.query_router import QueryRouter
+from app.services.rag_log_service import RagLogService
 from app.services.rag_service import RagService
 
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 app = FastAPI(title=settings.app_name)
+db_engine = create_engine(settings.postgres_dsn)
+db_session_factory = create_session_factory(db_engine)
 ollama_client = OllamaClient(
     base_url=settings.ollama_base_url,
     timeout_seconds=settings.request_timeout_seconds,
@@ -34,6 +45,15 @@ rag_service = RagService(
     default_top_k=settings.rag_top_k,
     default_score_threshold=settings.rag_score_threshold,
 )
+rag_log_service = RagLogService(session_factory=db_session_factory)
+
+
+@app.on_event("startup")
+async def startup() -> None:
+    try:
+        await init_db(db_engine)
+    except Exception:
+        logger.exception("PostgreSQL initialization failed")
 
 
 @app.get("/health")
@@ -46,6 +66,7 @@ async def health() -> dict[str, object]:
         "embedding_model": settings.embedding_model,
         "qdrant_collection": settings.qdrant_collection,
         "qdrant_collection_exists": _qdrant_collection_exists(),
+        "postgres_available": await database_available(db_engine),
     }
 
 
@@ -94,7 +115,7 @@ async def rag_chat(request: RagChatRequest) -> RagChatResponse:
         )
 
     try:
-        return await rag_service.answer(
+        response = await rag_service.answer(
             message=request.message,
             model=request.model,
             top_k=request.top_k,
@@ -105,6 +126,14 @@ async def rag_chat(request: RagChatRequest) -> RagChatResponse:
             max_sources_per_source_type=request.max_sources_per_source_type,
             max_sources_per_source_path=request.max_sources_per_source_path,
         )
+        try:
+            await rag_log_service.log_response(
+                message=request.message,
+                response=response,
+            )
+        except Exception:
+            logger.exception("RAG response logging failed")
+        return response
     except httpx.ConnectError as exc:
         raise HTTPException(
             status_code=503,

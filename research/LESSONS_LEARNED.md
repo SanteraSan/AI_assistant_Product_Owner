@@ -1118,3 +1118,26 @@ Stability / Latency:
 - router roadmap можно считать стабилизированным для M1 single-turn RAG;
 - перед сменой default model стоит еще прогнать несколько no-answer/negative constraints на `qwen3:14b` и `qwen3.5:9b`;
 - следующий архитектурный этап — PostgreSQL слой: request logs, evaluation runs, chat history и будущий conversation context.
+
+## 2026-07-06: Первый PostgreSQL Слой Для RAG Logs
+
+Контекст:
+
+- single-turn RAG pipeline уже стабилизирован: retrieval, diversity, query router и context policy работают как отдельные слои;
+- следующий шаг — добавить PostgreSQL без преждевременного multi-turn memory;
+- цель первого DB шага — observability: сохранять, какой вопрос пришел, какой ответ дала модель, какие sources были использованы и какие router/retrieval policy сработали.
+
+Решение:
+
+- добавить отдельный backend пакет `app/db` для SQLAlchemy base/session/models;
+- использовать async SQLAlchemy + `asyncpg`, потому что зависимости уже есть в backend;
+- создать таблицы `rag_request_logs` и `rag_source_logs`;
+- создавать таблицы на старте через `metadata.create_all()` как временный early-stage подход до Alembic;
+- логировать `/rag/chat` best-effort: недоступная БД не должна ломать RAG answer;
+- в `rag_source_logs` сохранять не полный chunk, а короткий `content_excerpt`, чтобы PostgreSQL не превращался во второе хранилище документов рядом с Qdrant.
+
+Вывод:
+
+- PostgreSQL пока является системной памятью и audit trail, а не частью prompt context;
+- такой слой поможет анализировать реальные запросы, latency, качество retrieval и поведение router;
+- следующий DB шаг: добавить chat sessions / message history и отдельную таблицу evaluation runs, но подключать их к RAG context нужно позже и осторожно.

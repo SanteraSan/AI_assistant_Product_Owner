@@ -201,7 +201,8 @@ curl http://localhost:8000/health | jq
   "ollama_available": true,
   "embedding_model": "nomic-embed-text",
   "qdrant_collection": "documents",
-  "qdrant_collection_exists": true
+  "qdrant_collection_exists": true,
+  "postgres_available": true
 }
 ```
 
@@ -298,4 +299,35 @@ curl -s -X POST http://localhost:8000/rag/chat \
   -H "Content-Type: application/json" \
   -d '{"message":"Какие проблемы с notifications влияют на enterprise-клиентов?","model":"gemma3:12b","top_k":3}' | \
   jq '{model,response,latency_ms,collection,sources}'
+```
+
+## M2: Первый PostgreSQL Слой
+
+PostgreSQL используется как системная память для backend observability: пока без multi-turn memory, но уже с сохранением истории RAG-запросов.
+
+При старте backend автоматически создает минимальные таблицы, если PostgreSQL доступен:
+
+- `rag_request_logs` - сообщение пользователя, ответ модели, latency, выбранная модель, retrieval/router/context policy параметры;
+- `rag_source_logs` - sources, которые попали в ответ, включая score, title, source type, source path, metadata и короткий excerpt content.
+
+Логирование `/rag/chat` работает best-effort: если PostgreSQL временно недоступен, RAG-ответ все равно вернется, а ошибка попадет в backend logs.
+
+Проверить доступность PostgreSQL через backend:
+
+```bash
+curl http://localhost:8000/health | jq '{postgres_available,qdrant_collection_exists,ollama_available}'
+```
+
+Посмотреть последние RAG-запросы:
+
+```bash
+docker exec -it taskflow-postgres psql -U po_user -d po_assistant \
+  -c "select id, created_at, model, latency_ms, jsonb_array_length(source_types) as source_type_count from rag_request_logs order by created_at desc limit 5;"
+```
+
+Посмотреть sources для последнего RAG-запроса:
+
+```bash
+docker exec -it taskflow-postgres psql -U po_user -d po_assistant \
+  -c "select source_index, title, source_type, round(score::numeric, 3) as score from rag_source_logs where request_log_id = (select id from rag_request_logs order by created_at desc limit 1) order by source_index;"
 ```
