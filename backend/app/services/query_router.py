@@ -40,6 +40,20 @@ class QueryRouter:
             "support_ticket",
             "release_note",
         ]
+        self._release_notes_markers = (
+            "release note",
+            "release notes",
+            "релиз",
+            "релизн",
+            "changelog",
+            "change log",
+            "что было выпущено",
+            "что выпустили",
+            "изменения",
+        )
+        self._release_notes_source_types = [
+            "release_note",
+        ]
         self._support_feedback_markers = (
             "жалоб",
             "отзыв",
@@ -82,6 +96,26 @@ class QueryRouter:
             "incident_note",
             "support_ticket",
         ]
+        self._incident_markers = (
+            "incident",
+            "инцидент",
+            "что случилось",
+            "что произошло",
+            "impact",
+            "влияние",
+            "последств",
+            "mitigation",
+            "смягч",
+            "affected",
+            "затронул",
+            "пострад",
+            "эскалац",
+        )
+        self._incident_source_types = [
+            "incident_note",
+            "support_ticket",
+            "metric_row",
+        ]
 
     def route(
         self,
@@ -110,14 +144,27 @@ class QueryRouter:
             and not has_metric_negative_marker
             and not has_strong_technical_marker
         )
+        release_notes_intent = (
+            _contains_any(normalized, self._release_notes_markers)
+            and not metric_intent
+        )
         support_feedback_intent = (
             _contains_any(normalized, self._support_feedback_markers)
             and not metric_intent
+            and not release_notes_intent
         )
         technical_root_cause_intent = (
             _contains_any(normalized, self._technical_root_cause_markers)
             and (has_strong_technical_marker or not metric_intent)
+            and not release_notes_intent
             and not support_feedback_intent
+        )
+        incident_intent = (
+            _contains_any(normalized, self._incident_markers)
+            and not metric_intent
+            and not release_notes_intent
+            and not support_feedback_intent
+            and not technical_root_cause_intent
         )
 
         selected_source_types = source_types
@@ -132,6 +179,10 @@ class QueryRouter:
             selected_score_threshold = _lower_threshold(score_threshold, 0.60)
             applied_hints.append("metric_score_threshold")
 
+        if release_notes_intent and not user_provided_source_types:
+            selected_source_types = self._release_notes_source_types
+            applied_hints.append("release_notes_source_types")
+
         if support_feedback_intent and not user_provided_source_types:
             selected_source_types = self._support_feedback_source_types
             applied_hints.append("support_feedback_source_types")
@@ -144,14 +195,20 @@ class QueryRouter:
             selected_score_threshold = _lower_threshold(score_threshold, 0.60)
             applied_hints.append("technical_root_cause_score_threshold")
 
+        if incident_intent and not user_provided_source_types:
+            selected_source_types = self._incident_source_types
+            applied_hints.append("incident_source_types")
+
         return QueryRoutingDecision(
             source_types=selected_source_types,
             score_threshold=selected_score_threshold,
             hints={
                 "metric_intent": metric_intent,
                 "metric_negative_marker": has_metric_negative_marker,
+                "release_notes_intent": release_notes_intent,
                 "support_feedback_intent": support_feedback_intent,
                 "technical_root_cause_intent": technical_root_cause_intent,
+                "incident_intent": incident_intent,
                 "applied_hints": applied_hints,
                 "user_provided_source_types": user_provided_source_types,
                 "user_provided_score_threshold": user_provided_score_threshold,

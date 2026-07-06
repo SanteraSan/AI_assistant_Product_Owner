@@ -1005,3 +1005,116 @@ Latency / Stability:
 - по скорости он выглядит лучше текущего `qwen2.5:14b`;
 - по строгости нужно проверить дополнительные negative/groundedness cases, потому что модель склонна расширять ответ смежными метриками;
 - следующий честный comparison: `qwen2.5:14b` vs `qwen3:14b` vs `qwen3.5:9b` на полном checklist после `think=False`.
+
+## 2026-07-06: Release Notes Intent
+
+Контекст:
+
+- evaluation ранее поймала ложное срабатывание metric intent на запрос `Какие изменения по notifications были в release notes?`;
+- после удаления широких metric markers запрос перестал считаться metric intent, но release-notes routing еще не был явным;
+- для release questions важно отделять shipped changes от incidents/support feedback.
+
+Решение:
+
+- добавить rule-based `release_notes_intent`;
+- markers: `release note(s)`, `релиз`, `релизн`, `changelog`, `change log`, `что было выпущено`, `что выпустили`, `изменения`;
+- если пользователь не передал `source_types`, router выставляет строго `source_types=["release_note"]`;
+- metric intent имеет приоритет, чтобы запросы вроде "какие метрики в release notes" не теряли metric behavior.
+
+Вывод:
+
+- strict `release_note` routing помогает не смешивать release changes с incident/support evidence;
+- если позже понадобится richer answer, можно расширить до `release_note + incident_note`, но первый baseline должен быть строгим.
+
+Результат retest:
+
+- `release_notes_intent=true`;
+- router автоматически выставил `source_types=["release_note"]`;
+- `final_top_k=1`, найден только `Release Note 2026-01: notifications`;
+- `qwen3.5:9b` и `qwen3:14b` корректно перечислили shipped changes без подмешивания incidents/support tickets.
+
+## 2026-07-06: Incident Intent
+
+Контекст:
+
+- после metrics, support feedback, technical/root-cause и release notes остался последний основной router intent — incidents;
+- incident questions обычно спрашивают не только root cause, но и что случилось, impact, mitigation и follow-up;
+- для такого ответа нужны `incident_note` как primary evidence, а `support_ticket` и `metric_row` могут дать подтверждение customer impact.
+
+Решение:
+
+- добавить rule-based `incident_intent`;
+- markers: `incident`, `инцидент`, `что случилось`, `что произошло`, `impact`, `влияние`, `последств`, `mitigation`, `affected`, `пострад`, `эскалац`;
+- если пользователь не передал `source_types`, router выставляет `incident_note`, `support_ticket`, `metric_row`;
+- technical/root-cause intent имеет приоритет, если вопрос явно про `root cause`, `retry`, `backoff`, `worker` или `rate limits`;
+- release/support/metric intents также сохраняют свои приоритеты, чтобы incident intent не перехватывал их сценарии.
+
+Вывод:
+
+- incidents intent закрывает основной RAG-router roadmap перед PostgreSQL слоем;
+- следующий retest должен проверить, что incident summary отвечает про what happened, impact и mitigation, а не превращается только в technical answer.
+
+Результат retest:
+
+- `incident_intent=true`;
+- router автоматически выставил `source_types=["incident_note","support_ticket","metric_row"]`;
+- sources стали incident/support-oriented: main notification incident, related integration incident и support feedback;
+- `qwen3:14b` сфокусировался на основном notifications incident: задержки Slack notifications, impact, tickets/adoption;
+- `qwen3.5:9b` дал более широкий ответ и объединил два мартовских incident-а: delivery delays и Slack integration/OAuth scopes.
+
+Наблюдение:
+
+- для broad incident questions широкий ответ `qwen3.5:9b` полезен;
+- для узкого "тот самый incident" ответа `qwen3:14b` оказался строже;
+- позже можно добавить уточняющий router/prompt rule: если вопрос просит "мартовский инцидент с notifications", не смешивать related integration incident без явной необходимости.
+
+## 2026-07-06: Full Model Evaluation After Router Roadmap
+
+Контекст:
+
+- после закрытия основных router intents нужно проверить весь активный пул моделей на полном checklist;
+- проверялись: `qwen2.5:7b-instruct-q8_0`, `qwen3.5:9b`, `qwen2.5:14b`, `qwen3:14b`, `gemma4:12b`;
+- scenarios: metric intent, negative metric, general PO summary, support feedback, technical/root-cause, release notes, no-answer ARR, incident summary;
+- результаты сохранены локально в `research/full_model_evaluation_latest.jsonl`.
+
+Stability / Latency:
+
+- все модели дали 8/8 непустых ответов;
+- CJK/китайский после `think=False` не протекал;
+- средняя latency:
+  - `qwen3:14b`: около `10.5s`;
+  - `qwen2.5:7b-instruct-q8_0`: около `10.7s`;
+  - `qwen2.5:14b`: около `11.7s`;
+  - `qwen3.5:9b`: около `12.1s`;
+  - `gemma4:12b`: около `14.2s`.
+
+Наблюдения По Моделям:
+
+- `qwen3:14b` показал лучший баланс скорости, строгости и качества; ответы компактные и grounded;
+- `qwen2.5:14b` остается хорошим baseline, но после `think=False` уже не выглядит однозначно быстрее/лучше `qwen3:14b`;
+- `qwen3.5:9b` сильный fast challenger: качественные ответы, хорошо держит no-answer и technical scenarios, но часто расширяет ответ смежными фактами и пишет длиннее;
+- `qwen2.5:7b-instruct-q8_0` surprisingly usable: короткие и стабильные ответы, хороший fallback, но беднее по структуре и глубине;
+- `gemma4:12b` grounded и аккуратна, но чаще verbose и медленнее, особенно в metric/general/support/incident summaries.
+
+Качество По Сценариям:
+
+- metric intent: `qwen2.5:14b` и `qwen3:14b` наиболее строго отвечают по `notification_delivery_delay`; `qwen3.5:9b` и `gemma4:12b` добавляют adoption/support ticket metrics как related context;
+- negative metric: все модели соблюли no-metrics policy;
+- release notes: release intent дал чистый `release_note` context, все модели ответили корректно;
+- technical/root-cause: все модели объяснили retry/backoff, `429` и rate limits; `qwen3.5:9b` дал самый подробный technical answer;
+- no-answer ARR: все модели отказались считать точный ARR loss и запросили недостающие financial/customer data;
+- incident summary: `qwen3:14b` строже держится основного notifications incident, `qwen3.5:9b` и `gemma4:12b` дают более широкий summary с related integration incident.
+
+Обновленная Модельная Карта:
+
+- Primary quality candidate: `qwen3:14b`;
+- Current baseline / stable comparator: `qwen2.5:14b`;
+- Fast challenger: `qwen3.5:9b`;
+- Fast fallback: `qwen2.5:7b-instruct-q8_0`;
+- Strict grounded candidate: `gemma4:12b`.
+
+Вывод:
+
+- router roadmap можно считать стабилизированным для M1 single-turn RAG;
+- перед сменой default model стоит еще прогнать несколько no-answer/negative constraints на `qwen3:14b` и `qwen3.5:9b`;
+- следующий архитектурный этап — PostgreSQL слой: request logs, evaluation runs, chat history и будущий conversation context.

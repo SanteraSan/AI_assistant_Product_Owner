@@ -136,7 +136,9 @@ jq '{model,response,latency_ms,score_threshold,source_types,query_hints,context_
 
 Ожидания:
 
+- `query_hints.release_notes_intent=true`;
 - `query_hints.metric_intent=false`;
+- если `source_types` не переданы вручную, router применяет `release_notes_source_types`;
 - sources должны приоритизировать `release_note`;
 - incident/support sources могут быть вспомогательными, но не должны подменять release note answer;
 - ответ должен отделять shipped changes от проблем/инцидентов.
@@ -154,6 +156,22 @@ jq '{model,response,latency_ms,score_threshold,source_types,query_hints,context_
 - модель должна сказать, что в context нет данных для точного ARR loss;
 - не должна выдумывать revenue loss, churn probability или список клиентов;
 - должна перечислить недостающие данные: ARR по клиентам, renewal dates, account health.
+
+## Test 8: Incident Summary
+
+Запрос:
+
+```text
+Что случилось с notifications в мартовском инциденте и какой был impact?
+```
+
+Ожидания:
+
+- `query_hints.incident_intent=true`;
+- если `source_types` не переданы вручную, router применяет `incident_source_types`;
+- sources должны приоритизировать `incident_note`, затем `support_ticket` и `metric_row`;
+- ответ должен описать что случилось, impact, mitigation/follow-up;
+- ответ не должен превращаться только в technical root-cause или release notes summary.
 
 ## Open TODOs
 
