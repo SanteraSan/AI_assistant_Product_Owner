@@ -493,3 +493,137 @@
 - все три модели работают в `100% GPU` режиме и имеют близкий практический уровень latency для пользователя;
 - переключение между этими моделями должно быть приемлемым для локального pet-проекта, особенно если учитывать warm state и `keep_alive`;
 - сегодняшняя лаборатория подтвердила, что выбор модели должен зависеть не только от размера, но и от задачи: скорость, groundedness, контекст, арифметика, strict refusal.
+
+## 2026-07-06: M1 Single-Collection RAG Старт
+
+Контекст:
+
+- после M0 smoke test и model benchmarks переходим к первому настоящему RAG;
+- цель M1: получить ответ модели на основе chunks, найденных в Qdrant;
+- начинаем с одной коллекции `documents`, без multi-collection routing;
+- PostgreSQL поднимается в Docker сразу, но chat history подключим позже отдельным шагом.
+
+Решение:
+
+- добавить `docker-compose.yml` с `postgres` и `qdrant`;
+- использовать `nomic-embed-text` как первую embedding-модель;
+- использовать Qdrant collection `documents`;
+- оставить `/chat` как простой Ollama smoke endpoint;
+- добавить отдельный `/rag/chat`, который возвращает ответ и `sources`;
+- держать backend слоистым: config, clients, models, services, scripts.
+
+Вывод:
+
+- M1 должен быть максимально прозрачным: ingestion, retrieval, prompt и sources должны легко проверяться;
+- до добавления агентов и router важно убедиться, что простой single-collection RAG работает и не галлюцинирует без источников.
+
+## 2026-07-06: Первый Успешный End-To-End RAG
+
+Контекст:
+
+- Qdrant и PostgreSQL подняты через Docker Compose;
+- seed-документы загружены в Qdrant collection `documents`;
+- embedding-модель: `nomic-embed-text`;
+- RAG endpoint: `/rag/chat`;
+- генеративная модель: `gemma3:12b`;
+- тестовый вопрос: "Какие проблемы с notifications влияют на enterprise-клиентов?"
+
+Наблюдение:
+
+- `/health` показал:
+  - `ollama_available: true`;
+  - `embedding_model: nomic-embed-text`;
+  - `qdrant_collection: documents`;
+  - `qdrant_collection_exists: true`.
+- Первый `/rag/chat` с `top_k=5` вернул релевантный grounded answer, но среди sources были шумные chunks:
+  - `Incident Note: Задержки Slack Notifications В Марте 2026`, score около `0.798`;
+  - `Архитектура Уведомлений TaskFlow AI`, score около `0.777`;
+  - `Slack уведомления приходят слишком поздно`, score около `0.697`;
+  - нерелевантные chunks `CSV Import V2` и `Search`.
+- Повторный `/rag/chat` с `top_k=3` вернул только релевантные sources:
+  - incident note про задержки Slack notifications;
+  - архитектуру notifications;
+  - support ticket про задержку Slack уведомлений.
+- Ответ модели был основан на источниках:
+  - задержки Slack notifications на `15-20 минут`;
+  - причина: Slack workspace rate limits;
+  - impact: Project Managers жаловались на потерю оперативности.
+- Latency для чистого `top_k=3` ответа: около `2503 ms`.
+
+Решение:
+
+- считать M1 single-collection RAG успешно запущенным;
+- для маленького seed dataset временно использовать `top_k=3` как более чистый default для ручных проверок;
+- следующим улучшением добавить score threshold и/или metadata filter по `feature`;
+- оставить `sources` в API, потому что они критичны для отладки retrieval и groundedness.
+
+Вывод:
+
+- первая полная цепочка работает: `question -> embedding -> Qdrant retrieval -> prompt -> gemma3:12b -> grounded answer + sources`;
+- retrieval уже находит правильные документы по смыслу;
+- качество ответа сильно зависит от того, какие chunks попали в prompt;
+- следующий инженерный шаг: уменьшить шум retrieval через filters/threshold/reranking, а не увеличивать `top_k` без контроля.
+
+## 2026-07-06: Retrieval Noise Control
+
+Контекст:
+
+- первый RAG с `top_k=5` вернул три релевантных chunks и два шумных chunks;
+- `top_k=3` дал более чистый prompt;
+- нужно дать backend простой механизм отсечения слабых результатов без усложнения архитектуры.
+
+Решение:
+
+- добавить опциональный `score_threshold` в `/rag/chat`;
+- оставить default threshold выключенным, чтобы не ломать retrieval на маленьком датасете;
+- разрешить задавать threshold на конкретный запрос;
+- добавить компактный `jq` пример, который показывает `score`, `title`, `source_type`, `feature` без полного `content`.
+
+Вывод:
+
+- на раннем этапе лучше явно видеть scores и sources;
+- `score_threshold` полезен как первый простой фильтр шума;
+- дальше стоит добавить metadata filters по `feature` и, позже, reranking.
+
+## 2026-07-06: Metadata Filtering По Feature
+
+Контекст:
+
+- после добавления `score_threshold` retrieval стал чище, но threshold сам по себе не понимает доменную структуру;
+- в Qdrant payload уже есть поле `feature`, например `notifications`, `csv_import`, `search`;
+- следующий слой качества retrieval - использовать metadata filtering до сборки prompt.
+
+Решение:
+
+- добавить в `/rag/chat` поле `features`;
+- передавать `features` в Qdrant payload filter;
+- использовать `MatchAny`, чтобы chunk проходил, если содержит хотя бы одну из запрошенных фич;
+- возвращать примененный список `features` в API response;
+- добавить README-пример с `features:["notifications"]`.
+
+Вывод:
+
+- metadata filtering помогает отсекать семантически похожий, но доменно нерелевантный шум;
+- это первый шаг к будущему collection routing и persona-aware retrieval;
+- на большом корпусе feature filters будут важнее, чем простое увеличение `top_k`.
+
+## 2026-07-06: Rule-Based Feature Extraction
+
+Контекст:
+
+- ручной `features:["notifications"]` улучшает retrieval, но пользователю неудобно каждый раз указывать feature;
+- нужен первый маленький шаг к будущему router без ML/fine-tune;
+- на M1 достаточно простых правил по ключевым словам.
+
+Решение:
+
+- добавить `FeatureExtractor`;
+- извлекать features из текста вопроса, если пользователь не передал `features` вручную;
+- оставить ручные `features` приоритетнее автоопределения;
+- начать с правил для `notifications`, `csv_import`, `permissions`, `reports`, `search`, `webhooks`, `integrations`, `tasks`, `projects`, `sprints`.
+
+Вывод:
+
+- это первый rule-based router для retrieval;
+- он не заменяет будущий CPU-router, но уже улучшает UX;
+- дальше можно сравнить rule-based extraction с embedding/router classifier и fine-tuned classifier.

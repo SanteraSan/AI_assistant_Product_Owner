@@ -2,3 +2,8 @@ fastapi
 uvicorn[standard]
 httpx
 pydantic-settings
+qdrant-client
+pandas
+pyyaml
+sqlalchemy
+asyncpg

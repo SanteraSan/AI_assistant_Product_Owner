@@ -117,3 +117,143 @@ git add backend research/LESSONS_LEARNED.md
 git commit -m "feat: add ollama smoke test backend"
 git push
 ```
+
+## M1: Single-Collection RAG
+
+На M1 backend получает первый RAG-путь:
+
+```text
+raw seed files -> chunks -> Ollama embeddings -> Qdrant documents -> /rag/chat -> Ollama answer with sources
+```
+
+PostgreSQL поднимается сразу, но история чата и таблицы будут подключены следующим шагом. В M1 основной фокус - Qdrant и первый grounded answer.
+
+### Поднять Qdrant И PostgreSQL
+
+Из корня проекта:
+
+```bash
+cd /home/santera/Projects
+docker compose up -d
+docker ps
+```
+
+Проверить Qdrant:
+
+```bash
+curl http://localhost:6333/healthz
+```
+
+### Embedding-Модель
+
+Скачать embedding-модель:
+
+```bash
+ollama pull nomic-embed-text
+```
+
+Проверить, что модель есть:
+
+```bash
+ollama list
+```
+
+### Обновить Python-Зависимости
+
+Из папки backend:
+
+```bash
+cd /home/santera/Projects/backend
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Если `.env` уже создан раньше, обнови его по `backend/.env.example` или добавь новые переменные вручную.
+
+### Загрузить Seed-Данные В Qdrant
+
+Из папки backend:
+
+```bash
+cd /home/santera/Projects/backend
+source .venv/bin/activate
+python -m scripts.ingest_seed_data --recreate
+```
+
+Ожидаемый результат:
+
+- script прочитает `data/raw`;
+- создаст chunks;
+- получит embeddings через `nomic-embed-text`;
+- создаст Qdrant collection `documents`;
+- загрузит chunks в Qdrant.
+
+### Проверить Health
+
+```bash
+curl http://localhost:8000/health | jq
+```
+
+Ожидаемые важные поля:
+
+```json
+{
+  "ollama_available": true,
+  "embedding_model": "nomic-embed-text",
+  "qdrant_collection": "documents",
+  "qdrant_collection_exists": true
+}
+```
+
+### Первый RAG-Запрос
+
+```bash
+curl -s -X POST http://localhost:8000/rag/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Какие проблемы с notifications влияют на enterprise-клиентов?","model":"gemma3:12b","top_k":5}' | \
+  jq '{model,response,latency_ms,collection,sources}'
+```
+
+Если ответ содержит `sources`, значит первый single-collection RAG работает.
+
+Для более чистого retrieval на маленьком seed dataset можно уменьшить `top_k` и добавить `score_threshold`:
+
+```bash
+curl -s -X POST http://localhost:8000/rag/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Какие проблемы с notifications влияют на enterprise-клиентов?","model":"gemma3:12b","top_k":5,"score_threshold":0.68}' | \
+  jq '{model,response,latency_ms,collection,score_threshold,sources:[.sources[] | {score,title,source_type,feature}]}'
+```
+
+Такой `jq` выводит компактные sources без полного `content`, чтобы терминал не превращался в простыню.
+
+Можно также добавить metadata filter по feature:
+
+```bash
+curl -s -X POST http://localhost:8000/rag/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Какие проблемы с notifications влияют на enterprise-клиентов?","model":"gemma3:12b","top_k":5,"score_threshold":0.68,"features":["notifications"]}' | \
+  jq '{model,response,latency_ms,collection,features,score_threshold,sources:[.sources[] | {score,title,source_type,feature}]}'
+```
+
+`features` фильтрует Qdrant payload до сборки prompt. Например `["notifications"]` не даст попасть в prompt chunks по `csv_import` или `search`.
+
+Если `features` не передавать, backend попробует определить их сам простым rule-based extractor:
+
+```bash
+curl -s -X POST http://localhost:8000/rag/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Какие проблемы с notifications влияют на enterprise-клиентов?","model":"gemma3:12b","top_k":5,"score_threshold":0.68}' | \
+  jq '{model,response,latency_ms,collection,features,score_threshold,sources:[.sources[] | {score,title,source_type,feature}]}'
+```
+
+Ручное поле `features` имеет приоритет над автоопределением. Это удобно для отладки retrieval.
+
+Если нужно увидеть полный контекст, который попал в ответ, используй:
+
+```bash
+curl -s -X POST http://localhost:8000/rag/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Какие проблемы с notifications влияют на enterprise-клиентов?","model":"gemma3:12b","top_k":3}' | \
+  jq '{model,response,latency_ms,collection,sources}'
+```
