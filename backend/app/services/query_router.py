@@ -170,10 +170,12 @@ class QueryRouter:
         selected_source_types = source_types
         selected_score_threshold = score_threshold
         applied_hints: list[str] = []
+        required_source_types: list[str] = []
 
         if metric_intent and not user_provided_source_types:
             selected_source_types = self._metric_source_types
             applied_hints.append("metric_source_types")
+            required_source_types.append("metric_row")
 
         if metric_intent and not user_provided_score_threshold:
             selected_score_threshold = _lower_threshold(score_threshold, 0.60)
@@ -210,6 +212,7 @@ class QueryRouter:
                 "technical_root_cause_intent": technical_root_cause_intent,
                 "incident_intent": incident_intent,
                 "applied_hints": applied_hints,
+                "required_source_types": required_source_types,
                 "user_provided_source_types": user_provided_source_types,
                 "user_provided_score_threshold": user_provided_score_threshold,
             },

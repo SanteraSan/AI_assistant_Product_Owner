@@ -255,15 +255,37 @@ def _build_quality_flags(
         flags["release_notes_intent_ok"] = query_hints.get("release_notes_intent") is True
         flags["has_release_note_source"] = "release_note" in source_types
     elif scenario.id == "no_answer_groundedness":
-        flags["refusal_or_missing_data_ok"] = any(
-            marker in response
-            for marker in ("нет данных", "не хватает", "недостаточно", "нет информации")
+        flags["refusal_or_missing_data_ok"] = _contains_any(
+            response,
+            (
+                "нет данных",
+                "не хватает",
+                "недостаточно",
+                "нет информации",
+                "контекст не предоставляет",
+                "точные цифры",
+                "точных цифр",
+                "отсутствуют",
+                "не приведены",
+                "не указано",
+                "не указаны",
+                "в предоставленном контексте нет",
+                "не предоставляет конкретной информации",
+                "конкретная сумма",
+                "не упоминается",
+                "дополнительные данные",
+                "потребовались бы",
+            ),
         )
     elif scenario.id == "incident_summary":
         flags["incident_intent_ok"] = query_hints.get("incident_intent") is True
         flags["has_incident_source"] = "incident_note" in source_types
 
     return flags
+
+
+def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in text for marker in markers)
 
 
 def _default_run_name() -> str:

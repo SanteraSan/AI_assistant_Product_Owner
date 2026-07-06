@@ -71,6 +71,17 @@ class RagService:
             source_types=selected_source_types,
         )
         sources = _filter_sources_by_score(sources, selected_score_threshold)
+        required_source_types = _normalize_values(
+            routing_decision.hints.get("required_source_types") or []
+        )
+        sources = self._supplement_required_source_types(
+            sources=sources,
+            query_vector=query_vector,
+            selected_features=selected_features,
+            selected_score_threshold=selected_score_threshold,
+            required_source_types=required_source_types,
+            limit=selected_top_k,
+        )
         diversity = {
             "max_sources_per_title": max_sources_per_title if max_sources_per_title is not None else 1,
             "max_sources_per_source_type": max_sources_per_source_type,
@@ -117,12 +128,43 @@ class RagService:
             retrieval={
                 "requested_top_k": selected_top_k,
                 "candidate_k": candidate_k,
+                "required_source_types": required_source_types,
                 "final_top_k": len(sources),
             },
             query_hints=routing_decision.hints,
             context_policy=context_policy,
             prompt_tokens_estimate=_estimate_tokens(prompt),
         )
+
+    def _supplement_required_source_types(
+        self,
+        *,
+        sources: list[SourceChunk],
+        query_vector: list[float],
+        selected_features: list[str],
+        selected_score_threshold: float | None,
+        required_source_types: list[str],
+        limit: int,
+    ) -> list[SourceChunk]:
+        supplemented_sources = sources
+        for required_source_type in required_source_types:
+            if _contains_source_type(supplemented_sources, required_source_type):
+                continue
+            supplemental_sources = self._qdrant_store.search(
+                query_vector=query_vector,
+                limit=limit,
+                features=selected_features,
+                source_types=[required_source_type],
+            )
+            supplemental_sources = _filter_sources_by_score(
+                supplemental_sources,
+                selected_score_threshold,
+            )
+            supplemented_sources = _merge_sources(
+                supplemental_sources[:2],
+                supplemented_sources,
+            )
+        return supplemented_sources
 
 
 def build_rag_prompt(
@@ -277,6 +319,28 @@ def _filter_sources_by_score(
         for source in sources
         if source.score is not None and source.score >= score_threshold
     ]
+
+
+def _contains_source_type(sources: list[SourceChunk], source_type: str) -> bool:
+    normalized_source_type = source_type.strip().lower()
+    return any(
+        (source.source_type or "").strip().lower() == normalized_source_type
+        for source in sources
+    )
+
+
+def _merge_sources(
+    preferred_sources: list[SourceChunk],
+    fallback_sources: list[SourceChunk],
+) -> list[SourceChunk]:
+    merged: list[SourceChunk] = []
+    seen_ids: set[str] = set()
+    for source in [*preferred_sources, *fallback_sources]:
+        if source.id in seen_ids:
+            continue
+        merged.append(source)
+        seen_ids.add(source.id)
+    return merged
 
 
 def _normalize_features(features: list[str]) -> list[str]:

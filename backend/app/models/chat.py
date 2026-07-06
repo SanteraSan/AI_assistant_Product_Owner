@@ -50,7 +50,7 @@ class RagChatResponse(ChatResponse):
     features: list[str] = Field(default_factory=list)
     source_types: list[str] = Field(default_factory=list)
     diversity: dict[str, int | None] = Field(default_factory=dict)
-    retrieval: dict[str, int] = Field(default_factory=dict)
+    retrieval: dict[str, Any] = Field(default_factory=dict)
     query_hints: dict[str, Any] = Field(default_factory=dict)
     context_policy: dict[str, Any] = Field(default_factory=dict)
     prompt_tokens_estimate: int | None = None

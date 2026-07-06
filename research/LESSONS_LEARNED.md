@@ -1205,3 +1205,37 @@ Stability / Latency:
 
 - evaluation слой теперь не только сохраняет результаты, но и помогает быстро читать их как инженерный сигнал;
 - это подготовка к будущим memory/context изменениям: перед изменением RAG behavior можно будет прогонять checklist и сравнивать summaries до/после.
+
+## 2026-07-06: Targeted Evaluation Fixes And Full Five-Model Run
+
+Контекст:
+
+- первый compact report по 3 моделям показал два сигнала: `metric_intent` не получал `metric_row`, а `no_answer_groundedness` не засчитывал корректные ответы Qwen;
+- пользователь справедливо заметил, что текущий рабочий пул шире: `qwen2.5:7b-instruct-q8_0`, `qwen3.5:9b`, `qwen3:14b`, `qwen2.5:14b`, `gemma4:12b`;
+- перед полным 5x8 evaluation нужно было сначала починить известные сигналы, чтобы не тратить длинный прогон на уже понятные проблемы.
+
+Диагностика:
+
+- `metric_intent` router выставлял `source_types=["metric_row","incident_note","support_ticket","release_note"]`, но vector ranking выбирал более текстовые chunks: `release_note`, `incident_note`, `support_ticket`;
+- metric-only retrieval показывал, что `metric_row` находится при `score_threshold=0.60`, значит проблема была не в данных, а в отсутствии source-type floor;
+- no-answer ответы Qwen были корректными: "контекст не предоставляет", "точные цифры отсутствуют", "конкретная сумма потерь не упоминается", но marker list был слишком узким.
+
+Решение:
+
+- добавить `query_hints.required_source_types=["metric_row"]` для metric intent;
+- в `RagService` добавить supplemental search по обязательным source types, если основной candidate pool их не содержит;
+- расширить no-answer эвристику общими маркерами отсутствующих данных, не привязанными к одной модели;
+- изменить `RagChatResponse.retrieval` на `dict[str, Any]`, потому что retrieval metadata теперь содержит не только числовые счетчики.
+
+Результат:
+
+- targeted run на 5 моделях и 2 сценариях (`metric_intent`, `no_answer_groundedness`) прошел без failed flags;
+- полный run `8c8f08d7-a07b-419c-b735-57e8d81a8713`: 5 моделей x 8 сценариев = 40 результатов;
+- ошибок нет, `zero_sources=0`, `failed_flags=0` по всем сценариям и моделям;
+- средняя latency: `qwen2.5:7b-instruct-q8_0` около `9.9s`, `qwen3:14b` около `11.2s`, `qwen2.5:14b` около `11.6s`, `gemma4:12b` около `12.2s`, `qwen3.5:9b` около `12.4s`.
+
+Вывод:
+
+- compact reporting уже окупился: он поймал regression, направил точечную правку и подтвердил clean full run;
+- для metric questions нужен не только broad source filter, но и обязательный metric evidence floor;
+- full five-model run теперь можно считать новым baseline перед следующим крупным этапом: multi-turn memory/context policy.

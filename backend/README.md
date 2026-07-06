@@ -261,6 +261,8 @@ curl -s -X POST http://localhost:8000/rag/chat \
   jq '{model,response,latency_ms,score_threshold,source_types,query_hints,retrieval,sources:[.sources[] | {score,title,source_type,feature}]}'
 ```
 
+Для `metric_intent` router не только выставляет metric-oriented `source_types`, но и помечает `metric_row` как обязательный source type. Если обычный vector search не дал `metric_row` в candidate pool, `RagService` делает supplemental search по `metric_row` и добавляет найденные metric chunks перед diversity/top-k. Это защищает metric questions от ситуации, когда более текстовые incident/support/release chunks вытесняют сами метрики.
+
 Если пользователь пишет "без метрик" или похожую фразу, metric hint не применяется:
 
 ```bash
