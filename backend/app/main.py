@@ -13,6 +13,7 @@ from app.db.session import (
     init_db,
 )
 from app.models.chat import ChatRequest, ChatResponse, RagChatRequest, RagChatResponse
+from app.services.chat_history_service import ChatExchangeRecord, ChatHistoryService
 from app.services.feature_extractor import FeatureExtractor
 from app.services.ollama_client import OllamaClient
 from app.services.query_router import QueryRouter
@@ -46,6 +47,7 @@ rag_service = RagService(
     default_score_threshold=settings.rag_score_threshold,
 )
 rag_log_service = RagLogService(session_factory=db_session_factory)
+chat_history_service = ChatHistoryService(session_factory=db_session_factory)
 
 
 @app.on_event("startup")
@@ -96,11 +98,19 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
     latency_ms = int((perf_counter() - started_at) * 1000)
 
-    return ChatResponse(
+    response = ChatResponse(
         model=model,
         response=result.get("response", ""),
         latency_ms=latency_ms,
     )
+    chat_exchange = await _try_save_chat_exchange(
+        session_id=request.session_id,
+        user_message=request.message,
+        response=response,
+        metadata={"endpoint": "/chat"},
+    )
+    _attach_chat_exchange(response, chat_exchange)
+    return response
 
 
 @app.post("/rag/chat", response_model=RagChatResponse)
@@ -126,6 +136,19 @@ async def rag_chat(request: RagChatRequest) -> RagChatResponse:
             max_sources_per_source_type=request.max_sources_per_source_type,
             max_sources_per_source_path=request.max_sources_per_source_path,
         )
+        chat_exchange = await _try_save_chat_exchange(
+            session_id=request.session_id,
+            user_message=request.message,
+            response=response,
+            metadata={
+                "endpoint": "/rag/chat",
+                "collection": response.collection,
+                "retrieval": response.retrieval,
+                "query_hints": response.query_hints,
+                "context_policy": response.context_policy,
+            },
+        )
+        _attach_chat_exchange(response, chat_exchange)
         try:
             await rag_log_service.log_response(
                 message=request.message,
@@ -153,3 +176,36 @@ def _qdrant_collection_exists() -> bool:
         return qdrant_store.collection_exists()
     except Exception:
         return False
+
+
+async def _try_save_chat_exchange(
+    *,
+    session_id: str | None,
+    user_message: str,
+    response: ChatResponse,
+    metadata: dict[str, object],
+) -> ChatExchangeRecord | None:
+    try:
+        return await chat_history_service.save_exchange(
+            session_id=session_id,
+            user_message=user_message,
+            assistant_message=response.response,
+            model=response.model,
+            provider=response.provider,
+            latency_ms=response.latency_ms,
+            metadata=metadata,
+        )
+    except Exception:
+        logger.exception("Chat history persistence failed")
+        return None
+
+
+def _attach_chat_exchange(
+    response: ChatResponse,
+    chat_exchange: ChatExchangeRecord | None,
+) -> None:
+    if chat_exchange is None:
+        return
+    response.session_id = chat_exchange.session_id
+    response.user_message_id = chat_exchange.user_message_id
+    response.assistant_message_id = chat_exchange.assistant_message_id

@@ -309,8 +309,10 @@ PostgreSQL используется как системная память дл�
 
 - `rag_request_logs` - сообщение пользователя, ответ модели, latency, выбранная модель, retrieval/router/context policy параметры;
 - `rag_source_logs` - sources, которые попали в ответ, включая score, title, source type, source path, metadata и короткий excerpt content.
+- `chat_sessions` - логические диалоги пользователя;
+- `chat_messages` - user/assistant сообщения внутри session.
 
-Логирование `/rag/chat` работает best-effort: если PostgreSQL временно недоступен, RAG-ответ все равно вернется, а ошибка попадет в backend logs.
+Логирование `/chat` и `/rag/chat` работает best-effort: если PostgreSQL временно недоступен, ответ все равно вернется, а ошибка попадет в backend logs. История пока не подмешивается в prompt: RAG остается single-turn, а PostgreSQL только сохраняет conversation history для будущего этапа.
 
 Проверить доступность PostgreSQL через backend:
 
@@ -331,3 +333,21 @@ docker exec -it taskflow-postgres psql -U po_user -d po_assistant \
 docker exec -it taskflow-postgres psql -U po_user -d po_assistant \
   -c "select source_index, title, source_type, round(score::numeric, 3) as score from rag_source_logs where request_log_id = (select id from rag_request_logs order by created_at desc limit 1) order by source_index;"
 ```
+
+Проверить последние chat messages:
+
+```bash
+docker exec -it taskflow-postgres psql -U po_user -d po_assistant \
+  -c "select session_id, role, left(content, 80) as content_preview, model, latency_ms, created_at from chat_messages order by created_at desc limit 10;"
+```
+
+Продолжить ту же session можно, передав `session_id` из предыдущего ответа:
+
+```bash
+curl -s -X POST http://localhost:8000/rag/chat \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"<SESSION_ID_FROM_PREVIOUS_RESPONSE>","message":"А какие из этих проблем самые критичные?","model":"gemma3:12b","top_k":5}' | \
+  jq '{session_id,user_message_id,assistant_message_id,model,latency_ms,response}'
+```
+
+Важно: на текущем этапе `session_id` только связывает записи в PostgreSQL. Backend еще не использует прошлые сообщения как context для следующего RAG prompt.

@@ -1141,3 +1141,25 @@ Stability / Latency:
 - PostgreSQL пока является системной памятью и audit trail, а не частью prompt context;
 - такой слой поможет анализировать реальные запросы, latency, качество retrieval и поведение router;
 - следующий DB шаг: добавить chat sessions / message history и отдельную таблицу evaluation runs, но подключать их к RAG context нужно позже и осторожно.
+
+## 2026-07-06: Chat History Без Multi-Turn Memory
+
+Контекст:
+
+- после RAG logs нужен следующий слой PostgreSQL: история пользовательских диалогов;
+- при этом single-turn RAG уже стабилен, и нельзя незаметно изменить качество ответов, начав подмешивать старые сообщения в prompt;
+- цель этапа — сохранить conversation history как данные, но не превращать ее в retrieval/memory policy.
+
+Решение:
+
+- добавить таблицы `chat_sessions` и `chat_messages`;
+- добавить `session_id` в `/chat` и `/rag/chat` requests;
+- возвращать `session_id`, `user_message_id` и `assistant_message_id` в responses, если запись в PostgreSQL успешна;
+- сохранять пары сообщений `user`/`assistant` best-effort, чтобы недоступная БД не ломала inference;
+- пока не добавлять FK из `rag_request_logs` в `chat_messages`, потому что текущий early-stage `create_all()` не мигрирует уже созданные таблицы.
+
+Вывод:
+
+- теперь backend умеет хранить историю общения, но RAG behavior остается прежним;
+- это правильная промежуточная ступень перед conversation context: сначала собрать данные и понять форму сессий, потом проектировать memory summarization/context window;
+- перед production-like этапом понадобится Alembic, чтобы безопасно добавлять связи и индексы к уже существующим таблицам.
