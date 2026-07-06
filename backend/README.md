@@ -391,3 +391,13 @@ docker exec -it taskflow-postgres psql -U po_user -d po_assistant \
 docker exec -it taskflow-postgres psql -U po_user -d po_assistant \
   -c "select scenario_id, model, latency_ms, source_count, quality_flags, error from evaluation_results where run_id = (select id from evaluation_runs order by started_at desc limit 1) order by created_at;"
 ```
+
+Compact reporting без ручного SQL:
+
+```bash
+python -m scripts.report_evaluation_runs list --limit 5
+python -m scripts.report_evaluation_runs summary
+python -m scripts.report_evaluation_runs summary --run-id <EVALUATION_RUN_ID>
+```
+
+`summary` показывает агрегаты по моделям и сценариям: среднюю latency, среднее число sources, ошибки, zero-source cases и failed quality flags.

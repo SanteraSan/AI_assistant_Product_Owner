@@ -1185,3 +1185,23 @@ Stability / Latency:
 - теперь модельные сравнения можно хранить как историю экспериментов, а не как разрозненные локальные файлы;
 - запуск через API path проверяет больше системы: request schema, router, retrieval, LLM call, response schema и DB persistence;
 - следующий шаг после накопления нескольких runs — сделать compact report/query layer, чтобы сравнивать модели по latency, source_count и failed flags.
+
+## 2026-07-06: Compact Evaluation Reporting
+
+Контекст:
+
+- после добавления `evaluation_runs` и `evaluation_results` данные начали сохраняться в PostgreSQL, но смотреть их через ручной SQL неудобно;
+- нужен быстрый способ увидеть последние runs и понять, где появились слабые места: ошибки, `zero_sources`, failed quality flags или высокая latency;
+- на этом этапе не нужен UI: достаточно CLI summary, который не выводит полный текст prompt/response.
+
+Решение:
+
+- добавить `python -m scripts.report_evaluation_runs list` для последних runs;
+- добавить `python -m scripts.report_evaluation_runs summary` для агрегатов по последнему или указанному run;
+- считать summary по моделям и сценариям: avg latency, avg source_count, errors, zero-source cases, failed boolean flags;
+- не выводить полный response content, чтобы report оставался компактным и безопасным для терминала.
+
+Вывод:
+
+- evaluation слой теперь не только сохраняет результаты, но и помогает быстро читать их как инженерный сигнал;
+- это подготовка к будущим memory/context изменениям: перед изменением RAG behavior можно будет прогонять checklist и сравнивать summaries до/после.
