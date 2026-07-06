@@ -49,11 +49,12 @@ class QdrantStore:
         query_vector: list[float],
         limit: int,
         features: list[str] | None = None,
+        source_types: list[str] | None = None,
     ) -> list[SourceChunk]:
         result = self._client.query_points(
             collection_name=self._collection_name,
             query=query_vector,
-            query_filter=_feature_filter(features or []),
+            query_filter=_payload_filter(features=features or [], source_types=source_types or []),
             limit=limit,
             with_payload=True,
         )
@@ -95,15 +96,27 @@ def _as_str_list(value: Any) -> list[str]:
     return [str(value)]
 
 
-def _feature_filter(features: list[str]) -> models.Filter | None:
+def _payload_filter(features: list[str], source_types: list[str]) -> models.Filter | None:
+    conditions: list[models.FieldCondition] = []
+
     normalized = [feature.strip() for feature in features if feature.strip()]
-    if not normalized:
-        return None
-    return models.Filter(
-        must=[
+    if normalized:
+        conditions.append(
             models.FieldCondition(
                 key="feature",
                 match=models.MatchAny(any=normalized),
             )
-        ]
-    )
+        )
+
+    normalized_source_types = [source_type.strip() for source_type in source_types if source_type.strip()]
+    if normalized_source_types:
+        conditions.append(
+            models.FieldCondition(
+                key="source_type",
+                match=models.MatchAny(any=normalized_source_types),
+            )
+        )
+
+    if not conditions:
+        return None
+    return models.Filter(must=conditions)

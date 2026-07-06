@@ -238,6 +238,48 @@ curl -s -X POST http://localhost:8000/rag/chat \
 
 `features` фильтрует Qdrant payload до сборки prompt. Например `["notifications"]` не даст попасть в prompt chunks по `csv_import` или `search`.
 
+Для PO-вопросов можно дополнительно ограничить типы источников:
+
+```bash
+curl -s -X POST http://localhost:8000/rag/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Какие проблемы с notifications влияют на enterprise-клиентов?","model":"gemma3:12b","top_k":8,"score_threshold":0.68,"features":["notifications"],"source_types":["incident_note","support_ticket","metric_row","release_note"],"max_sources_per_title":1}' | \
+  jq '{model,response,latency_ms,collection,features,source_types,score_threshold,retrieval,diversity,sources:[.sources[] | {score,title,source_type,feature}]}'
+```
+
+`max_sources_per_title` помогает не забивать prompt несколькими почти одинаковыми support tickets с одним заголовком. По умолчанию backend уже использует `max_sources_per_title=1`.
+
+Backend берет из Qdrant расширенный пул кандидатов: `candidate_k = top_k * 3`. После `score_threshold` и diversity в prompt попадает максимум `top_k` sources. Поле `retrieval` показывает `requested_top_k`, `candidate_k` и фактический `final_top_k`.
+
+Для вопросов про метрики backend использует простой rule-based query router:
+
+```bash
+curl -s -X POST http://localhost:8000/rag/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Какие метрики по notifications изменились у enterprise-клиентов?","model":"qwen2.5:14b","top_k":8,"features":["notifications"],"max_sources_per_title":1}' | \
+  jq '{model,response,latency_ms,score_threshold,source_types,query_hints,retrieval,sources:[.sources[] | {score,title,source_type,feature}]}'
+```
+
+Если пользователь пишет "без метрик" или похожую фразу, metric hint не применяется:
+
+```bash
+curl -s -X POST http://localhost:8000/rag/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Какие проблемы с notifications важны для enterprise-клиентов, без метрик?","model":"qwen2.5:14b","top_k":8,"features":["notifications"],"max_sources_per_title":1}' | \
+  jq '{model,response,latency_ms,score_threshold,source_types,query_hints,context_policy,retrieval,sources:[.sources[] | {score,title,source_type,feature}]}'
+```
+
+В этом случае `query_hints.metric_negative_marker=true`, `applied_hints=[]`, а prompt получает строгое дополнительное правило не упоминать числовые KPI, проценты, счетчики тикетов, adoption, latency/delay metrics и рекомендации про метрики. Также включается `context_policy.numeric_line_sanitization=true`: backend убирает numeric/KPI-heavy строки из prompt context, но оставляет оригинальные `sources` в API response для отладки. Router не переопределяет явно переданные `source_types` и `score_threshold`; ручные параметры имеют приоритет.
+
+Для Developer-вопросов можно, наоборот, искать в технических источниках:
+
+```bash
+curl -s -X POST http://localhost:8000/rag/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Какая техническая причина задержек Slack notifications?","model":"gemma3:12b","top_k":5,"score_threshold":0.68,"features":["notifications"],"source_types":["markdown","openapi","incident_note"]}' | \
+  jq '{model,response,latency_ms,collection,features,source_types,score_threshold,sources:[.sources[] | {score,title,source_type,feature}]}'
+```
+
 Если `features` не передавать, backend попробует определить их сам простым rule-based extractor:
 
 ```bash

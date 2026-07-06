@@ -8,6 +8,7 @@ from app.core.config import get_settings
 from app.models.chat import ChatRequest, ChatResponse, RagChatRequest, RagChatResponse
 from app.services.feature_extractor import FeatureExtractor
 from app.services.ollama_client import OllamaClient
+from app.services.query_router import QueryRouter
 from app.services.rag_service import RagService
 
 
@@ -22,10 +23,12 @@ qdrant_store = QdrantStore(
     collection_name=settings.qdrant_collection,
 )
 feature_extractor = FeatureExtractor()
+query_router = QueryRouter()
 rag_service = RagService(
     ollama_client=ollama_client,
     qdrant_store=qdrant_store,
     feature_extractor=feature_extractor,
+    query_router=query_router,
     embedding_model=settings.embedding_model,
     default_model=settings.default_rag_model,
     default_top_k=settings.rag_top_k,
@@ -93,6 +96,10 @@ async def rag_chat(request: RagChatRequest) -> RagChatResponse:
             top_k=request.top_k,
             score_threshold=request.score_threshold,
             features=request.features,
+            source_types=request.source_types,
+            max_sources_per_title=request.max_sources_per_title,
+            max_sources_per_source_type=request.max_sources_per_source_type,
+            max_sources_per_source_path=request.max_sources_per_source_path,
         )
     except httpx.ConnectError as exc:
         raise HTTPException(

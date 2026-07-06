@@ -32,6 +32,10 @@ class RagChatRequest(BaseModel):
     top_k: int | None = Field(default=None, ge=1, le=20)
     score_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     features: list[str] = Field(default_factory=list)
+    source_types: list[str] = Field(default_factory=list)
+    max_sources_per_title: int | None = Field(default=None, ge=1, le=10)
+    max_sources_per_source_type: int | None = Field(default=None, ge=1, le=10)
+    max_sources_per_source_path: int | None = Field(default=None, ge=1, le=10)
 
 
 class RagChatResponse(ChatResponse):
@@ -39,4 +43,9 @@ class RagChatResponse(ChatResponse):
     sources: list[SourceChunk]
     score_threshold: float | None = None
     features: list[str] = Field(default_factory=list)
+    source_types: list[str] = Field(default_factory=list)
+    diversity: dict[str, int | None] = Field(default_factory=dict)
+    retrieval: dict[str, int] = Field(default_factory=dict)
+    query_hints: dict[str, Any] = Field(default_factory=dict)
+    context_policy: dict[str, Any] = Field(default_factory=dict)
     prompt_tokens_estimate: int | None = None

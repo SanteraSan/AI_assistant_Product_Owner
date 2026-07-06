@@ -2,6 +2,12 @@
 
 Папка содержит воспроизводимые prompt-файлы для ручных benchmark-тестов локальных моделей.
 
+Для проверки настоящего `/rag/chat` pipeline смотри:
+
+```text
+research/RAG_EVALUATION_CHECKLIST.md
+```
+
 ## Medium Context Test
 
 Файл:

@@ -627,3 +627,162 @@
 - это первый rule-based router для retrieval;
 - он не заменяет будущий CPU-router, но уже улучшает UX;
 - дальше можно сравнить rule-based extraction с embedding/router classifier и fine-tuned classifier.
+
+## 2026-07-06: Synthetic Corpus Expansion
+
+Контекст:
+
+- маленький seed dataset хорошо подходит для проверки pipeline, но слишком "тепличный" для проверки retrieval;
+- на 1000 документов сразу идти рано: сложнее дебажить, труднее глазами понять, где именно retrieval начал ошибаться;
+- выбран промежуточный шаг: контролируемый synthetic corpus на 100-150 документов/строк.
+
+Решение:
+
+- добавить deterministic generator `backend/scripts/generate_synthetic_corpus.py`;
+- создать generated corpus в отдельных папках/файлах, не смешивая его с ручным starter dataset;
+- покрыть features: `notifications`, `csv_import`, `permissions`, `reports`, `search`, `webhooks`, `integrations`, `tasks`, `projects`, `sprints`;
+- добавить похожие и запутывающие связи между features через `related_feature`;
+- сгенерировать:
+  - 40 technical markdown docs;
+  - 12 release/incident notes;
+  - 50 support ticket rows;
+  - 20 user review rows;
+  - 30 metrics rows.
+
+Вывод:
+
+- generated corpus дает около `152` новых документов/строк;
+- следующий тест должен показать, насколько retrieval устойчив при большем числе похожих документов;
+- главная гипотеза: `features` filter и `score_threshold` должны стать заметно важнее после расширения корпуса.
+
+## 2026-07-06: Source Type Filtering
+
+Контекст:
+
+- после расширения корпуса `features:["notifications"]` успешно убрал межфичевый шум;
+- внутри одной feature появились конкурирующие релевантные документы: release notes, RFC, architecture, runbook, incident, support tickets;
+- для PO-вопросов часто нужны `incident_note`, `support_ticket`, `metric_row`, `release_note`;
+- для Developer-вопросов чаще нужны `markdown`, `openapi`, `runbook`, `incident_note`.
+
+Наблюдение:
+
+- после расширения корпуса top results по `notifications` подняли generated release/RFC/runbook выше исходного support ticket;
+- это не ошибка feature filter: все документы действительно относятся к `notifications`;
+- проблема стала не "не та feature", а "не тот тип evidence для роли/вопроса".
+
+Решение:
+
+- добавить в `/rag/chat` поле `source_types`;
+- реализовать Qdrant payload filter по `source_type`;
+- объединять `features` и `source_types` через `must` условия;
+- возвращать примененные `source_types` в response;
+- добавить README-примеры для PO-oriented и Developer-oriented retrieval.
+
+Вывод:
+
+- `features` отвечает на вопрос "про какую область продукта искать";
+- `source_types` отвечает на вопрос "какой тип evidence нужен";
+- это следующий шаг к persona-aware retrieval и будущему router.
+
+## 2026-07-06: Source Diversity Layer
+
+Контекст:
+
+- `source_types` filter помог выбрать нужный тип evidence, но top results начали забиваться похожими generated support tickets;
+- несколько support tickets имели почти одинаковый title и очень близкие scores;
+- это реальная RAG-проблема: даже релевантные chunks могут быть слишком однотипными и ухудшать prompt.
+
+Решение:
+
+- добавить простую source diversity фильтрацию перед сборкой prompt;
+- по умолчанию ограничить `max_sources_per_title=1`;
+- разрешить дополнительно ограничивать `max_sources_per_source_type` и `max_sources_per_source_path`;
+- возвращать примененные diversity-настройки в response.
+
+Вывод:
+
+- source diversity не заменяет reranking, но быстро защищает prompt от дублей;
+- следующий более умный слой — reranker или grouping по evidence type;
+- для маленького pet-проекта этот слой уже помогает увидеть, как context builder начинает управлять качеством ответа.
+
+## 2026-07-06: Candidate Pool Before Diversity
+
+Контекст:
+
+- при `top_k=8` и `max_sources_per_source_type=1` prompt стал чище;
+- но после diversity часть candidates отбрасывалась, а backend не добирал замену из следующих Qdrant results;
+- из-за этого полезный `metric_row` мог не попасть в финальный контекст.
+
+Решение:
+
+- искать в Qdrant не финальный `top_k`, а расширенный `candidate_k = top_k * 3`;
+- затем применять `score_threshold`;
+- затем применять source diversity / deduplication;
+- затем обрезать sources до финального `top_k` перед сборкой prompt;
+- возвращать `retrieval.requested_top_k`, `retrieval.candidate_k` и `retrieval.final_top_k` в API response.
+
+Вывод:
+
+- deduplication уже частично реализован через `max_sources_per_title=1`;
+- source diversity — это более общий механизм, который ограничивает повторения по `title`, `source_type` и `source_path`;
+- candidate pool нужен не вместо deduplication, а вместе с ним: он дает системе больше вариантов, из которых можно собрать разнообразный финальный context.
+
+## 2026-07-06: Rule-Based Query Router For Metrics
+
+Контекст:
+
+- `metric_row` оказался релевантным для вопроса про изменившиеся метрики, но имел score около `0.62`;
+- при общем `score_threshold=0.68` такой источник отсекается;
+- глобально снижать threshold опасно, потому что в обычных PO-вопросах это увеличит retrieval noise.
+
+Решение:
+
+- добавить небольшой rule-based query router;
+- если вопрос похож на metric intent, backend автоматически:
+  - добавляет PO-friendly `source_types`: `metric_row`, `incident_note`, `support_ticket`, `release_note`;
+  - снижает effective `score_threshold` до `0.60`;
+- если пользователь явно передал `source_types` или `score_threshold`, router их не переопределяет;
+- если вопрос содержит отрицательные паттерны вроде "без метрик", metric hint не применяется;
+- для таких negative metric вопросов prompt получает строгое дополнительное правило не упоминать числовые KPI, проценты, счетчики тикетов, adoption, latency/delay metrics и рекомендации про метрики;
+- API возвращает `query_hints`, чтобы было видно, какие правила сработали.
+
+Вывод:
+
+- это не LLM-router, а прозрачный domain-specific routing layer;
+- query router может влиять не только на retrieval, но и на prompt policy;
+- для pet-проекта такой слой полезнее, чем преждевременный reranker;
+- риск ложных срабатываний сохраняется, поэтому важно логировать `query_hints` и тестировать positive/negative examples.
+- похожие positive/negative тесты стоит позже сделать для других intent: incidents, support tickets, release notes, technical/root-cause.
+
+## 2026-07-06: Context Sanitization For Negative Metric Requests
+
+Контекст:
+
+- `qwen2.5:14b` хорошо соблюдал правило "без метрик";
+- `gemma3:12b` продолжал вытаскивать числа из context, даже после более строгого prompt rule;
+- это показало границу prompt engineering: если запрещенные факты лежат в prompt, модель может все равно использовать их.
+
+Решение:
+
+- для `query_hints.metric_negative_marker=true` включить `context_policy.numeric_line_sanitization=true`;
+- перед сборкой prompt удалять строки с numeric/KPI-heavy patterns: проценты, ticket counters, adoption, latency/delay metrics;
+- дополнительно чистить title chunks, если title сам содержит numeric/delay metric;
+- оригинальные `sources` оставлять в API response для отладки, а в prompt передавать sanitized copies.
+
+Вывод:
+
+- это не замена retrieval, а policy layer между retrieval и prompt;
+- в production RAG иногда нужно не только говорить модели "не используй X", но и не давать ей X в prompt;
+- context sanitization стоит применять точечно, только когда пользовательское ограничение явно распознано.
+
+Результат retest:
+
+- `gemma3:12b` перестал упоминать `47`, `61%`, `48%` после включения `context_policy.numeric_line_sanitization=true`;
+- `qwen2.5:14b` продолжил хорошо соблюдать no-metrics constraint;
+- появился небольшой UX-артефакт: sanitized title может отображаться как `Источник без числовых метрик`.
+
+TODO:
+
+- улучшить отображение sanitized titles: не заменять title текстом-заглушкой, а скрывать title из prompt metadata или хранить отдельное `prompt_title`;
+- вести проверки через `research/RAG_EVALUATION_CHECKLIST.md`;
+- позже автоматизировать checklist в evaluation script.

@@ -14,6 +14,39 @@
 | `data/raw/release_notes/incident_notifications_delay_2026_03.md` | Incident note | `notifications`, `integrations`, `webhooks` | Связка между incident, support и metrics. |
 | `data/seed/persona_test_questions.jsonl` | Eval questions | все основные features | 20 тестовых вопросов по personas. |
 
+## Synthetic Corpus Для Retrieval Stress Test
+
+Для проверки RAG на более шумном корпусе добавлен deterministic generated dataset.
+
+Генератор:
+
+```text
+backend/scripts/generate_synthetic_corpus.py
+```
+
+Сгенерированные данные:
+
+| Путь | Тип | Количество | Назначение |
+| --- | --- | ---: | --- |
+| `data/raw/tech_knowledge/generated/*.md` | Technical docs | 40 | Architecture/runbook/RFC/known issue по 10 features. |
+| `data/raw/release_notes/generated/*.md` | Release/incident notes | 12 | Похожие incident/release scenarios с пересечениями features. |
+| `data/raw/user_feedback/generated_support_tickets.csv` | Support tickets | 50 rows | Шумные и похожие тикеты по всем features. |
+| `data/raw/user_feedback/generated_user_reviews.csv` | User reviews | 20 rows | Отзывы разных ролей по feature-проблемам. |
+| `data/raw/business_metrics/generated_monthly_metrics.csv` | Metrics | 30 rows | Метрики adoption/support_tickets/feature-specific counters. |
+
+Всего generated corpus:
+
+```text
+152 документов/строк
+```
+
+Цель:
+
+- проверить, начнет ли retrieval шуметь при росте корпуса;
+- проверить пользу `features` metadata filter;
+- проверить пользу `score_threshold`;
+- подготовить почву для reranking и multi-collection retrieval.
+
 ## Нужно Добавить Позже
 
 Для полноценного M1/M6 dataset:

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     postgres_dsn: str = "postgresql+asyncpg://po_user:po_password@localhost:5432/po_assistant"
     raw_data_dir: str = "../data/raw"
     rag_top_k: int = 5
-    rag_score_threshold: float | None = None
+    rag_score_threshold: float | None = 0.68
 
     model_config = SettingsConfigDict(
         env_file=".env",
