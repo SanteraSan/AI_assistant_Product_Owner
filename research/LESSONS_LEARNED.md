@@ -786,3 +786,161 @@ TODO:
 - улучшить отображение sanitized titles: не заменять title текстом-заглушкой, а скрывать title из prompt metadata или хранить отдельное `prompt_title`;
 - вести проверки через `research/RAG_EVALUATION_CHECKLIST.md`;
 - позже автоматизировать checklist в evaluation script.
+
+## 2026-07-06: First RAG Evaluation Pass
+
+Контекст:
+
+- после добавления query router, source diversity и context sanitization нужен baseline, чтобы не улучшать retrieval вслепую;
+- был прогнан `research/RAG_EVALUATION_CHECKLIST.md` на `gemma3:12b` и `qwen2.5:14b`;
+- цель evaluation — проверить не только ответы моделей, но и policy layers: `score_threshold`, `query_hints`, `context_policy`, `source_types`, `candidate_k`, diversity.
+
+Что Сработало:
+
+- metric intent: router корректно снизил threshold до `0.60`, `metric_row` попал в context, обе модели использовали `notification_delivery_delay`;
+- negative metric intent: `context_policy.numeric_line_sanitization=true` удержал обе модели от KPI/процентов;
+- technical root cause: обе модели нашли Slack rate limits и aggressive retry/backoff;
+- no-answer ARR: обе модели не выдумали точный ARR loss, `qwen2.5:14b` лучше запросил недостающие данные.
+
+Что Нашли:
+
+- release notes запрос `Какие изменения по notifications были в release notes?` ошибочно включал `metric_intent=true`;
+- причина: marker `изменен` срабатывал как substring внутри слова `изменения`;
+- source diversity stress показал, что для вопроса про жалобы клиентов нужны отдельные support-feedback hints, иначе markdown/release/incident могут доминировать над tickets.
+
+Решение:
+
+- убрать широкие metric markers `изменил`, `изменен`, `изменён`;
+- оставить metric intent на более явных сигналах: `метрик`, `metric`, `adoption`, `tickets`, `вырос/снизил`, `delay` и т.п.;
+- release notes focus должен оставаться release-notes intent, а не metric intent.
+
+Вывод:
+
+- evaluation быстро окупилась: один прогон поймал ложноположительное router rule;
+- перед добавлением новых router intents нужно прогонять checklist, чтобы не чинить один сценарий ценой другого;
+- следующий слой после фикса metric router — support feedback intent для вопросов про жалобы клиентов.
+
+## 2026-07-06: Support Feedback Intent
+
+Контекст:
+
+- evaluation Test 4 `Какие жалобы клиентов чаще всего встречаются по notifications?` показал, что generic retrieval приносит много `markdown`/`release_note`;
+- для вопроса про жалобы клиентов ожидаем primary evidence из `support_ticket`, а incident/metrics могут быть вспомогательными;
+- без отдельного intent router отвечает правильно, но context не оптимален: support tickets появляются поздно.
+
+Решение:
+
+- добавить rule-based `support_feedback_intent`;
+- markers: `жалоб`, `отзыв`, `feedback`, `клиенты сообщают`, `support`, `тикет`, `tickets`;
+- если пользователь не передал `source_types`, router выставляет `support_ticket`, `incident_note`, `metric_row`;
+- metric intent имеет приоритет, чтобы вопросы про метрики не превращались в support feedback intent.
+
+Вывод:
+
+- query router постепенно превращается в domain policy layer;
+- новые intents нужно добавлять маленькими шагами и сразу проверять checklist;
+- следующий retest должен показать, ушло ли доминирование markdown/release docs в Test 4.
+
+Результат regression:
+
+- metric intent не сломался: `metric_intent=true`, `score_threshold=0.60`, `metric_row` остается в sources;
+- release notes focus больше не включает metric intent: `metric_intent=false`, `score_threshold=0.68`;
+- support feedback intent сработал: `support_feedback_intent=true`, `source_types=["support_ticket","incident_note","metric_row"]`;
+- no-answer ARR не сломался: модель не назвала точный ARR loss и запросила недостающие revenue/account данные.
+
+Отдельное Наблюдение По Conversation Context:
+
+- текущий `/rag/chat` endpoint stateless: каждый запрос обрабатывается независимо;
+- multi-turn memory / chat history пока не реализованы и не проверялись;
+- чтобы модель отвечала на follow-up вопросы по своему предыдущему ответу, нужно передавать историю диалога в prompt или хранить её в PostgreSQL;
+- это отдельный будущий слой, не часть текущего single-turn RAG retrieval.
+
+## 2026-07-06: Technical Root Cause Intent
+
+Контекст:
+
+- evaluation Test 5 уже показывал хорошее поведение, если вручную передавать `source_types=["markdown","incident_note","support_ticket"]`;
+- для вопросов "почему", "какая техническая причина", "root cause" ожидаем technical evidence, а не только PO summary;
+- это следующий естественный router intent после metrics и support feedback.
+
+Решение:
+
+- добавить rule-based `technical_root_cause_intent`;
+- markers: `техническ`, `причин`, `root cause`, `почему`, `rate limits`, `retry`, `backoff`, `worker`, `очеред`, `api`;
+- если пользователь не передал `source_types`, router выставляет `markdown`, `incident_note`, `support_ticket`;
+- metric и support feedback intents имеют приоритет, чтобы не конфликтовать с уже настроенными сценариями.
+
+Вывод:
+
+- technical/root-cause intent формализует успешный ручной retrieval pattern;
+- теперь пользователь может задавать технический вопрос без ручного `source_types`;
+- Test 5 в evaluation checklist должен проверять `query_hints.technical_root_cause_intent=true`.
+
+Результат retest:
+
+- `technical_root_cause_intent=true`;
+- router автоматически выставил `source_types=["markdown","incident_note","support_ticket"]`;
+- sources включили incident note, known issue, RFC, runbook, architecture и support tickets;
+- обе модели назвали Slack API rate limits и aggressive retry/backoff у delivery worker как техническую причину.
+
+Mini-Evaluation На 5 Формулировках:
+
+- успешно сработали вопросы про "техническая причина", "почему", "delivery worker", "Slack API или backend";
+- проблемный кейс: `Как retry/backoff влияет на задержки уведомлений?`;
+- он ошибочно включал `metric_intent=true`, потому что marker `задержк` относился к metric intent, а metric intent имел приоритет выше technical intent.
+
+Решение Priority Conflict:
+
+- добавить strong technical markers: `root cause`, `rate limit(s)`, `retry`, `backoff`, `worker`;
+- если в вопросе есть strong technical marker, `technical_root_cause_intent` побеждает metric intent;
+- это сохраняет metric intent для вопросов про метрики, но корректно маршрутизирует вопросы про retry/backoff.
+
+Дополнительный Результат Retest:
+
+- после priority fix вопрос `Как retry/backoff влияет на задержки уведомлений?` стал корректно включать `technical_root_cause_intent=true`;
+- но при baseline `score_threshold=0.68` retrieval вернул `final_top_k=0`;
+- причина: mixed-language technical query (`retry/backoff`) хуже матчится с embeddings, а релевантные chunks остаются ниже общего threshold.
+
+Решение:
+
+- для `technical_root_cause_intent` добавить `technical_root_cause_score_threshold`;
+- если пользователь не передал `score_threshold`, снижать effective threshold до `0.60`;
+- риск шума компенсируется тем, что technical intent одновременно ограничивает `source_types` до `markdown`, `incident_note`, `support_ticket`.
+
+## 2026-07-06: Qwen3 / Qwen3.5 / Gemma4 Mini-Evaluation
+
+Контекст:
+
+- после появления новых локальных моделей нужно сравнить их не на одном prompt, а на текущих RAG scenarios;
+- проверялись `qwen2.5:14b`, `qwen3:14b`, `qwen3.5:9b-q8_0`, `gemma4:12b`;
+- scenarios: metric intent, negative metric, support feedback, technical/root-cause, no-answer ARR;
+- полные результаты сохранены в `research/model_evaluation_latest.jsonl`.
+
+Latency / Stability:
+
+- `qwen2.5:14b`: среднее около `12.1s`, 5/5 непустых ответов;
+- `qwen3:14b`: среднее около `17.4s`, 5/5 непустых ответов;
+- `qwen3.5:9b-q8_0`: среднее около `37.3s`, 4/5 пустых ответов;
+- `gemma4:12b`: среднее около `25.0s`, 5/5 непустых ответов.
+
+Наблюдения:
+
+- `qwen2.5:14b` остается самым стабильным baseline для PO/RAG: хороший баланс скорости, структуры и groundedness;
+- `qwen3:14b` выглядит сильным конкурентом: ответы компактные, grounded, без thinking leakage, но медленнее `qwen2.5:14b`;
+- `gemma4:12b` хорошо держит groundedness и no-answer ARR, но медленнее и иногда более сухая/формальная;
+- `qwen3.5:9b-q8_0` пока нельзя оценивать как candidate: модель часто возвращала пустой `response`, нужна отдельная диагностика Ollama/template/options.
+
+Качество По Сценариям:
+
+- metric intent: `qwen2.5:14b` и `qwen3:14b` отвечают строго по `notification_delivery_delay`; `gemma4:12b` добавляет больше метрик из incident context;
+- negative metric: все непустые модели соблюдают no-metrics policy, `gemma4:12b` особенно аккуратна;
+- support feedback: все непустые модели находят задержки Slack notifications как главную жалобу;
+- technical/root-cause: все непустые модели объясняют retry/backoff и Slack rate limits, `qwen3.5:9b-q8_0` дал хороший ответ только в этом сценарии;
+- no-answer ARR: `qwen3:14b` и `gemma4:12b` лучше всех отказались от точного ARR loss; `qwen2.5:14b` частично смешал русский и китайский в ответе, что является regression risk.
+
+Вывод:
+
+- текущий default пока не менять: `qwen2.5:14b` остается основным PO/RAG baseline;
+- `qwen3:14b` стоит добавить как нового кандидата для следующих сравнений;
+- `gemma4:12b` можно держать как strict grounded/no-answer candidate;
+- `qwen3.5:9b-q8_0` нужно отдельно диагностировать перед дальнейшим сравнением.

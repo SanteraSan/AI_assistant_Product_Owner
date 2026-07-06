@@ -91,6 +91,10 @@ jq '{model,response,latency_ms,score_threshold,source_types,query_hints,context_
 
 Ожидания:
 
+- `query_hints.support_feedback_intent=true`;
+- если `source_types` не переданы вручную, router применяет `support_feedback_source_types`;
+- sources должны приоритизировать `support_ticket`, затем `incident_note` и `metric_row`;
+- markdown/release docs не должны доминировать в context;
 - support tickets могут быть важными, но не должны полностью забивать prompt;
 - `max_sources_per_title=1` убирает дубли;
 - при необходимости проверить `max_sources_per_source_type=2`;
@@ -104,8 +108,20 @@ jq '{model,response,latency_ms,score_threshold,source_types,query_hints,context_
 Какая техническая причина задержек Slack notifications?
 ```
 
+Дополнительные формулировки:
+
+```text
+Почему Slack notifications задерживаются у enterprise-клиентов?
+Что происходит в delivery worker при отправке notifications?
+Как retry/backoff влияет на задержки уведомлений?
+Это проблема Slack API или нашего backend?
+```
+
 Ожидания:
 
+- `query_hints.technical_root_cause_intent=true`;
+- если `source_types` не переданы вручную, router применяет `technical_root_cause_source_types`;
+- если `score_threshold` не передан вручную, router снижает threshold до `0.60`;
 - sources должны включать технические документы или incident/runbook;
 - ответ должен упомянуть Slack rate limits и retry/backoff behavior, если это есть в context;
 - ответ не должен превращаться только в PO summary.
@@ -120,6 +136,7 @@ jq '{model,response,latency_ms,score_threshold,source_types,query_hints,context_
 
 Ожидания:
 
+- `query_hints.metric_intent=false`;
 - sources должны приоритизировать `release_note`;
 - incident/support sources могут быть вспомогательными, но не должны подменять release note answer;
 - ответ должен отделять shipped changes от проблем/инцидентов.
