@@ -263,6 +263,8 @@ curl -s -X POST http://localhost:8000/rag/chat \
 
 Для `metric_intent` router не только выставляет metric-oriented `source_types`, но и помечает `metric_row` как обязательный source type. Если обычный vector search не дал `metric_row` в candidate pool, `RagService` делает supplemental search по `metric_row` и добавляет найденные metric chunks перед diversity/top-k. Это защищает metric questions от ситуации, когда более текстовые incident/support/release chunks вытесняют сами метрики.
 
+Supplemental search для обязательных source types остается ограниченным по `features` и `source_type`, но не применяет повторно общий `score_threshold`. Это важно для summary-обогащенных follow-up запросов: длинный retrieval query может немного снизить cosine score metric rows, хотя router уже явно требует metric evidence.
+
 Если пользователь пишет "без метрик" или похожую фразу, metric hint не применяется:
 
 ```bash
@@ -313,8 +315,9 @@ PostgreSQL используется как системная память дл�
 - `rag_source_logs` - sources, которые попали в ответ, включая score, title, source type, source path, metadata и короткий excerpt content.
 - `chat_sessions` - логические диалоги пользователя;
 - `chat_messages` - user/assistant сообщения внутри session.
+- `conversation_summaries` - компактный rule-based summary длинных sessions для M4.3.
 
-Логирование `/chat` и `/rag/chat` работает best-effort: если PostgreSQL временно недоступен, ответ все равно вернется, а ошибка попадет в backend logs. История пока не подмешивается в prompt: RAG остается single-turn, а PostgreSQL только сохраняет conversation history для будущего этапа.
+Логирование `/chat` и `/rag/chat` работает best-effort: если PostgreSQL временно недоступен, ответ все равно вернется, а ошибка попадет в backend logs. Полная история не подмешивается в prompt напрямую; conversation context слои M4 используют ее только для управляемого построения `retrieval_query`.
 
 Проверить доступность PostgreSQL через backend:
 
@@ -352,7 +355,7 @@ curl -s -X POST http://localhost:8000/rag/chat \
   jq '{session_id,user_message_id,assistant_message_id,model,latency_ms,response}'
 ```
 
-Важно: на текущем этапе `session_id` только связывает записи в PostgreSQL. Backend еще не использует прошлые сообщения как context для следующего RAG prompt.
+Важно: PostgreSQL хранит полную chat history, но в prompt не подставляется вся переписка. Начиная с M4.1/M4.3 backend использует историю только для построения `retrieval_query`: сначала recent messages, а для длинных sessions - компактный `conversation_summaries`.
 
 ## M3: RAG Evaluation Runs В PostgreSQL
 
@@ -465,3 +468,47 @@ Debug metadata стало чуть богаче:
 ```
 
 Full regression M4.2: 5 моделей x 15 сценариев = 75 результатов, `errors=0`, `zero_sources=0`, `failed_flags=0`.
+
+## M4.3: Conversation Summary
+
+M4.3 добавляет компактную session summary для длинных диалогов, где последних 4 сообщений уже недостаточно, чтобы понять, к какой теме относится follow-up.
+
+Границы этапа:
+
+- summary строится rule-based/extractive, без LLM-based summarization;
+- summary влияет на retrieval query, но не заменяет оригинальный вопрос в prompt;
+- explicit topic switch имеет приоритет и не использует summary;
+- триггеры summary: оценочный token budget, fallback по числу сообщений, stale summary после нескольких новых сообщений, session idle boundary;
+- unload Ollama model не является trigger, потому что это инфраструктурное событие, а не lifecycle диалога.
+
+Новая таблица:
+
+- `conversation_summaries` - `session_id`, `summary`, `features`, `message_count_at_update`, `metadata_json`, timestamps.
+
+Debug metadata в `conversation_context` теперь показывает summary-состояние:
+
+```json
+{
+  "summary_available": true,
+  "summary_used": true,
+  "summary_updated": false,
+  "summary_message_count": 8,
+  "summary_features": ["notifications"],
+  "summary_mode": "stored_summary",
+  "summary_reason": "stored_summary_fresh"
+}
+```
+
+Пример длинного follow-up:
+
+```bash
+python -m scripts.run_rag_evaluation \
+  --base-url http://localhost:8000 \
+  --models qwen2.5:7b-instruct-q8_0 \
+  --scenarios summary_long_follow_up summary_topic_switch summary_metric_follow_up summary_negative_metric_follow_up \
+  --notes "M4.3 summary smoke"
+```
+
+Targeted M4.3 run `d48f20eb-0289-44f2-8832-c47de7e99863`: 4 новых summary scenarios x 1 модель, `errors=0`, `zero_sources=0`, `failed_flags=0`.
+
+Full regression M4.3 run `35a9f4df-bf83-4643-9623-d179735016fd`: 5 моделей x 19 сценариев = 95 результатов, `errors=0`, `zero_sources=0`, `failed_flags=0`.

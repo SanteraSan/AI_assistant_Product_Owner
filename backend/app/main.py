@@ -15,6 +15,7 @@ from app.db.session import (
 from app.models.chat import ChatRequest, ChatResponse, RagChatRequest, RagChatResponse
 from app.services.chat_history_service import ChatExchangeRecord, ChatHistoryService
 from app.services.conversation_context_service import ConversationContextService
+from app.services.conversation_summary_service import ConversationSummaryService
 from app.services.feature_extractor import FeatureExtractor
 from app.services.ollama_client import OllamaClient
 from app.services.query_router import QueryRouter
@@ -50,6 +51,10 @@ rag_service = RagService(
 rag_log_service = RagLogService(session_factory=db_session_factory)
 chat_history_service = ChatHistoryService(session_factory=db_session_factory)
 conversation_context_service = ConversationContextService(
+    feature_extractor=feature_extractor,
+)
+conversation_summary_service = ConversationSummaryService(
+    session_factory=db_session_factory,
     feature_extractor=feature_extractor,
 )
 
@@ -201,9 +206,13 @@ async def _build_conversation_context(
             session_id=session_id,
             limit=4,
         )
+        summary_context = await conversation_summary_service.prepare_summary(
+            session_id=session_id,
+        )
         return conversation_context_service.build_context(
             message=message,
             recent_messages=recent_messages,
+            summary_context=summary_context,
         ).to_dict()
     except Exception:
         logger.exception("Conversation context build failed")
@@ -211,10 +220,19 @@ async def _build_conversation_context(
             "used": False,
             "mode": "error",
             "follow_up_detected": False,
+            "topic_switch_detected": False,
             "history_messages_used": 0,
             "retrieval_query": message,
             "carried_features": [],
             "current_features": feature_extractor.extract(message),
+            "decision_reason": "error",
+            "summary_available": False,
+            "summary_used": False,
+            "summary_updated": False,
+            "summary_message_count": 0,
+            "summary_features": [],
+            "summary_mode": "error",
+            "summary_reason": "conversation_context_build_failed",
         }
 
 

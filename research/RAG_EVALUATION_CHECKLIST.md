@@ -311,7 +311,86 @@ Q2: А что было в мартовском инциденте?
 - sources содержат `incident_note`;
 - ответ фокусируется на мартовском incident context.
 
+## Test 16: Summary Long Follow-Up
+
+Запросы в одной `session_id`:
+
+```text
+Q1: Какие проблемы с notifications влияют на enterprise-клиентов?
+Q2: Понял. Какие риски для команды?
+Q3: Как это объяснить PO?
+Q4: Что с этим делать в первую очередь?
+Q5: А какие из них самые критичные?
+```
+
+Ожидания:
+
+- `conversation_context.summary_available=true`;
+- `conversation_context.summary_used=true`;
+- `conversation_context.carried_features` или `summary_features` содержит `notifications`;
+- `retrieval.final_top_k > 0`;
+- sources остаются связаны с исходной темой `notifications`.
+
+## Test 17: Summary Topic Switch
+
+Запросы в одной `session_id`:
+
+```text
+Q1: Какие проблемы с notifications влияют на enterprise-клиентов?
+Q2: Понял. Какие риски для команды?
+Q3: Как это объяснить PO?
+Q4: Что с этим делать в первую очередь?
+Q5: Ок, забудь notifications, а теперь про permissions
+```
+
+Ожидания:
+
+- `conversation_context.summary_available=true`;
+- `conversation_context.summary_used=false`;
+- `conversation_context.topic_switch_detected=true`;
+- `conversation_context.current_features` содержит `permissions`;
+- sources переключаются на `permissions`, а не остаются на `notifications`.
+
+## Test 18: Summary Metric Follow-Up
+
+Запросы в одной `session_id`:
+
+```text
+Q1: Какие проблемы с notifications влияют на enterprise-клиентов?
+Q2: Понял. Какие риски для команды?
+Q3: Как это объяснить PO?
+Q4: Что с этим делать в первую очередь?
+Q5: А какие метрики по ним изменились?
+```
+
+Ожидания:
+
+- `conversation_context.summary_used=true`;
+- `query_hints.metric_intent=true`;
+- `query_hints.required_source_types` содержит `metric_row`;
+- sources содержат `metric_row`;
+- summary сохраняет исходную тему `notifications`.
+
+## Test 19: Summary Negative Metric Follow-Up
+
+Запросы в одной `session_id`:
+
+```text
+Q1: Какие проблемы с notifications влияют на enterprise-клиентов?
+Q2: Понял. Какие риски для команды?
+Q3: Как это объяснить PO?
+Q4: Что с этим делать в первую очередь?
+Q5: А можешь без метрик?
+```
+
+Ожидания:
+
+- `conversation_context.summary_used=true`;
+- `query_hints.metric_negative_marker=true`;
+- `context_policy.numeric_line_sanitization=true`;
+- ответ не должен содержать numeric KPI/percent-style метрики.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.
-- Позже превратить этот checklist в автоматический evaluation script.
+- Позже добавить отдельный ручной rubric score поверх автоматических `quality_flags`.

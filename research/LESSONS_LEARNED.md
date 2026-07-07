@@ -1311,3 +1311,41 @@ Evaluation:
 - M4.2 укрепил short-context policy без добавления новой памяти;
 - explicit topic switch теперь наблюдаем и чище влияет на retrieval;
 - следующий этап можно выбирать осознанно: либо еще расширять policy edge cases, либо переходить к M4.3 conversation summary.
+
+## 2026-07-07: M4.3 Conversation Summary
+
+Контекст:
+
+- M4.1/M4.2 закрыли short follow-up и topic switch через recent history, но длинная session все еще могла потерять исходную тему, когда нужная feature выпала из последних сообщений;
+- пользователь справедливо предложил не создавать summary "каждые 2-4 сообщения", а привязать trigger к context budget и lifecycle session;
+- unload Ollama model не стал trigger: это инфраструктурное событие, а не смысловая граница диалога.
+
+Решение:
+
+- добавить отдельную таблицу `conversation_summaries`, не меняя существующие таблицы;
+- реализовать `ConversationSummaryService` как rule-based/extractive baseline без LLM summarization;
+- создавать/обновлять summary по token estimate, fallback message count, stale message threshold и idle session boundary;
+- использовать summary только для follow-up retrieval query, когда recent user history уже не несет features;
+- не использовать summary при explicit topic switch: текущая новая feature и sanitized retrieval query имеют приоритет;
+- добавить summary debug fields в `conversation_context`: `summary_available`, `summary_used`, `summary_updated`, `summary_features`, `summary_mode`, `summary_reason`;
+- расширить evaluation новыми long-session сценариями: `summary_long_follow_up`, `summary_topic_switch`, `summary_metric_follow_up`, `summary_negative_metric_follow_up`.
+
+Диагностика:
+
+- targeted M4.3 run сначала показал один failed flag: `summary_metric_follow_up` правильно срабатывал как `metric_intent`, но final sources не содержали `metric_row`;
+- причина: supplemental search для `required_source_types=["metric_row"]` повторно применял общий score threshold к длинному summary-обогащенному retrieval query;
+- исправление: для router-mandated source types supplemental search остается ограниченным по `features` и `source_type`, но не режется тем же score threshold.
+
+Результат:
+
+- targeted run `d48f20eb-0289-44f2-8832-c47de7e99863`: 1 модель x 4 новых summary сценария;
+- `errors=0`, `zero_sources=0`, `failed_flags=0`;
+- full run `35a9f4df-bf83-4643-9623-d179735016fd`: 5 моделей x 19 сценариев = 95 результатов;
+- full regression: `errors=0`, `zero_sources=0`, `failed_flags=0`;
+- средняя latency на full run: `qwen2.5:7b-instruct-q8_0` около `5.5s`, `qwen3:14b` около `6.8s`, `qwen3.5:9b` около `7.1s`, `gemma4:12b` около `9.2s`, `qwen2.5:14b-instruct-q8_0` около `15.3s`.
+
+Вывод:
+
+- summary лучше вводить как отдельный наблюдаемый memory layer, а не смешивать с recent history logic;
+- rule-based summary дает хороший baseline и debug surface перед будущим LLM-based summarization;
+- обязательные source types должны вести себя как evidence floor: если router требует тип источника, fallback retrieval не должен ломаться из-за небольшого падения score на длинном query.

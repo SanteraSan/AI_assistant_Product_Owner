@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from app.services.chat_history_service import ChatHistoryMessage
+from app.services.conversation_summary_service import ConversationSummaryContext
 from app.services.feature_extractor import FeatureExtractor
 
 
@@ -15,6 +16,13 @@ class ConversationContextDecision:
     carried_features: list[str]
     current_features: list[str]
     decision_reason: str
+    summary_available: bool
+    summary_used: bool
+    summary_updated: bool
+    summary_message_count: int
+    summary_features: list[str]
+    summary_mode: str
+    summary_reason: str
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -27,6 +35,13 @@ class ConversationContextDecision:
             "carried_features": self.carried_features,
             "current_features": self.current_features,
             "decision_reason": self.decision_reason,
+            "summary_available": self.summary_available,
+            "summary_used": self.summary_used,
+            "summary_updated": self.summary_updated,
+            "summary_message_count": self.summary_message_count,
+            "summary_features": self.summary_features,
+            "summary_mode": self.summary_mode,
+            "summary_reason": self.summary_reason,
         }
 
 
@@ -94,14 +109,17 @@ class ConversationContextService:
         *,
         message: str,
         recent_messages: list[ChatHistoryMessage],
+        summary_context: ConversationSummaryContext | None = None,
     ) -> ConversationContextDecision:
         normalized_message = message.lower()
         current_features = self._feature_extractor.extract(message)
+        summary_context = summary_context or _empty_summary_context()
         if not recent_messages:
             return self._empty_decision(
                 message=message,
                 mode="no_history",
                 current_features=current_features,
+                summary_context=summary_context,
             )
 
         follow_up_detected = self._is_follow_up(normalized_message)
@@ -123,12 +141,20 @@ class ConversationContextService:
                 carried_features=[],
                 current_features=topic_switch_features or current_features,
                 decision_reason="current_message_has_explicit_topic_feature",
+                summary_available=summary_context.available,
+                summary_used=False,
+                summary_updated=summary_context.updated,
+                summary_message_count=summary_context.message_count,
+                summary_features=summary_context.features,
+                summary_mode=summary_context.mode,
+                summary_reason=summary_context.reason,
             )
         if not follow_up_detected:
             return self._empty_decision(
                 message=message,
                 mode="standalone_question",
                 current_features=current_features,
+                summary_context=summary_context,
             )
 
         user_history = [
@@ -144,16 +170,26 @@ class ConversationContextService:
                 mode="no_reusable_history",
                 current_features=current_features,
                 follow_up_detected=follow_up_detected,
+                summary_context=summary_context,
             )
 
         recent_user_context = " ".join(user_history[-2:])
+        summary_used = summary_context.available and not carried_features
+        effective_features = _merge_unique(
+            carried_features,
+            summary_context.features if summary_used else [],
+        )
         retrieval_query_parts = [
             message,
             f"Предыдущая тема: {recent_user_context}".strip(),
         ]
-        if carried_features:
+        if summary_used and summary_context.summary:
             retrieval_query_parts.append(
-                f"Ключевые features из предыдущего контекста: {', '.join(carried_features)}."
+                f"Summary предыдущего диалога: {summary_context.summary}"
+            )
+        if effective_features:
+            retrieval_query_parts.append(
+                f"Ключевые features из предыдущего контекста: {', '.join(effective_features)}."
             )
         retrieval_query = " ".join(part for part in retrieval_query_parts if part)
 
@@ -164,9 +200,20 @@ class ConversationContextService:
             topic_switch_detected=False,
             history_messages_used=len(recent_messages),
             retrieval_query=retrieval_query,
-            carried_features=carried_features,
+            carried_features=effective_features,
             current_features=current_features,
-            decision_reason="follow_up_without_explicit_topic_switch",
+            decision_reason=(
+                "follow_up_with_summary"
+                if summary_used
+                else "follow_up_without_explicit_topic_switch"
+            ),
+            summary_available=summary_context.available,
+            summary_used=summary_used,
+            summary_updated=summary_context.updated,
+            summary_message_count=summary_context.message_count,
+            summary_features=summary_context.features,
+            summary_mode=summary_context.mode,
+            summary_reason=summary_context.reason,
         )
 
     def _is_follow_up(self, normalized_message: str) -> bool:
@@ -209,7 +256,9 @@ class ConversationContextService:
         mode: str,
         current_features: list[str],
         follow_up_detected: bool = False,
+        summary_context: ConversationSummaryContext | None = None,
     ) -> ConversationContextDecision:
+        summary_context = summary_context or _empty_summary_context()
         return ConversationContextDecision(
             used=False,
             mode=mode,
@@ -220,4 +269,35 @@ class ConversationContextService:
             carried_features=[],
             current_features=current_features,
             decision_reason=mode,
+            summary_available=summary_context.available,
+            summary_used=False,
+            summary_updated=summary_context.updated,
+            summary_message_count=summary_context.message_count,
+            summary_features=summary_context.features,
+            summary_mode=summary_context.mode,
+            summary_reason=summary_context.reason,
         )
+
+
+def _empty_summary_context() -> ConversationSummaryContext:
+    return ConversationSummaryContext(
+        available=False,
+        updated=False,
+        summary=None,
+        features=[],
+        message_count=0,
+        message_count_at_update=0,
+        stale_message_count=0,
+        token_estimate=0,
+        mode="not_available",
+        reason="not_provided",
+    )
+
+
+def _merge_unique(first: list[str], second: list[str]) -> list[str]:
+    merged: list[str] = []
+    for item in [*first, *second]:
+        if item in merged:
+            continue
+        merged.append(item)
+    return merged

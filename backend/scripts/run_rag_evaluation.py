@@ -149,6 +149,70 @@ SCENARIOS = [
             "А что было в мартовском инциденте?",
         ),
     ),
+    EvaluationScenario(
+        id="summary_long_follow_up",
+        name="Summary Long Follow-Up",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2-Q4: уточняющие follow-up без явного feature\n"
+            "Q5: А какие из них самые критичные?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "Что с этим делать в первую очередь?",
+            "А какие из них самые критичные?",
+        ),
+    ),
+    EvaluationScenario(
+        id="summary_topic_switch",
+        name="Summary Topic Switch",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2-Q4: follow-up без явного feature\n"
+            "Q5: Ок, забудь notifications, а теперь про permissions"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "Что с этим делать в первую очередь?",
+            "Ок, забудь notifications, а теперь про permissions",
+        ),
+    ),
+    EvaluationScenario(
+        id="summary_metric_follow_up",
+        name="Summary Metric Follow-Up",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2-Q4: follow-up без явного feature\n"
+            "Q5: А какие метрики по ним изменились?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "Что с этим делать в первую очередь?",
+            "А какие метрики по ним изменились?",
+        ),
+    ),
+    EvaluationScenario(
+        id="summary_negative_metric_follow_up",
+        name="Summary Negative Metric Follow-Up",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2-Q4: follow-up без явного feature\n"
+            "Q5: А можешь без метрик?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "Что с этим делать в первую очередь?",
+            "А можешь без метрик?",
+        ),
+    ),
 ]
 
 
@@ -467,6 +531,45 @@ def _build_quality_flags(
         flags["conversation_context_used"] = conversation_context.get("used") is True
         flags["incident_intent_ok"] = query_hints.get("incident_intent") is True
         flags["has_incident_source"] = "incident_note" in source_types
+    elif scenario.id == "summary_long_follow_up":
+        flags["summary_available"] = conversation_context.get("summary_available") is True
+        flags["summary_used"] = conversation_context.get("summary_used") is True
+        flags["has_final_sources"] = (data.get("retrieval") or {}).get("final_top_k", 0) > 0
+        flags["notifications_context_ok"] = _has_context_feature(
+            feature="notifications",
+            response_features=response_features,
+            source_features=source_features,
+            conversation_context=conversation_context,
+        )
+    elif scenario.id == "summary_topic_switch":
+        flags["summary_available"] = conversation_context.get("summary_available") is True
+        flags["summary_not_used"] = conversation_context.get("summary_used") is not True
+        flags["topic_switch_detected"] = (
+            conversation_context.get("topic_switch_detected") is True
+        )
+        flags["permissions_context_ok"] = _has_context_feature(
+            feature="permissions",
+            response_features=response_features,
+            source_features=source_features,
+            conversation_context=conversation_context,
+        )
+    elif scenario.id == "summary_metric_follow_up":
+        flags["summary_used"] = conversation_context.get("summary_used") is True
+        flags["metric_intent_ok"] = query_hints.get("metric_intent") is True
+        flags["has_metric_row_source"] = "metric_row" in source_types
+        flags["notifications_context_ok"] = _has_context_feature(
+            feature="notifications",
+            response_features=response_features,
+            source_features=source_features,
+            conversation_context=conversation_context,
+        )
+    elif scenario.id == "summary_negative_metric_follow_up":
+        flags["summary_used"] = conversation_context.get("summary_used") is True
+        flags["negative_marker_ok"] = query_hints.get("metric_negative_marker") is True
+        flags["numeric_sanitization_ok"] = (
+            context_policy.get("numeric_line_sanitization") is True
+        )
+        flags["no_percent_symbol"] = "%" not in response
 
     return flags
 
@@ -484,6 +587,7 @@ def _has_context_feature(
         or feature in str(conversation_context.get("retrieval_query", "")).lower()
         or feature in (conversation_context.get("carried_features") or [])
         or feature in (conversation_context.get("current_features") or [])
+        or feature in (conversation_context.get("summary_features") or [])
     )
 
 

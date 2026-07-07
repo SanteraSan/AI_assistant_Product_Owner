@@ -84,6 +84,30 @@ class ChatMessage(Base):
     session: Mapped[ChatSession] = relationship(back_populates="messages")
 
 
+class ConversationSummary(Base):
+    __tablename__ = "conversation_summaries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        index=True,
+        unique=True,
+    )
+    summary: Mapped[str] = mapped_column(Text)
+    message_count_at_update: Mapped[int] = mapped_column(Integer, default=0)
+    features: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class EvaluationRun(Base):
     __tablename__ = "evaluation_runs"
 

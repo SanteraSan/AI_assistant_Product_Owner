@@ -83,7 +83,6 @@ class RagService:
             sources=sources,
             query_vector=query_vector,
             selected_features=selected_features,
-            selected_score_threshold=selected_score_threshold,
             required_source_types=required_source_types,
             limit=selected_top_k,
         )
@@ -148,7 +147,6 @@ class RagService:
         sources: list[SourceChunk],
         query_vector: list[float],
         selected_features: list[str],
-        selected_score_threshold: float | None,
         required_source_types: list[str],
         limit: int,
     ) -> list[SourceChunk]:
@@ -161,10 +159,6 @@ class RagService:
                 limit=limit,
                 features=selected_features,
                 source_types=[required_source_type],
-            )
-            supplemental_sources = _filter_sources_by_score(
-                supplemental_sources,
-                selected_score_threshold,
             )
             supplemented_sources = _merge_sources(
                 supplemental_sources[:2],
