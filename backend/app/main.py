@@ -158,6 +158,8 @@ async def rag_chat(request: RagChatRequest) -> RagChatResponse:
             score_threshold=request.score_threshold,
             features=request.features,
             source_types=request.source_types,
+            document_ids=request.document_ids,
+            source_paths=request.source_paths,
             max_sources_per_title=request.max_sources_per_title,
             max_sources_per_source_type=request.max_sources_per_source_type,
             max_sources_per_source_path=request.max_sources_per_source_path,

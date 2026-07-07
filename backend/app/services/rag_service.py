@@ -39,6 +39,8 @@ class RagService:
         score_threshold: float | None = None,
         features: list[str] | None = None,
         source_types: list[str] | None = None,
+        document_ids: list[str] | None = None,
+        source_paths: list[str] | None = None,
         max_sources_per_title: int | None = None,
         max_sources_per_source_type: int | None = None,
         max_sources_per_source_path: int | None = None,
@@ -52,9 +54,12 @@ class RagService:
         )
         candidate_k = selected_top_k * 3
         selected_features = _normalize_features(features or [])
-        if not selected_features:
-            selected_features = self._feature_extractor.extract(selected_retrieval_query)
         selected_source_types = _normalize_values(source_types or [])
+        selected_document_ids = _normalize_values(document_ids or [])
+        selected_source_paths = _normalize_values(source_paths or [])
+        has_document_filter = bool(selected_document_ids or selected_source_paths)
+        if not selected_features and not has_document_filter:
+            selected_features = self._feature_extractor.extract(selected_retrieval_query)
         routing_decision = self._query_router.route(
             message=selected_retrieval_query,
             source_types=selected_source_types,
@@ -75,6 +80,8 @@ class RagService:
             limit=candidate_k,
             features=selected_features,
             source_types=selected_source_types,
+            document_ids=selected_document_ids,
+            source_paths=selected_source_paths,
         )
         sources = _filter_sources_by_score(sources, selected_score_threshold)
         required_source_types = _normalize_values(
@@ -84,6 +91,8 @@ class RagService:
             sources=sources,
             query_vector=query_vector,
             selected_features=selected_features,
+            selected_document_ids=selected_document_ids,
+            selected_source_paths=selected_source_paths,
             required_source_types=required_source_types,
             limit=selected_top_k,
         )
@@ -136,6 +145,8 @@ class RagService:
                 "candidate_k": candidate_k,
                 "retrieval_query": selected_retrieval_query,
                 "required_source_types": required_source_types,
+                "document_ids": selected_document_ids,
+                "source_paths": selected_source_paths,
                 "final_top_k": len(sources),
             },
             query_hints=routing_decision.hints,
@@ -149,6 +160,8 @@ class RagService:
         sources: list[SourceChunk],
         query_vector: list[float],
         selected_features: list[str],
+        selected_document_ids: list[str],
+        selected_source_paths: list[str],
         required_source_types: list[str],
         limit: int,
     ) -> list[SourceChunk]:
@@ -161,6 +174,8 @@ class RagService:
                 limit=limit,
                 features=selected_features,
                 source_types=[required_source_type],
+                document_ids=selected_document_ids,
+                source_paths=selected_source_paths,
             )
             supplemented_sources = _merge_sources(
                 supplemental_sources[:2],

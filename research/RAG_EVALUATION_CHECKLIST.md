@@ -454,6 +454,28 @@ Q5: А что нужно объяснить PO в первую очередь?
 - ответ упоминает `notifications` / delayed Slack notifications;
 - automatic flags: `has_pdf_source=true`, `pdf_page_metadata_ok=true`, `pdf_bucket_metadata_ok=true`.
 
+## Test 23: Document-Level PDF Filter
+
+Запрос:
+
+```text
+Ответь по выбранному PDF-документу: что в нём сказано про delayed Slack notifications?
+```
+
+Параметры:
+
+- `source_types=["pdf"]`;
+- `source_paths=["/path/to/selected.pdf"]` или `document_ids=["..."]`;
+- `score_threshold=0.0` для коротких PDF smoke.
+
+Ожидания:
+
+- все returned sources относятся только к выбранному `source_path` или `document_id`;
+- `retrieval.source_paths` или `retrieval.document_ids` отражает применённый фильтр;
+- auto feature extraction не должен добавлять продуктовые `features`, если документ уже выбран через `source_paths` или `document_ids`;
+- source metadata сохраняет `page_number`, `page_count`, `bucket_id`, `tenant_id`;
+- LLM не получает chunks из других PDF fixtures даже при широком вопросе.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

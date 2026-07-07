@@ -676,3 +676,29 @@ Evaluation:
 M5.1 smoke `66901498-4411-4bf7-a159-758f3aba0603`: `pdf_text_ingestion` на `qwen3.5:9b`, sources=1, `failed_flags=0`.
 
 M5.1 regression `aff5a8e9-8799-4a01-b398-d8b0aebc7a6d`: 5 baseline scenarios + `pdf_text_ingestion`, `failed_flags=0`, `errors=0`.
+
+## M5.2: Document QA Evaluation
+
+M5.2 начинает проверять не только факт ingestion, но и качество QA по документам: правильный тип источника, page metadata, bucket metadata, отсутствие смешивания нерелевантных PDF и latency разных моделей.
+
+Для вопросов по конкретному документу `/rag/chat` поддерживает deterministic filters до LLM prompt:
+
+```json
+{
+  "source_types": ["pdf"],
+  "source_paths": ["/home/santera/Projects/data/raw/tech_knowledge/notifications_pdf_brief.pdf"],
+  "document_ids": []
+}
+```
+
+`source_paths` и `document_ids` фильтруются на уровне Qdrant payload. Это важно для будущего UI: если пользователь открыл конкретный файл или bucket, backend должен отобрать разрешённые chunks до передачи контекста в LLM.
+
+Если задан `source_paths` или `document_ids`, backend не включает auto feature extraction из вопроса. Иначе продуктовые features вроде `projects` могут случайно отфильтровать chunks произвольного документа. Явно переданные `features` всё ещё применяются.
+
+M5.2 synthetic PDF comparison `dc24ce47-e9e4-4755-9ed9-e9f987c8945b`:
+
+- `qwen3.5:9b`: `pdf_text_ingestion`, sources=1, `failed_flags=0`, latency около 2.6s;
+- `gemma4:12b`: sources=1, `failed_flags=0`, latency около 8.2s;
+- `qwen3:14b`: sources=1, `failed_flags=0`, latency около 15.5s.
+
+Локальный anonymized resume check не коммитит PDF и не сохраняет PII в документацию. Проверяются только категории extraction: страницы извлечены, контактные блоки распознаны как наличие данных, опыт/навыки/AI-LLM-RAG/CI-CD/security tooling находятся в тексте. После добавления `source_paths` filtered resume QA возвращает sources только из выбранного PDF.

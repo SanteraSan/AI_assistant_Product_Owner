@@ -23,6 +23,8 @@ class EvaluationScenario:
     prompt: str
     turns: tuple[str, ...] = ()
     source_types: tuple[str, ...] = ()
+    document_ids: tuple[str, ...] = ()
+    source_paths: tuple[str, ...] = ()
     score_threshold: float | None = None
     expected_feature: str | None = None
     expected_prompt_memory_used: bool | None = None
@@ -570,6 +572,10 @@ async def _run_scenario(
         }
         if scenario.source_types:
             payload["source_types"] = list(scenario.source_types)
+        if scenario.document_ids:
+            payload["document_ids"] = list(scenario.document_ids)
+        if scenario.source_paths:
+            payload["source_paths"] = list(scenario.source_paths)
         if scenario.score_threshold is not None:
             payload["score_threshold"] = scenario.score_threshold
         if session_id:

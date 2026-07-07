@@ -38,6 +38,8 @@ class RagChatRequest(BaseModel):
     score_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     features: list[str] = Field(default_factory=list)
     source_types: list[str] = Field(default_factory=list)
+    document_ids: list[str] = Field(default_factory=list)
+    source_paths: list[str] = Field(default_factory=list)
     max_sources_per_title: int | None = Field(default=None, ge=1, le=10)
     max_sources_per_source_type: int | None = Field(default=None, ge=1, le=10)
     max_sources_per_source_path: int | None = Field(default=None, ge=1, le=10)

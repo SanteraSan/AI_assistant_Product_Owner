@@ -50,11 +50,18 @@ class QdrantStore:
         limit: int,
         features: list[str] | None = None,
         source_types: list[str] | None = None,
+        document_ids: list[str] | None = None,
+        source_paths: list[str] | None = None,
     ) -> list[SourceChunk]:
         result = self._client.query_points(
             collection_name=self._collection_name,
             query=query_vector,
-            query_filter=_payload_filter(features=features or [], source_types=source_types or []),
+            query_filter=_payload_filter(
+                features=features or [],
+                source_types=source_types or [],
+                document_ids=document_ids or [],
+                source_paths=source_paths or [],
+            ),
             limit=limit,
             with_payload=True,
         )
@@ -96,7 +103,12 @@ def _as_str_list(value: Any) -> list[str]:
     return [str(value)]
 
 
-def _payload_filter(features: list[str], source_types: list[str]) -> models.Filter | None:
+def _payload_filter(
+    features: list[str],
+    source_types: list[str],
+    document_ids: list[str],
+    source_paths: list[str],
+) -> models.Filter | None:
     conditions: list[models.FieldCondition] = []
 
     normalized = [feature.strip() for feature in features if feature.strip()]
@@ -114,6 +126,24 @@ def _payload_filter(features: list[str], source_types: list[str]) -> models.Filt
             models.FieldCondition(
                 key="source_type",
                 match=models.MatchAny(any=normalized_source_types),
+            )
+        )
+
+    normalized_document_ids = [document_id.strip() for document_id in document_ids if document_id.strip()]
+    if normalized_document_ids:
+        conditions.append(
+            models.FieldCondition(
+                key="document_id",
+                match=models.MatchAny(any=normalized_document_ids),
+            )
+        )
+
+    normalized_source_paths = [source_path.strip() for source_path in source_paths if source_path.strip()]
+    if normalized_source_paths:
+        conditions.append(
+            models.FieldCondition(
+                key="source_path",
+                match=models.MatchAny(any=normalized_source_paths),
             )
         )
 

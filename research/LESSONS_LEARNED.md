@@ -1772,3 +1772,63 @@ Reindex and evaluation:
 - page-level metadata и bucket metadata доходят до source metadata;
 - для document QA evaluation важно явно управлять `source_types` и threshold, особенно на коротких PDF;
 - следующий логичный шаг: расширять document QA evaluation и сравнить `qwen3.5:9b`, `gemma4:12b`, возможно `qwen3:14b` на ответах по document context.
+
+## 2026-07-08: M5.2 Document QA Evaluation
+
+Контекст:
+
+- после M5.1 важно проверить не только PDF parsing, но и качество ответов по документам;
+- document QA должен доказывать, что backend отдаёт LLM правильные chunks, page metadata и bucket metadata;
+- локальные пользовательские PDF можно использовать для smoke, но нельзя коммитить и нельзя записывать персональные данные в журнал.
+
+Synthetic PDF model comparison:
+
+- выполнен reindex локального corpus: 192 documents, 224 chunks;
+- evaluation run id: `dc24ce47-e9e4-4755-9ed9-e9f987c8945b`;
+- scenario: `pdf_text_ingestion`;
+- `qwen3.5:9b`: sources=1, `failed_flags=0`, latency около 2.6s;
+- `gemma4:12b`: sources=1, `failed_flags=0`, latency около 8.2s;
+- `qwen3:14b`: sources=1, `failed_flags=0`, latency около 15.5s;
+- все три модели корректно получили `source_type=pdf`, `page_number=1`, `bucket_id=taskflow_seed` и ответили по delayed Slack notifications.
+
+Anonymized resume extraction smoke:
+
+- пользовательский PDF не добавлялся в git;
+- проверялись только категории качества extraction, без ФИО, телефона, email и других конкретных значений;
+- извлечены все страницы PDF;
+- детектируются категории: контактный блок как факт наличия, целевая позиция, опыт работы, навыки, AI/LLM/RAG, CI/CD, security tooling;
+- первый broad PDF QA с `source_types=["pdf"]` показал, что retrieval может смешивать несколько PDF fixtures, если вопрос общий и нет фильтра на конкретный документ.
+
+Решение:
+
+- добавить deterministic document-level filters в `/rag/chat`: `document_ids` и `source_paths`;
+- прокинуть фильтры в `RagService` и Qdrant payload filter до сборки prompt;
+- сохранить фильтры в `retrieval`, чтобы debug/reporting показывали, какой документ был выбран;
+- добавить поддержку `document_ids/source_paths` в evaluation runner.
+
+Verification:
+
+- `py_compile` по изменённым Python-файлам прошёл без ошибок;
+- diagnostics по изменённым файлам без ошибок;
+- regression after document filters run id: `b90def53-7ac6-4a53-9fea-ad727fa96c83`, `pdf_text_ingestion` на `qwen3.5:9b`, sources=1, status `ok`;
+- filtered resume QA с `source_paths=[...]` вернул 5/5 sources только из выбранного PDF;
+- model comparison на filtered resume QA: `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b` нашли AI/LLM/RAG признаки, все sources были из выбранного документа;
+- latency на filtered resume QA: `qwen3.5:9b` около 2.8s, `gemma4:12b` около 11.8s, `qwen3:14b` около 15.5s.
+
+Вывод:
+
+- для document QA одного `source_types=["pdf"]` недостаточно: нужен фильтр по конкретному документу, иначе RAG может смешивать релевантные и нерелевантные PDF;
+- `source_paths/document_ids` - промежуточная deterministic защита до M5.3 bucket isolation;
+- `qwen3.5:9b` снова выглядит лучшим кандидатом для частых M5 document QA regression runs: качество на текущем smoke совпало с более крупными моделями, latency заметно ниже.
+
+Дополнительный exploratory smoke: PDF с проектной таблицей.
+
+- локально добавлен PDF с проектной спецификацией и табличной структурой, файл не предназначен для git;
+- `pypdf` извлёк 2 страницы: заголовки таблицы частично распались на отдельные строки, но основные позиции, единицы измерения и количества доступны как текст;
+- после reindex corpus: 194 documents, 227 chunks;
+- initial RAG по выбранному `source_path` показал проблему: точечные вопросы про IP-камеры/кабели возвращали `sources=0`;
+- причина: auto feature extraction из фразы "проектная PDF-таблица" мог включить продуктовый feature `projects` и сузить Qdrant filter для произвольного документа;
+- исправление: если запрос уже ограничен `document_ids` или `source_paths`, backend не применяет auto feature extraction; явно переданные `features` продолжают работать;
+- повторный RAG smoke: вопрос про IP-камеры вернул 46 шт, вопрос про кабели вернул витую пару 3860 м и оптический кабель 460 м, summary equipment list собрал позиции с единицами измерения и количеством;
+- regression after fix run id: `f478c298-289c-45bc-a6db-86f4c11efd10`, `pdf_text_ingestion` на `qwen3.5:9b`, sources=1, status `ok`;
+- вывод: text-based PDF с простыми таблицами уже можно использовать для exploratory QA, но это ещё не полноценный table extraction - структура строк может быть шумной, поэтому для production-quality таблиц нужен отдельный M5 table pipeline.
