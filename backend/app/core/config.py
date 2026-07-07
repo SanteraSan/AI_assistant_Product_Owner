@@ -16,8 +16,11 @@ class Settings(BaseSettings):
     rag_top_k: int = 5
     rag_score_threshold: float | None = 0.68
     conversation_summary_strategy: str = "hybrid"
-    conversation_summary_model: str = "qwen2.5:3b"
+    conversation_summary_model: str = "gemma4:12b"
     conversation_summary_temperature: float = 0.0
+    conversation_memory_enabled: bool = True
+    conversation_memory_token_budget: int = 350
+    conversation_memory_recent_messages: int = 4
 
     model_config = SettingsConfigDict(
         env_file=".env",

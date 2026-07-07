@@ -412,6 +412,26 @@ Q5: А какие из них самые критичные?
 - `conversation_context.summary_structured.summary` непустой;
 - sources остаются связаны с исходной темой `notifications`.
 
+## Test 21: Prompt Memory Budget
+
+Запросы в одной `session_id`:
+
+```text
+Q1: Какие проблемы с notifications влияют на enterprise-клиентов?
+Q2: Понял. Какие риски для команды?
+Q3: Как это объяснить PO?
+Q4: Что с этим делать в первую очередь?
+Q5: А что нужно объяснить PO в первую очередь?
+```
+
+Ожидания:
+
+- `conversation_context.prompt_memory.used=true`;
+- `conversation_context.prompt_memory.included` содержит `summary`;
+- `conversation_context.prompt_memory.included` содержит `recent_user_messages`;
+- `conversation_context.prompt_memory.token_estimate <= token_budget`;
+- prompt memory используется только как память диалога, а факты продукта по-прежнему должны приходить из Qdrant sources.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

@@ -42,6 +42,7 @@ class RagService:
         max_sources_per_title: int | None = None,
         max_sources_per_source_type: int | None = None,
         max_sources_per_source_path: int | None = None,
+        memory_context: dict[str, object] | None = None,
     ) -> RagChatResponse:
         selected_model = model or self._default_model
         selected_top_k = top_k or self._default_top_k
@@ -108,6 +109,7 @@ class RagService:
             question=message,
             sources=prompt_sources,
             extra_rules=extra_prompt_rules,
+            memory_context=memory_context,
         )
         result = await self._ollama_client.generate(
             model=selected_model,
@@ -171,6 +173,7 @@ def build_rag_prompt(
     question: str,
     sources: list[SourceChunk],
     extra_rules: list[str] | None = None,
+    memory_context: dict[str, object] | None = None,
 ) -> str:
     context_blocks = []
     for index, source in enumerate(sources, start=1):
@@ -187,9 +190,20 @@ def build_rag_prompt(
         )
 
     context = "\n\n".join(context_blocks) if context_blocks else "Контекст не найден."
+    memory_text = _build_memory_prompt_text(memory_context)
+    memory_rules = [
+        (
+            "Память диалога помогает учитывать предыдущие цели и формулировки "
+            "пользователя, но не является источником фактов о продукте."
+        ),
+        (
+            "Факты о продукте, метрики, причины инцидентов и рекомендации "
+            "бери только из блока Контекст."
+        ),
+    ] if memory_text else []
     dynamic_rules = "\n".join(
         f"- {rule}"
-        for rule in (extra_rules or [])
+        for rule in [*memory_rules, *(extra_rules or [])]
     )
     rules = "\n".join(
         [
@@ -214,9 +228,20 @@ def build_rag_prompt(
 
 {context}
 
+Память диалога:
+
+{memory_text or "Память диалога не используется."}
+
 Вопрос пользователя:
 {question}
 """
+
+
+def _build_memory_prompt_text(memory_context: dict[str, object] | None) -> str:
+    if not memory_context or memory_context.get("used") is not True:
+        return ""
+    content = str(memory_context.get("content") or "").strip()
+    return content
 
 
 def _estimate_tokens(text: str) -> int:

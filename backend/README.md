@@ -521,7 +521,7 @@ M4.4 добавляет production-like режим summary: локальная L
 
 ```bash
 CONVERSATION_SUMMARY_STRATEGY=hybrid
-CONVERSATION_SUMMARY_MODEL=qwen2.5:3b
+CONVERSATION_SUMMARY_MODEL=gemma4:12b
 CONVERSATION_SUMMARY_TEMPERATURE=0.0
 ```
 
@@ -551,7 +551,7 @@ Backend валидирует JSON и сохраняет structured summary в `c
 ```json
 {
   "summary_strategy": "hybrid",
-  "summary_model": "qwen2.5:3b",
+  "summary_model": "gemma4:12b",
   "summary_structured": {
     "summary": "..."
   },
@@ -567,3 +567,56 @@ Targeted memory regression `1b58271c-9955-4c03-b7f5-7e3ef93b6ac1`: 5 summary/mem
 Diagnostic full run `31d78815-3424-4270-9d7b-d8a5befd2f0f` поймал router-priority regression: LLM-summary добавил technical markers, и explicit metric follow-up иногда не получал `metric_row`. После fix explicit metric question markers имеют приоритет над technical markers из summary.
 
 Clean full regression M4.4 run `8fd546bb-ea64-426e-bd2d-d5350f9becc1`: 5 моделей x 20 сценариев = 100 результатов, `errors=0`, `zero_sources=0`, `failed_flags=0`.
+
+## M4.5: Prompt Memory Budget
+
+M4.5 добавляет контролируемую conversation memory в финальный RAG prompt. Summary по-прежнему не является evidence: факты о продукте, метрики и причины инцидентов должны приходить из Qdrant sources.
+
+Настройки:
+
+```bash
+CONVERSATION_MEMORY_ENABLED=true
+CONVERSATION_MEMORY_TOKEN_BUDGET=350
+CONVERSATION_MEMORY_RECENT_MESSAGES=4
+```
+
+Prompt memory включает:
+
+- structured summary диалога;
+- цели пользователя из LLM/rule-based summary;
+- последние user messages;
+- debug metadata `conversation_context.prompt_memory`.
+
+Пример debug:
+
+```json
+{
+  "prompt_memory": {
+    "used": true,
+    "included": ["summary", "user_goals", "recent_user_messages"],
+    "token_budget": 350,
+    "token_estimate": 124
+  }
+}
+```
+
+Targeted M4.5 smoke `3c7731d5-a31f-4adb-81f9-bd562fda2950`: scenario `prompt_memory_budget` на `gemma4:12b` и `qwen3.5:9b`, summary model `gemma4:12b`, `errors=0`, `prompt_memory_used=true`, `prompt_memory_budget_ok=true`, sources=5.
+
+M4.5 stability check:
+
+- 6 базовых M4.5 сценариев x 2 модели x 3 повтора = 36 результатов;
+- модели: `gemma4:12b`, `qwen3.5:9b`;
+- результат: `failed_flags=0`, `errors=0`;
+- `summary_topic_switch` стабильно отключает prompt memory с `reason=topic_switch`;
+- все сценарии с включённой memory остались в рамках `CONVERSATION_MEMORY_TOKEN_BUDGET=350`.
+
+Большой M4.5 прогон для `qwen3.5:9b`:
+
+- JSONL-артефакт: `research/m45_qwen35_big_evaluation_latest.jsonl`;
+- 15 memory-сценариев x 7 повторов = 105 результатов;
+- результат: `failed_count=0`, runtime errors = 0;
+- средняя задержка около 5.18s;
+- `prompt_memory.used=true`: 84 случая;
+- `prompt_memory.used=false`: 21 случай, все с `reason=topic_switch`.
+
+Итог по модели: `qwen3.5:9b` выбран как основной кандидат для дальнейших summary/context-memory и частых RAG regression прогонов. `gemma4:12b` остаётся эталонной моделью для сравнения и более осторожным summarizer baseline.

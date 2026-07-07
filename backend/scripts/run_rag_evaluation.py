@@ -22,6 +22,10 @@ class EvaluationScenario:
     name: str
     prompt: str
     turns: tuple[str, ...] = ()
+    expected_feature: str | None = None
+    expected_prompt_memory_used: bool | None = None
+    expected_metric_intent: bool | None = None
+    expected_negative_metric_marker: bool | None = None
 
 
 SCENARIOS = [
@@ -228,6 +232,182 @@ SCENARIOS = [
             "Что с этим делать в первую очередь?",
             "А какие из них самые критичные?",
         ),
+    ),
+    EvaluationScenario(
+        id="prompt_memory_budget",
+        name="Prompt Memory Budget",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2-Q4: follow-up для накопления summary/recent memory\n"
+            "Q5: А что нужно объяснить PO в первую очередь?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "Что с этим делать в первую очередь?",
+            "А что нужно объяснить PO в первую очередь?",
+        ),
+    ),
+    EvaluationScenario(
+        id="memory_permissions_long_follow_up",
+        name="Memory Permissions Long Follow-Up",
+        prompt=(
+            "Q1: Какие проблемы с permissions влияют на enterprise-клиентов?\n"
+            "Q2-Q4: follow-up без явного feature\n"
+            "Q5: Что нужно объяснить PO в первую очередь?"
+        ),
+        turns=(
+            "Какие проблемы с permissions влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "Что с этим делать в первую очередь?",
+            "Что нужно объяснить PO в первую очередь?",
+        ),
+        expected_feature="permissions",
+        expected_prompt_memory_used=True,
+    ),
+    EvaluationScenario(
+        id="memory_csv_import_long_follow_up",
+        name="Memory CSV Import Long Follow-Up",
+        prompt=(
+            "Q1: Какие проблемы с csv_import влияют на enterprise-клиентов?\n"
+            "Q2-Q4: follow-up без явного feature\n"
+            "Q5: Что самое критичное?"
+        ),
+        turns=(
+            "Какие проблемы с csv_import влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "Что с этим делать в первую очередь?",
+            "Что самое критичное?",
+        ),
+        expected_feature="csv_import",
+        expected_prompt_memory_used=True,
+    ),
+    EvaluationScenario(
+        id="memory_explicit_topic_switch_csv",
+        name="Memory Explicit Topic Switch To CSV",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2-Q4: follow-up без явного feature\n"
+            "Q5: Ок, забудь notifications, а теперь про csv_import"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "Что с этим делать в первую очередь?",
+            "Ок, забудь notifications, а теперь про csv_import",
+        ),
+        expected_feature="csv_import",
+        expected_prompt_memory_used=False,
+    ),
+    EvaluationScenario(
+        id="memory_return_to_previous_topic",
+        name="Memory Return To Previous Topic",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2-Q3: follow-up без явного feature\n"
+            "Q4: А теперь коротко про permissions\n"
+            "Q5: Вернёмся к notifications: что самое критичное?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "А теперь коротко про permissions",
+            "Вернёмся к notifications: что самое критичное?",
+        ),
+        expected_feature="notifications",
+        expected_prompt_memory_used=False,
+    ),
+    EvaluationScenario(
+        id="memory_metric_permissions_follow_up",
+        name="Memory Metric Permissions Follow-Up",
+        prompt=(
+            "Q1: Какие проблемы с permissions влияют на enterprise-клиентов?\n"
+            "Q2-Q4: follow-up без явного feature\n"
+            "Q5: А какие метрики по ним изменились?"
+        ),
+        turns=(
+            "Какие проблемы с permissions влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "Что с этим делать в первую очередь?",
+            "А какие метрики по ним изменились?",
+        ),
+        expected_feature="permissions",
+        expected_prompt_memory_used=True,
+        expected_metric_intent=True,
+    ),
+    EvaluationScenario(
+        id="memory_negative_metric_permissions_follow_up",
+        name="Memory Negative Metric Permissions Follow-Up",
+        prompt=(
+            "Q1: Какие проблемы с permissions влияют на enterprise-клиентов?\n"
+            "Q2-Q4: follow-up без явного feature\n"
+            "Q5: А можешь без метрик?"
+        ),
+        turns=(
+            "Какие проблемы с permissions влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "Что с этим делать в первую очередь?",
+            "А можешь без метрик?",
+        ),
+        expected_feature="permissions",
+        expected_prompt_memory_used=True,
+        expected_negative_metric_marker=True,
+    ),
+    EvaluationScenario(
+        id="memory_incident_follow_up",
+        name="Memory Incident Follow-Up",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2-Q4: follow-up без явного feature\n"
+            "Q5: А что было в мартовском инциденте?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "Что с этим делать в первую очередь?",
+            "А что было в мартовском инциденте?",
+        ),
+        expected_feature="notifications",
+        expected_prompt_memory_used=True,
+    ),
+    EvaluationScenario(
+        id="memory_release_notes_follow_up",
+        name="Memory Release Notes Follow-Up",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2-Q4: follow-up без явного feature\n"
+            "Q5: Что было в release notes?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "Что с этим делать в первую очередь?",
+            "Что было в release notes?",
+        ),
+        expected_feature="notifications",
+        expected_prompt_memory_used=True,
+    ),
+    EvaluationScenario(
+        id="memory_short_follow_up_recent_only",
+        name="Memory Short Follow-Up Recent Only",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2: Что самое критичное?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "Что самое критичное?",
+        ),
+        expected_feature="notifications",
     ),
 ]
 
@@ -558,8 +738,10 @@ def _build_quality_flags(
             conversation_context=conversation_context,
         )
     elif scenario.id == "summary_topic_switch":
+        prompt_memory = conversation_context.get("prompt_memory") or {}
         flags["summary_available"] = conversation_context.get("summary_available") is True
         flags["summary_not_used"] = conversation_context.get("summary_used") is not True
+        flags["prompt_memory_not_used"] = prompt_memory.get("used") is not True
         flags["topic_switch_detected"] = (
             conversation_context.get("topic_switch_detected") is True
         )
@@ -607,6 +789,59 @@ def _build_quality_flags(
             source_features=source_features,
             conversation_context=conversation_context,
         )
+    elif scenario.id == "prompt_memory_budget":
+        prompt_memory = conversation_context.get("prompt_memory") or {}
+        flags["prompt_memory_used"] = prompt_memory.get("used") is True
+        flags["prompt_memory_budget_ok"] = int(
+            prompt_memory.get("token_estimate") or 0
+        ) <= int(prompt_memory.get("token_budget") or 0)
+        flags["prompt_memory_has_summary"] = "summary" in (
+            prompt_memory.get("included") or []
+        )
+        flags["prompt_memory_has_recent_user_messages"] = "recent_user_messages" in (
+            prompt_memory.get("included") or []
+        )
+        flags["notifications_context_ok"] = _has_context_feature(
+            feature="notifications",
+            response_features=response_features,
+            source_features=source_features,
+            conversation_context=conversation_context,
+        )
+
+    if scenario.id.startswith("memory_"):
+        prompt_memory = conversation_context.get("prompt_memory") or {}
+        flags["prompt_memory_budget_ok"] = int(
+            prompt_memory.get("token_estimate") or 0
+        ) <= int(prompt_memory.get("token_budget") or 0)
+
+        if scenario.expected_prompt_memory_used is True:
+            flags["prompt_memory_used"] = prompt_memory.get("used") is True
+            flags["prompt_memory_has_recent_user_messages"] = "recent_user_messages" in (
+                prompt_memory.get("included") or []
+            )
+        elif scenario.expected_prompt_memory_used is False:
+            flags["prompt_memory_not_used"] = prompt_memory.get("used") is not True
+
+        if scenario.expected_feature:
+            flags[f"{scenario.expected_feature}_context_ok"] = _has_context_feature(
+                feature=scenario.expected_feature,
+                response_features=response_features,
+                source_features=source_features,
+                conversation_context=conversation_context,
+            )
+
+        if scenario.expected_metric_intent is True:
+            flags["metric_intent_ok"] = query_hints.get("metric_intent") is True
+            flags["has_metric_row_source"] = "metric_row" in source_types
+
+        if scenario.expected_negative_metric_marker is True:
+            flags["negative_marker_ok"] = (
+                query_hints.get("metric_negative_marker") is True
+            )
+            flags["numeric_sanitization_ok"] = (
+                context_policy.get("numeric_line_sanitization") is True
+            )
+            flags["no_percent_symbol"] = "%" not in response
 
     return flags
 

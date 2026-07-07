@@ -1553,3 +1553,139 @@ Targeted failure analysis:
 - лучший fast fallback/alternative candidate: `qwen3.5:9b` — 20/20 safe, но требует repair retry для стабильности schema;
 - `qwen2.5:7b-instruct-q8_0` остаётся быстрым baseline candidate, но качество ниже;
 - `qwen3:14b` не выглядит оправданным для summarizer role: медленнее `gemma4:12b` и хуже по quality score.
+
+## 2026-07-07: M4.5 Prompt Memory Budget
+
+Контекст:
+
+- до M4.5 summary использовался для retrieval query rewrite, но не попадал в финальный prompt модели;
+- цель этапа: приблизиться к продуктовой conversational memory, но не нарушить границу evidence;
+- факты о продукте по-прежнему должны приходить только из Qdrant sources.
+
+Решение:
+
+- добавить отдельный prompt block `Память диалога`;
+- включать в память summary, user goals и последние user messages под `CONVERSATION_MEMORY_TOKEN_BUDGET`;
+- не включать recent assistant messages в первый вариант, чтобы не тащить прошлые ответы как product evidence;
+- добавить prompt rules: memory помогает учитывать цели пользователя, но не является источником фактов о продукте;
+- добавить debug metadata `conversation_context.prompt_memory` с `used`, `included`, `token_budget`, `token_estimate`, `content`;
+- добавить evaluation scenario `prompt_memory_budget`.
+
+Targeted smoke:
+
+- backend запущен с текущим кодом на отдельном порту `8003`;
+- scenario: `prompt_memory_budget`;
+- модели: `gemma4:12b`, `qwen3.5:9b`;
+- run id: `3c7731d5-a31f-4adb-81f9-bd562fda2950`;
+- summary model: `gemma4:12b`;
+- `gemma4:12b`: `prompt_memory_used=true`, `prompt_memory_budget_ok=true`, `token_estimate=147/350`, sources=5;
+- `qwen3.5:9b`: `prompt_memory_used=true`, `prompt_memory_budget_ok=true`, `token_estimate=154/350`, sources=5;
+- в обоих случаях prompt memory включила `summary`, `user_goals`, `recent_user_messages`.
+
+Вывод:
+
+- M4.5 baseline работает: memory попадает в финальный prompt контролируемо и наблюдаемо;
+- budget не превышается на smoke-сценарии;
+- следующий шаг: прогнать больше M4.5 scenarios на двух выбранных моделях (`gemma4:12b`, `qwen3.5:9b`) и проверить, что memory улучшает follow-up quality без нарушения groundedness.
+
+Архитектурное уточнение:
+
+- первоначально prompt memory собиралась в `main.py`, потому что там уже доступны `recent_messages` и `summary_context`;
+- чтобы не утолщать FastAPI entrypoint, сборка memory вынесена в `ConversationMemoryService`;
+- сервис не ходит в БД сам и не дублирует загрузку history/summary;
+- `main.py` остаётся orchestrator: загружает recent messages и summary один раз, затем передаёт их в context/memory services;
+- unit-level smoke подтвердил, что сервис включает `summary`, `user_goals`, `recent_user_messages`, соблюдает бюджет и не включает сообщения ассистента.
+
+Точечная регрессионная проверка M4.5:
+
+- run id: `f5eb9335-e2ee-4b7c-a47d-2f8a9d1aa53c`;
+- 6 сценариев x 2 модели = 12 результатов;
+- сценарии: `prompt_memory_budget`, `summary_long_follow_up`, `summary_topic_switch`, `summary_metric_follow_up`, `summary_negative_metric_follow_up`, `llm_summary_structured`;
+- модели: `gemma4:12b`, `qwen3.5:9b`;
+- существующие флаги качества прошли: `failed_flags=0`;
+- prompt memory во всех проверенных случаях осталась в рамках бюджета.
+
+Важное наблюдение:
+
+- начальная регрессионная проверка показала скрытый пробел в safety-логике: в `summary_topic_switch` было `summary_used=false`, но `prompt_memory.used=true`;
+- это могло протащить память старой темы в финальный prompt после явного topic switch;
+- добавлено M4.5 safety-правило: `ConversationMemoryService` возвращает пустую memory с `reason=topic_switch`, если `topic_switch_detected=true`;
+- добавлен флаг проверки `prompt_memory_not_used` для `summary_topic_switch`.
+
+Проверка исправления topic switch:
+
+- run id: `bda4b594-fe0e-48c2-b5b8-ee1b940b0a5c`;
+- сценарий: `summary_topic_switch`;
+- модели: `gemma4:12b`, `qwen3.5:9b`;
+- обе модели: `prompt_memory_not_used=true`, `prompt_memory.used=false`, `prompt_memory.reason=topic_switch`, `failed_flags=0`.
+
+Проверка стабильности M4.5:
+
+- адрес backend: `http://localhost:8000`;
+- сценарии: `prompt_memory_budget`, `summary_long_follow_up`, `summary_topic_switch`, `summary_metric_follow_up`, `summary_negative_metric_follow_up`, `llm_summary_structured`;
+- модели: `gemma4:12b`, `qwen3.5:9b`;
+- повторено 3 раза: 6 сценариев x 2 модели x 3 прогона = 36 результатов;
+- run ids: `4cf0ce8a-50d4-4154-b98c-2726984fa1b3`, `312aa8f4-569a-419c-b98a-4ba2190b132c`, `ba785389-82e5-4581-a994-e704cd56f044`;
+- результат: `failed_flags=0`, `errors=0`;
+- `summary_topic_switch`: `prompt_memory.used=false`, `reason=topic_switch` у обеих моделей во всех повторах;
+- все сценарии с включённой memory остались в рамках `CONVERSATION_MEMORY_TOKEN_BUDGET=350`;
+- средняя задержка по 18 вызовам на модель: `gemma4:12b` около 15.7s, `qwen3.5:9b` около 6.1s.
+
+Расширенный набор memory-сценариев M4.5:
+
+- в evaluation script добавлена поддержка memory-focused сценариев с проверками ожидаемой feature, ожидаемого поведения prompt memory, metric intent и negative metric marker;
+- добавлены сценарии для `permissions`, `csv_import`, явного topic switch на `csv_import`, возврата к предыдущей теме, metric follow-up, negative metric follow-up, incident follow-up, release notes follow-up и короткого follow-up только с recent messages;
+- run id расширенного прогона: `8ddf490d-0469-46fc-ba0f-24b770183903`;
+- 15 сценариев x 2 модели = 30 результатов;
+- результат выполнения: 30/30 `ok`, `errors=0`;
+- найдены две ошибки в ожиданиях теста:
+  - `memory_return_to_previous_topic` ожидал включения memory, но система корректно трактовала явное движение между темами как `topic_switch` и отключила memory;
+  - `memory_short_follow_up_recent_only` ожидал `summary_available=true`, но короткие диалоги из двух turns должны уметь использовать recent messages без persisted summary.
+
+Коррекция ожиданий качества:
+
+- `memory_return_to_previous_topic` теперь ожидает `prompt_memory.used=false`; явный feature в текущем запросе должен вести retrieval, а не старая memory;
+- общие `memory_*` сценарии больше не требуют `summary_available=true`, потому что recent-message-only memory допустима для коротких диалогов;
+- run id повторной проверки edge-cases: `02c3dd4c-3db9-4259-9d79-440e24040e35`;
+- сценарии повторной проверки: `memory_return_to_previous_topic`, `memory_short_follow_up_recent_only`;
+- результат повторной проверки: 4/4 результата с `failed_flags=0`;
+- `memory_return_to_previous_topic`: `prompt_memory.reason=topic_switch`, при этом `notifications_context_ok=true`;
+- `memory_short_follow_up_recent_only`: `prompt_memory.used=true`, `included=["recent_user_messages"]`, `token_estimate=24/350`.
+
+Итоговый вывод по M4.5 на этом этапе:
+
+- prompt memory ведёт себя стабильно на повторных прогонах;
+- topic switch safety работает и предотвращает утечку memory старой темы;
+- memory поддерживает как summary-based, так и recent-message-only сценарии;
+- явные упоминания feature в текущем запросе должны оставаться сильнее memory;
+- `qwen3.5:9b` остаётся заметно быстрее `gemma4:12b` на генерации ответов, при этом обе модели проходят текущие проверки качества M4.5.
+
+Большой M4.5 прогон для `qwen3.5:9b`:
+
+- цель: проверить, можно ли оставить `qwen3.5:9b` главным кандидатом для дальнейших M4.5/M5 тестов из-за высокой скорости при сохранении качества;
+- модель: `qwen3.5:9b`;
+- адрес backend: `http://localhost:8000`;
+- набор: 15 M4.5 memory-сценариев x 7 повторов = 105 результатов;
+- сценарии включали базовые M4.5 cases (`prompt_memory_budget`, long follow-up, topic switch, metric/negative metric follow-up, structured summary) и memory-focused edge cases (`permissions`, `csv_import`, explicit topic switch, возврат к теме, incident, release notes, short recent-only);
+- run ids: `8b9d7e09-01af-4974-b19f-14b994035ee2`, `b23f4cd8-8e21-4a02-ae90-ed8816fb682e`, `d8b9f3c5-78ad-413b-a7cd-ea5b0b4e653f`, `86834fb5-9339-473e-86ff-45f659e80afe`, `84f52dfc-f367-4fd2-82d2-93cd5caf4208`, `01e5a52e-430f-4a1c-a9a8-eb8f43a6c4ba`, `7fdc2f71-ad32-4599-8fc9-9248f712f3ec`;
+- JSONL-артефакт: `research/m45_qwen35_big_evaluation_latest.jsonl`;
+- первая строка файла содержит summary и список сценариев с turns/expectations, следующие 105 строк содержат result records.
+
+Результаты большого прогона:
+
+- `result_count=105`, `failed_count=0`;
+- ошибок выполнения: 0;
+- средняя задержка: около 5.18s;
+- min/max latency: 2.14s / 9.54s;
+- средний `source_count`: 4.9;
+- `prompt_memory.used=true`: 84 случая;
+- `prompt_memory.used=false`: 21 случай;
+- все 21 отключения memory пришлись на `reason=topic_switch`, что совпадает с ожидаемой safety-логикой;
+- `summary_topic_switch`, `memory_explicit_topic_switch_csv`, `memory_return_to_previous_topic`: во всех 7 повторах memory отключалась с `reason=topic_switch`;
+- `memory_short_follow_up_recent_only`: во всех 7 повторах использовалась recent-message-only memory без обязательного persisted summary.
+
+Вывод по `qwen3.5:9b`:
+
+- на текущем M4.5 наборе модель показывает стабильное качество: 105/105 без failed flags;
+- скорость заметно лучше `gemma4:12b`, поэтому `qwen3.5:9b` стоит оставить главным кандидатом для дальнейших больших M4.5/M5 прогонов;
+- `gemma4:12b` остаётся полезной эталонной моделью для сравнения и summarizer baseline, но для частых regression runs `qwen3.5:9b` выглядит практичнее.

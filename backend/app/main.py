@@ -15,6 +15,7 @@ from app.db.session import (
 from app.models.chat import ChatRequest, ChatResponse, RagChatRequest, RagChatResponse
 from app.services.chat_history_service import ChatExchangeRecord, ChatHistoryService
 from app.services.conversation_context_service import ConversationContextService
+from app.services.conversation_memory_service import ConversationMemoryService
 from app.services.conversation_summary_service import ConversationSummaryService
 from app.services.feature_extractor import FeatureExtractor
 from app.services.ollama_client import OllamaClient
@@ -52,6 +53,11 @@ rag_log_service = RagLogService(session_factory=db_session_factory)
 chat_history_service = ChatHistoryService(session_factory=db_session_factory)
 conversation_context_service = ConversationContextService(
     feature_extractor=feature_extractor,
+)
+conversation_memory_service = ConversationMemoryService(
+    enabled=settings.conversation_memory_enabled,
+    token_budget=settings.conversation_memory_token_budget,
+    recent_messages_limit=settings.conversation_memory_recent_messages,
 )
 conversation_summary_service = ConversationSummaryService(
     session_factory=db_session_factory,
@@ -155,6 +161,7 @@ async def rag_chat(request: RagChatRequest) -> RagChatResponse:
             max_sources_per_title=request.max_sources_per_title,
             max_sources_per_source_type=request.max_sources_per_source_type,
             max_sources_per_source_path=request.max_sources_per_source_path,
+            memory_context=_as_dict(conversation_context.get("prompt_memory")),
         )
         response.conversation_context = conversation_context
         chat_exchange = await _try_save_chat_exchange(
@@ -208,16 +215,21 @@ async def _build_conversation_context(
     try:
         recent_messages = await chat_history_service.get_recent_messages(
             session_id=session_id,
-            limit=4,
+            limit=max(4, conversation_memory_service.recent_messages_limit),
         )
         summary_context = await conversation_summary_service.prepare_summary(
             session_id=session_id,
         )
-        return conversation_context_service.build_context(
+        context_decision = conversation_context_service.build_context(
             message=message,
             recent_messages=recent_messages,
             summary_context=summary_context,
         ).to_dict()
+        context_decision["prompt_memory"] = conversation_memory_service.build_prompt_memory(
+            recent_messages=recent_messages,
+            summary_context=context_decision,
+        )
+        return context_decision
     except Exception:
         logger.exception("Conversation context build failed")
         return {
@@ -243,6 +255,9 @@ async def _build_conversation_context(
             "summary_fallback_used": False,
             "summary_validation_error": "conversation_context_build_failed",
             "summary_validation_warnings": [],
+            "prompt_memory": conversation_memory_service.empty_prompt_memory(
+                reason="conversation_context_build_failed"
+            ),
         }
 
 
@@ -277,3 +292,9 @@ def _attach_chat_exchange(
     response.session_id = chat_exchange.session_id
     response.user_message_id = chat_exchange.user_message_id
     response.assistant_message_id = chat_exchange.assistant_message_id
+
+
+def _as_dict(value: object) -> dict[str, object]:
+    if isinstance(value, dict):
+        return value
+    return {}
