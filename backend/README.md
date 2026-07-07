@@ -731,3 +731,51 @@ M5.3 smoke `af815661-b073-417d-91c1-b7d6a33a6934`:
 - `bucket_no_leak_negative`: query asks about Alpha while scope is `bucket_beta`; sources only from `bucket_beta`, forbidden Alpha facts absent, `failed_flags=0`.
 
 Важно: bucket сейчас - это логическая область/подборка документов. Полноценные `users`, `groups`, `roles`, `access_policies`, а также row-level/field-level permissions для таблиц остаются future hardening после upload/UI и structured table extraction.
+
+## M5.4: Excel Row Ingestion
+
+M5.4 добавляет baseline ingestion для `.xlsx` и `.xls`. Excel читается через `pandas` с engine dependencies `openpyxl` и `xlrd`. Каждая строка каждого sheet становится отдельным `RawDocument` с `source_type=excel_row`.
+
+Для грязных Excel без нормальных headers loader добавляет в content компактную строку `Row values: ...`. Это сохраняет исходные `Unnamed:*` поля в metadata, но даёт LLM человекочитаемую строку таблицы.
+
+Excel row metadata:
+
+```json
+{
+  "source_type": "excel_row",
+  "document_metadata": {
+    "file_name": "product_owner_metrics.xlsx",
+    "sheet_name": "Roadmap",
+    "row_index": 0,
+    "excel_row_number": 2
+  },
+  "bucket_id": "taskflow_seed",
+  "tenant_id": "local_demo"
+}
+```
+
+Добавлен synthetic fixture:
+
+```text
+data/raw/excel_fixtures/product_owner_metrics.xlsx
+```
+
+Evaluation:
+
+- scenario: `excel_ingestion`;
+- request ограничивает `source_types=["excel_row"]`;
+- quality flags проверяют `has_excel_source`, `excel_sheet_metadata_ok`, `excel_row_metadata_ok`, `excel_bucket_metadata_ok`.
+
+M5.4 smoke `fef54dac-ac00-4f49-b073-72ad40584920`: `excel_ingestion` на `qwen3.5:9b`, sources=5, `failed_flags=0`.
+
+Локальный exploratory smoke на реальном `Price.xls`:
+
+- файл не добавлен в git, но использован для проверки `.xls` ingestion;
+- reindex после файла: 341 documents, 374 chunks;
+- initial vector-only retrieval не находил точный barcode `4600682643425` и плохо отвечал на вопросы про шапку документа;
+- добавлен deterministic Excel supplement внутри разрешённого scope: exact numeric terms для штрихкодов/артикулов и header rows для вопросов про документ/организацию/дату;
+- final artifact: `research/m54_price_xls_model_smoke_latest.jsonl`;
+- `qwen3.5:9b`: 6/6 сценариев, avg latency около 3.3s;
+- `gemma4:12b`: 6/6 сценариев, avg latency около 7.9s.
+
+Ограничение baseline: это row-level text ingestion, а не полноценный spreadsheet parser. Формулы, merged cells, pivot tables, rich formatting и cell-level permissions остаются future hardening.

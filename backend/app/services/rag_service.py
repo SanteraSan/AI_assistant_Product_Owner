@@ -90,6 +90,16 @@ class RagService:
             source_paths=selected_source_paths,
         )
         sources = _filter_sources_by_score(sources, selected_score_threshold)
+        excel_supplement_sources = self._supplement_excel_sources(
+            message=selected_retrieval_query,
+            selected_tenant_id=selected_tenant_id,
+            selected_bucket_ids=selected_bucket_ids,
+            selected_source_types=selected_source_types,
+            selected_document_ids=selected_document_ids,
+            selected_source_paths=selected_source_paths,
+            limit=selected_top_k,
+        )
+        sources = _merge_sources(excel_supplement_sources, sources)
         required_source_types = _normalize_values(
             routing_decision.hints.get("required_source_types") or []
         )
@@ -157,6 +167,7 @@ class RagService:
                 "bucket_ids": selected_bucket_ids,
                 "document_ids": selected_document_ids,
                 "source_paths": selected_source_paths,
+                "excel_supplement_count": len(excel_supplement_sources),
                 "final_top_k": len(sources),
             },
             query_hints=routing_decision.hints,
@@ -196,6 +207,52 @@ class RagService:
                 supplemented_sources,
             )
         return supplemented_sources
+
+    def _supplement_excel_sources(
+        self,
+        *,
+        message: str,
+        selected_tenant_id: str | None,
+        selected_bucket_ids: list[str],
+        selected_source_types: list[str],
+        selected_document_ids: list[str],
+        selected_source_paths: list[str],
+        limit: int,
+    ) -> list[SourceChunk]:
+        if selected_source_types and "excel_row" not in selected_source_types:
+            return []
+        if not selected_document_ids and not selected_source_paths:
+            return []
+
+        candidates = self._qdrant_store.scroll(
+            limit=1000,
+            tenant_id=selected_tenant_id,
+            bucket_ids=selected_bucket_ids,
+            source_types=["excel_row"],
+            document_ids=selected_document_ids,
+            source_paths=selected_source_paths,
+        )
+        if not candidates:
+            return []
+
+        exact_terms = _extract_exact_numeric_terms(message)
+        exact_matches = [
+            source
+            for source in candidates
+            if exact_terms and all(term in source.content for term in exact_terms)
+        ]
+        exact_matches = sorted(exact_matches, key=_excel_row_number)
+
+        header_matches: list[SourceChunk] = []
+        if _looks_like_document_header_question(message):
+            header_matches = [
+                source
+                for source in candidates
+                if _excel_row_number(source) <= 12
+            ]
+            header_matches = sorted(header_matches, key=_excel_row_number)
+
+        return _merge_sources(exact_matches[:limit], header_matches[:limit])
 
 
 def build_rag_prompt(
@@ -381,6 +438,32 @@ def _contains_source_type(sources: list[SourceChunk], source_type: str) -> bool:
         (source.source_type or "").strip().lower() == normalized_source_type
         for source in sources
     )
+
+
+def _extract_exact_numeric_terms(text: str) -> list[str]:
+    return re.findall(r"\b\d{6,}\b", text)
+
+
+def _looks_like_document_header_question(text: str) -> bool:
+    normalized = text.lower()
+    markers = (
+        "организац",
+        "дата",
+        "документ",
+        "реквизит",
+        "компан",
+        "company",
+        "document",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def _excel_row_number(source: SourceChunk) -> int:
+    document_metadata = source.metadata.get("document_metadata") or {}
+    try:
+        return int(document_metadata.get("excel_row_number") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _merge_sources(

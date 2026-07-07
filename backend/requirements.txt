@@ -4,6 +4,8 @@ httpx
 pydantic-settings
 qdrant-client
 pandas
+openpyxl
+xlrd
 pypdf
 pyyaml
 sqlalchemy

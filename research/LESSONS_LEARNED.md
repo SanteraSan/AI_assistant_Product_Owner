@@ -1885,3 +1885,84 @@ Evaluation:
 - M5.3 закрывает первый no-leak retrieval boundary на уровне tenant/bucket metadata;
 - это ещё не auth system, но уже правильная backend-гарантия: forbidden chunks не попадают в prompt;
 - следующий слой доступа лучше добавлять только после upload/UI или structured table extraction, чтобы не превратить RAG этап в отдельный auth-проект.
+
+## 2026-07-08: M5.4 Excel Row Ingestion
+
+Контекст:
+
+- следующий шаг M5 после bucket isolation - поддержка офисных Excel-файлов;
+- baseline должен быть простым и трассируемым: сначала читаем строки и metadata, не пытаемся решить все spreadsheet edge cases;
+- cell-level permissions, формулы, merged cells и сложный table understanding остаются future hardening.
+
+Решение:
+
+- добавить dependencies `openpyxl` и `xlrd`;
+- читать `.xlsx` и `.xls` через `pandas.read_excel(sheet_name=None, dtype=str)`;
+- каждая строка каждого sheet становится отдельным `RawDocument`;
+- использовать `source_type=excel_row`;
+- сохранять metadata: `file_name`, `sheet_name`, `row_index`, `excel_row_number`, исходные значения колонок;
+- оставить `tenant_id/bucket_id` propagation таким же, как для других документов;
+- manifest overrides M5.3 также применимы к Excel-документам, если позже нужно назначить файл в другой bucket.
+
+Synthetic fixture:
+
+- добавлен безопасный файл `data/raw/excel_fixtures/product_owner_metrics.xlsx`;
+- sheets: `Roadmap`, `Budget`;
+- loader smoke: 5 Excel row documents;
+- строки содержат synthetic PO/RAG topics: enterprise onboarding, notifications, permissions, Excel ingestion budget, PDF parsing budget.
+
+Evaluation:
+
+- reindex result: 201 documents, 234 chunks;
+- run id: `fef54dac-ac00-4f49-b073-72ad40584920`;
+- scenario: `excel_ingestion`;
+- model: `qwen3.5:9b`;
+- result: status `ok`, sources=5, `failed_flags=0`;
+- passed flags: `has_excel_source`, `excel_sheet_metadata_ok`, `excel_row_metadata_ok`, `excel_bucket_metadata_ok`, `response_has_required_markers`.
+
+Вывод:
+
+- базовый Excel ingestion работает end-to-end через Qdrant/RAG;
+- row-level metadata даёт source traceability до sheet и row number;
+- для production-grade таблиц нужен следующий слой: sheet/source_path filters, table normalization, formula handling, merged-cell strategy и later row/cell-level access control.
+
+Дополнительный exploratory smoke: реальный `Price.xls`.
+
+- пользователь добавил локальный устаревший `.xls` прайс, файл не предназначен для git;
+- workbook читается через `xlrd`: 1 sheet, 140 строк, 6 колонок вида `Unnamed:*`;
+- структура типична для офисного прайса: шапка организации, дата, категории, товарные строки, цены, единицы, пометки `новинка` / `снижение цены`;
+- добавлено улучшение Excel content: `Row values: ...`, чтобы LLM видела строку в естественном порядке, а не только `Unnamed` columns;
+- reindex result после `Price.xls`: 341 documents, 374 chunks.
+
+Первичный model smoke:
+
+- сценарии: document identity, barcode lookup, name lookup, new items, discount items, no-answer;
+- модели: `qwen3.5:9b`, `gemma4:12b`;
+- initial result: 3/6 failed markers у обеих моделей;
+- причина не в LLM, а в retrieval: vector search не находил точный barcode `4600682643425` и не всегда доставал header rows с организацией/датой;
+- увеличение `top_k` до 20 не решило exact barcode lookup.
+
+Исправление:
+
+- добавлен deterministic Excel supplement в `RagService`;
+- supplement работает только внутри уже разрешённого scope: `tenant_id`, `bucket_ids`, `source_types`, `document_ids`, `source_paths`;
+- exact numeric terms: длинные числовые токены из вопроса, например barcode;
+- header rows: первые Excel rows для вопросов про документ, организацию, дату, реквизиты, компанию;
+- supplement rows сортируются по `excel_row_number`, чтобы шапка читалась в естественном порядке;
+- `retrieval.excel_supplement_count` показывает, сколько rows было добавлено deterministic путём.
+
+Final Price.xls smoke:
+
+- artifact: `research/m54_price_xls_model_smoke_latest.jsonl`;
+- `qwen3.5:9b`: 6/6 сценариев, avg latency около 3.3s;
+- `gemma4:12b`: 6/6 сценариев, avg latency около 7.9s;
+- barcode scenario теперь находит строки 14/15, товар `Sarbast`, цену `94.44`, единицу `шт`;
+- document identity scenario теперь находит `ООО "ПРАЙМ"` и дату `25 Января 2018 г.`;
+- no-answer scenario корректно не выдумывает товар `Космический чай 10 литров`.
+
+Вывод по реальному `.xls`:
+
+- для табличных файлов одного semantic vector search недостаточно;
+- exact identifiers, barcodes, invoice numbers, SKUs и header metadata нужно доставать deterministic supplement/fallback;
+- `qwen3.5:9b` остаётся лучшим кандидатом для частых Excel smoke/regression: качество совпало с `gemma4:12b`, latency ниже примерно в 2.4 раза;
+- это важный production-minded вывод: RAG для таблиц должен быть hybrid retrieval, а не только embeddings.

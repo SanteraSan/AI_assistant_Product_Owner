@@ -73,24 +73,62 @@ class QdrantStore:
         sources: list[SourceChunk] = []
         for point in result.points:
             payload = point.payload or {}
-            content = str(payload.get("content", ""))
-            sources.append(
-                SourceChunk(
-                    id=str(point.id),
-                    score=point.score,
-                    title=_as_optional_str(payload.get("title")),
-                    source_type=_as_optional_str(payload.get("source_type")),
-                    source_path=_as_optional_str(payload.get("source_path")),
-                    feature=_as_str_list(payload.get("feature")),
-                    content=content,
-                    metadata={
-                        key: value
-                        for key, value in payload.items()
-                        if key not in {"content", "title", "source_type", "source_path", "feature"}
-                    },
-                )
-            )
+            sources.append(_source_from_payload(id=str(point.id), score=point.score, payload=payload))
         return sources
+
+    def scroll(
+        self,
+        *,
+        limit: int,
+        tenant_id: str | None = None,
+        bucket_ids: list[str] | None = None,
+        features: list[str] | None = None,
+        source_types: list[str] | None = None,
+        document_ids: list[str] | None = None,
+        source_paths: list[str] | None = None,
+    ) -> list[SourceChunk]:
+        records, _ = self._client.scroll(
+            collection_name=self._collection_name,
+            scroll_filter=_payload_filter(
+                tenant_id=tenant_id,
+                bucket_ids=bucket_ids or [],
+                features=features or [],
+                source_types=source_types or [],
+                document_ids=document_ids or [],
+                source_paths=source_paths or [],
+            ),
+            limit=limit,
+            with_payload=True,
+        )
+
+        sources: list[SourceChunk] = []
+        for record in records:
+            payload = record.payload or {}
+            sources.append(_source_from_payload(id=str(record.id), score=None, payload=payload))
+        return sources
+
+
+def _source_from_payload(
+    *,
+    id: str,
+    score: float | None,
+    payload: dict[str, Any],
+) -> SourceChunk:
+    content = str(payload.get("content", ""))
+    return SourceChunk(
+        id=id,
+        score=score,
+        title=_as_optional_str(payload.get("title")),
+        source_type=_as_optional_str(payload.get("source_type")),
+        source_path=_as_optional_str(payload.get("source_path")),
+        feature=_as_str_list(payload.get("feature")),
+        content=content,
+        metadata={
+            key: value
+            for key, value in payload.items()
+            if key not in {"content", "title", "source_type", "source_path", "feature"}
+        },
+    )
 
 
 def _as_optional_str(value: Any) -> str | None:

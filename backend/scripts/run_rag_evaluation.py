@@ -427,6 +427,14 @@ SCENARIOS = [
         score_threshold=0.0,
     ),
     EvaluationScenario(
+        id="excel_ingestion",
+        name="Excel Ingestion",
+        prompt="Что Excel говорит про enterprise onboarding blockers и какую рекомендацию даёт?",
+        source_types=("excel_row",),
+        required_response_markers=("enterprise", "excel", "validation"),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
         id="bucket_alpha_positive",
         name="Bucket Alpha Positive",
         prompt="Что нужно сделать для Alpha enterprise clients по notifications?",
@@ -900,6 +908,24 @@ def _build_quality_flags(
             (source.get("metadata") or {}).get("bucket_id") for source in pdf_sources
         )
         flags["pdf_mentions_notifications"] = "notifications" in response
+    elif scenario.id == "excel_ingestion":
+        excel_sources = [source for source in sources if source.get("source_type") == "excel_row"]
+        flags["has_excel_source"] = bool(excel_sources)
+        flags["excel_sheet_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "sheet_name"
+            )
+            for source in excel_sources
+        )
+        flags["excel_row_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "excel_row_number"
+            )
+            for source in excel_sources
+        )
+        flags["excel_bucket_metadata_ok"] = any(
+            (source.get("metadata") or {}).get("bucket_id") for source in excel_sources
+        )
 
     if scenario.expected_bucket_ids:
         expected_bucket_ids = set(scenario.expected_bucket_ids)

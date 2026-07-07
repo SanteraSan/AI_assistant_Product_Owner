@@ -521,6 +521,71 @@ Q5: А что нужно объяснить PO в первую очередь?
 - ответ не содержит forbidden Alpha facts вроде `delayed delivery status` / `slack delivery visibility`;
 - LLM не получает Alpha chunks в prompt.
 
+## Test 26: Excel Row Ingestion
+
+Запрос:
+
+```text
+Что Excel говорит про enterprise onboarding blockers и какую рекомендацию даёт?
+```
+
+Параметры:
+
+- `source_types=["excel_row"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources содержит `source_type=excel_row`;
+- source metadata содержит `document_metadata.sheet_name`;
+- source metadata содержит `document_metadata.excel_row_number`;
+- source metadata содержит `bucket_id` и `tenant_id`;
+- ответ упоминает enterprise onboarding и рекомендацию про Excel import validation.
+
+## Test 27: Excel Exact Identifier Supplement
+
+Запрос:
+
+```text
+Найди товар со штрихкодом 4600682643425. Какое название, цена и единица измерения указаны?
+```
+
+Параметры:
+
+- `source_types=["excel_row"]`;
+- `source_paths=["/path/to/Price.xls"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- retrieval использует deterministic Excel supplement;
+- `retrieval.excel_supplement_count > 0`;
+- sources содержат строку с exact barcode `4600682643425`;
+- ответ содержит цену `94.44` и единицу `шт`;
+- все sources остаются внутри выбранного `source_path`.
+
+## Test 28: Excel Header Rows Supplement
+
+Запрос:
+
+```text
+Что это за Excel-документ, какая организация и дата прайс-листа указаны?
+```
+
+Параметры:
+
+- `source_types=["excel_row"]`;
+- `source_paths=["/path/to/Price.xls"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- retrieval использует deterministic Excel supplement для header rows;
+- `retrieval.excel_supplement_count > 0`;
+- sources включают первые строки Excel sheet;
+- ответ находит организацию и дату из шапки документа;
+- supplement не должен срабатывать на обычные вопросы по товарам только из-за слова `прайс`.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

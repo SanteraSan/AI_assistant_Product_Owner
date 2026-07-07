@@ -40,6 +40,7 @@ def load_raw_documents(
     documents.extend(_load_text_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_json_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_pdf_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
+    documents.extend(_load_excel_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_csv_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_openapi_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents = _apply_ingestion_manifest(raw_data_dir, documents)
@@ -187,6 +188,54 @@ def _load_csv_documents(
                     bucket_id=bucket_id,
                 )
             )
+    return documents
+
+
+def _load_excel_documents(
+    raw_data_dir: Path,
+    *,
+    tenant_id: str,
+    bucket_id: str,
+) -> list[RawDocument]:
+    documents: list[RawDocument] = []
+    excel_paths = sorted(
+        list(raw_data_dir.rglob("*.xlsx"))
+        + list(raw_data_dir.rglob("*.xls"))
+    )
+    for path in excel_paths:
+        sheets = pd.read_excel(path, sheet_name=None, dtype=str)
+        for sheet_name, frame in sheets.items():
+            for index, row in frame.fillna("").iterrows():
+                row_data = {key: str(value) for key, value in row.to_dict().items()}
+                content = "\n".join(
+                    [
+                        f"File: {path.name}",
+                        f"Sheet: {sheet_name}",
+                        f"Row values: {_compact_row_values(row_data)}",
+                        _row_to_text(row_data),
+                    ]
+                )
+                title = f"{path.stem} - {sheet_name} - row {int(index) + 2}"
+                documents.append(
+                    RawDocument(
+                        id=f"{_stable_document_id(path)}:{sheet_name}:{index}",
+                        title=title,
+                        content=content,
+                        source_type="excel_row",
+                        source_path=str(path),
+                        domain=_domain_for_path(path),
+                        feature=_features_from_text(content),
+                        metadata={
+                            "file_name": path.name,
+                            "sheet_name": sheet_name,
+                            "row_index": int(index),
+                            "excel_row_number": int(index) + 2,
+                            **row_data,
+                        },
+                        tenant_id=tenant_id,
+                        bucket_id=bucket_id,
+                    )
+                )
     return documents
 
 
@@ -360,6 +409,10 @@ def _as_str_list(value: Any) -> list[str]:
 
 def _row_to_text(row: dict[str, str]) -> str:
     return "\n".join(f"{key}: {value}" for key, value in row.items() if value)
+
+
+def _compact_row_values(row: dict[str, str]) -> str:
+    return " | ".join(value.strip() for value in row.values() if value.strip())
 
 
 def _json_to_text(data: Any) -> str:
