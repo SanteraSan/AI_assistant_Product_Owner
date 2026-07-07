@@ -1349,3 +1349,207 @@ Evaluation:
 - summary лучше вводить как отдельный наблюдаемый memory layer, а не смешивать с recent history logic;
 - rule-based summary дает хороший baseline и debug surface перед будущим LLM-based summarization;
 - обязательные source types должны вести себя как evidence floor: если router требует тип источника, fallback retrieval не должен ломаться из-за небольшого падения score на длинном query.
+
+## 2026-07-07: M4.4 LLM-Based Structured Summary
+
+Контекст:
+
+- M4.3 дал стабильный rule-based summary baseline, но для production-like memory нужно попробовать LLM-based summarization;
+- важно не смешивать conversation memory с evidence: summary описывает диалог, а факты о продукте по-прежнему должны приходить из Qdrant sources;
+- LLM summary потенциально может вернуть плохой JSON, пустой ответ или добавить лишнее, поэтому нужен fallback и validation.
+
+Решение:
+
+- добавить настройки `CONVERSATION_SUMMARY_STRATEGY`, `CONVERSATION_SUMMARY_MODEL`, `CONVERSATION_SUMMARY_TEMPERATURE`;
+- сделать `hybrid` strategy: сначала LLM structured summary, при ошибке fallback на rule-based summary;
+- просить summarizer возвращать строгий JSON с `main_topics`, `user_goals`, `decisions`, `open_questions`, `constraints`, `summary`;
+- сохранять structured summary в `conversation_summaries.metadata_json`, не меняя схему таблицы;
+- features для retrieval продолжать извлекать через `FeatureExtractor` из реального текста user messages, а не доверять LLM;
+- добавить debug fields: `summary_strategy`, `summary_model`, `summary_structured`, `summary_fallback_used`, `summary_validation_error`.
+
+Результат:
+
+- targeted run `7337aeab-9946-4447-b4ba-258ca56654a4`: 1 сценарий `llm_summary_structured`, `errors=0`, `failed_flags=0`;
+- debug snapshot подтвердил `summary_strategy=hybrid`, `summary_model=qwen2.5:3b`, `summary_fallback_used=False`, structured JSON валиден;
+- targeted memory regression `1b58271c-9955-4c03-b7f5-7e3ef93b6ac1`: 1 модель x 5 summary/memory сценариев, `errors=0`, `zero_sources=0`, `failed_flags=0`;
+- первый full run `31d78815-3424-4270-9d7b-d8a5befd2f0f` был остановлен как diagnostic run: он показал regression в `summary_metric_follow_up` на 2 моделях;
+- причина regression: LLM-summary добавлял technical markers вроде `retry`, `worker`, `rate limits`, и router иногда отдавал приоритет technical/release intent над явной формулировкой `А какие метрики...`;
+- исправление: explicit metric question markers (`какие метрики`, `метрики по`, `какие показатели`) теперь имеют приоритет над technical markers из summary;
+- targeted fix run `f27bd8a3-39d2-43e0-a341-33b73f088a68`: 2 проблемные модели x `summary_metric_follow_up`, `errors=0`, `failed_flags=0`;
+- clean full run `8fd546bb-ea64-426e-bd2d-d5350f9becc1`: 5 моделей x 20 сценариев = 100 результатов;
+- full regression: `errors=0`, `zero_sources=0`, `failed_flags=0`;
+- средняя latency на clean full run: `qwen2.5:7b-instruct-q8_0` около `7.1s`, `qwen3:14b` около `7.3s`, `qwen3.5:9b` около `8.2s`, `gemma4:12b` около `9.2s`, `qwen2.5:14b-instruct-q8_0` около `16.8s`.
+
+Вывод:
+
+- LLM summary можно безопасно вводить поверх rule-based baseline, если есть строгий JSON contract, fallback и observability;
+- `metadata_json` оказался полезным extension point: structured memory можно добавить без миграции таблицы;
+- следующий логичный шаг после M4.4 - M4.5 prompt memory budget, где recent messages и summary начнут попадать в финальный prompt под контролем token budget.
+
+## 2026-07-07: M4.4.2 Summarizer Model Selection
+
+Контекст:
+
+- ручной review первых LLM summaries показал, что `qwen2.5:3b` технически работает, но теряет decisions/open questions и иногда галлюцинирует features;
+- цель не в том, чтобы все модели одинаково хорошо работали на всех задачах, а в том, чтобы выбрать подходящую модель для роли summarizer;
+- summary создается не на каждый запрос, поэтому можно выбирать модель крупнее, если качество заметно лучше.
+
+Решение:
+
+- исключить `qwen2.5:14b-instruct-q8_0` из summarizer selection из-за VRAM;
+- сравнить candidates: `qwen2.5:7b-instruct-q8_0`, `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b`;
+- добавить script `python -m scripts.select_summary_model`, который берет 20 transcript examples, вызывает каждую candidate-модель и сохраняет JSONL/Markdown review artifacts;
+- добавить автоматические guardrails: валидный JSON, русский язык, отсутствие hallucinated known features, summary length, наличие user goals/decisions/open questions;
+- критерий выбора: минимум 16/20 good/excellent на review и отсутствие critical feature hallucinations.
+
+Результат:
+
+- прогон 20 examples x 4 models = 80 summary calls завершился успешно;
+- automatic safe counts: `qwen3.5:9b` 15/20, `qwen2.5:7b-instruct-q8_0` 14/20, `qwen3:14b` 14/20, `gemma4:12b` 13/20;
+- `qwen3.5:9b` лучший по automatic guardrails, но почти не сохраняет decisions;
+- `qwen2.5:7b-instruct-q8_0` лучше сохраняет decisions, но чаще теряет open questions и иногда галлюцинирует known features;
+- ни одна модель пока не достигла порога 16/20 без дополнительных prompt/guardrail улучшений.
+
+Вывод:
+
+- не стоит фиксировать summarizer-модель для M4.5 прямо сейчас;
+- следующий шаг: усилить prompt/guardrails, особенно по forbidden features, decisions и open questions, затем повторить selection;
+- это хороший пример практического model selection: качество роли важнее универсальности модели.
+
+Повторный прогон после prompt hardening:
+
+- candidate set остался тем же: `qwen2.5:7b-instruct-q8_0`, `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b`;
+- локальный automatic run агента: `qwen3.5:9b` 15/20 safe, `qwen2.5:7b-instruct-q8_0` 14/20, `gemma4:12b` 12/20, `qwen3:14b` 12/20;
+- локальный review пользователя показал похожую картину, но `qwen3:14b` субъективно выглядел чуть лучше: около 13/20;
+- целевой порог 16/20 всё равно не достигнут;
+- главный повторяющийся дефект: модели продолжают иногда добавлять known features вне `allowed_features`, чаще `webhooks`, `reports`, `integrations`.
+
+Инженерный вывод:
+
+- prompt-only hardening недостаточен для production-like memory layer;
+- `main_topics` нельзя принимать напрямую от LLM, даже при строгом prompt;
+- следующий шаг: deterministic post-validation — фильтровать `main_topics` через `allowed_features`, а отброшенные темы сохранять как warning/debug metadata.
+
+Реализация:
+
+- production `ConversationSummaryService` теперь очищает LLM `main_topics` через `allowed_features`;
+- очищенный `structured_summary` не содержит отброшенные topics, чтобы будущий prompt memory не подхватил их обратно;
+- отброшенные topics сохраняются отдельно в `validation_warnings` / `summary_validation_warnings`;
+- `select_summary_model.py` применяет ту же post-validation, чтобы следующий selection измерял качество безопасного итогового summary, а не только raw compliance модели.
+
+Повторный прогон после deterministic post-validation:
+
+- 20 examples x 4 models = 80 summary calls завершились успешно;
+- automatic safe counts: `gemma4:12b` 15/20, `qwen3.5:9b` 15/20, `qwen2.5:7b-instruct-q8_0` 14/20, `qwen3:14b` 12/20;
+- `gemma4:12b` стал одним из лидеров после очистки `main_topics`, но целевой порог 16/20 всё ещё не достигнут;
+- `qwen3.5:9b` сохранил 15/20, но снова показал нестабильность JSON/validation на 2 examples;
+- `validation_warnings` по `main_topics` почти не сработали: основной остаточный шум находится не в `main_topics`, а в текстовых полях `summary`, `decisions`, `user_goals`;
+- частые forbidden known features в текстовых полях: `reports`, `webhooks`, `integrations`.
+
+Следующий вывод:
+
+- post-validation `main_topics` нужен как safety layer, но он не решает весь класс hallucination/noise;
+- guardrails нужно сделать более диагностическими: отдельно показывать forbidden features в `main_topics`, отдельно raw topics, отброшенные post-validation, и отдельно forbidden features внутри текстовых summary fields.
+
+Реализация diagnostic guardrails:
+
+- `select_summary_model.py` теперь отдельно выводит `forbidden_known_features_in_main_topics`, `discarded_known_features_from_main_topics`, `forbidden_known_features_in_text`;
+- `safe_for_prompt_review` остается строгим и по-прежнему падает при любом forbidden known feature, но теперь видно, где именно возникла проблема;
+- summary output дополнен счетчиками `text_forbidden_cases`, `main_topic_forbidden_cases`, `discarded_topic_cases`.
+
+Полный прогон после diagnostic guardrails:
+
+- 20 examples x 4 models = 80 summary calls завершились успешно;
+- `qwen3.5:9b`: 15/20 safe, 2 validation/JSON errors, `text_forbidden_cases=3`;
+- `gemma4:12b`: 14/20 safe, errors=0, `text_forbidden_cases=6`;
+- `qwen2.5:7b-instruct-q8_0`: 14/20 safe, errors=0, `text_forbidden_cases=6`, `russian_failures=1`;
+- `qwen3:14b`: 12/20 safe, errors=0, `text_forbidden_cases=7`;
+- `main_topic_forbidden_cases=0` и `discarded_topic_cases=0` у всех моделей.
+
+Вывод:
+
+- post-validation `main_topics` стабилизировал topic field;
+- остаточные forbidden features появляются именно в текстовых полях;
+- следующий guardrail должен различать настоящую hallucination и полезные boundary mentions вроде `не смешивать notifications с webhooks`.
+
+Реализация следующего слоя:
+
+- добавлена Pydantic-модель `LlmStructuredSummary` для schema validation LLM structured summary;
+- production summary parser и `select_summary_model.py` теперь используют Pydantic перед domain validation;
+- в `select_summary_model.py` добавлен contextual guardrail: benign boundary mentions выводятся в `allowed_contextual_forbidden_mentions`, а настоящий шум остается в `forbidden_known_features_in_text`;
+- `safe_for_prompt_review` остается строгим, но теперь лучше отражает смысловую ошибку, а не любое техническое упоминание forbidden feature.
+
+Полный прогон после Pydantic + contextual guardrail:
+
+- 20 examples x 4 models = 80 summary calls завершились успешно;
+- `gemma4:12b`: 19/20 safe, errors=0, `text_forbidden_cases=1`, `contextual_allowed_cases=5`;
+- `qwen3.5:9b`: 17/20 safe, errors=2, `text_forbidden_cases=1`, `contextual_allowed_cases=2`;
+- `qwen2.5:7b-instruct-q8_0`: 16/20 safe, errors=0, `text_forbidden_cases=4`, `contextual_allowed_cases=2`, `russian_failures=1`;
+- `qwen3:14b`: 14/20 safe, errors=0, `text_forbidden_cases=5`, `contextual_allowed_cases=2`;
+- `main_topic_forbidden_cases=0` и `discarded_topic_cases=0` у всех моделей;
+- целевой порог 16/20 теперь прошли `gemma4:12b`, `qwen3.5:9b` и `qwen2.5:7b-instruct-q8_0`.
+
+Первичный разбор failures:
+
+- `gemma4:12b` упала только на одном example: в `decisions` появилось `рекомендовано эскалировать enterprise-тикеты ... в integrations team`;
+- это не topic hallucination и не ошибка JSON: модель пересказала operational action из assistant context, но guardrail посчитал `integrations` forbidden text noise;
+- `qwen3.5:9b` дважды вернула валидный JSON-объект, но без обязательного поля `summary`;
+- обе ошибки `qwen3.5:9b` выглядят как хороший кандидат для future repair retry: схема почти правильная, нужно дозапросить отсутствующее поле `summary`.
+
+Вывод:
+
+- `gemma4:12b` выглядит лучшим summarizer candidate: самый высокий safe score и ноль validation errors;
+- оставшийся `gemma4` failure нужно разбирать аккуратно: возможно, это legitimate operational team mention, а не опасная feature hallucination;
+- `qwen3.5:9b` потенциально сильная, но требует retry/schema repair layer перед production use.
+
+Targeted failure analysis:
+
+- `gemma4:12b` failure с `integrations` оказался operational mention: `эскалировать enterprise-тикеты ... в integrations team`;
+- это не расширение `main_topics` и не product feature hallucination, поэтому в selection guardrail добавлен узкий allowlist для `integrations team` / `команда интеграций`;
+- обычное упоминание `integrations` без operational/team context по-прежнему считается forbidden text noise;
+- `qwen3.5:9b` schema errors вызваны отсутствующим обязательным полем `summary` при почти корректном JSON;
+- добавлен repair retry только при schema validation error: успешные ответы `gemma4:12b` не затрагиваются;
+- targeted repair smoke для `qwen3.5:9b` успешно восстановил `summary` и прошел `safe_for_prompt_review=True`.
+- для `qwen3.5:9b` добавлен узкий boundary marker `не следует пут`, чтобы фраза `не следует путать ... webhooks` считалась contextual mention, а не forbidden text noise.
+
+Дополнительный разбор перед следующим full run:
+
+- `qwen2.5:7b-instruct-q8_0` unsafe cases: два `integrations team` operational mentions, один boundary mention про `reports`, один спорный `SLA reports` symptom object внутри проблемы `permissions`;
+- `integrations team` cases должны закрыться уже внесённым allowlist;
+- boundary mention про `reports` вероятно закроется текущим marker `отдел`;
+- `SLA reports` как symptom object пока не правим: это отдельная бизнес-семантика, лучше не расширять guardrail без повторного измерения;
+- `qwen3:14b` unsafe cases: два `integrations team`, три `SLA reports` symptom object для `permissions`, один `russian_language_ok=false` из-за большого количества английских metric identifiers;
+- оптимизировать guardrail специально под `qwen3:14b` пока нецелесообразно, так как главный кандидат остаётся `gemma4:12b`.
+
+Ожидания перед следующим full selection:
+
+- `gemma4:12b`: ожидаем 20/20 safe, если единственный failure действительно был operational mention `integrations team`;
+- `qwen3.5:9b`: ожидаем рост до 19-20/20, но часть успеха может быть через `repair_retry_used=True`;
+- `qwen2.5:7b-instruct-q8_0`: ожидаем рост выше 16/20 за счёт `integrations team` allowlist и существующего boundary marker `отдел`;
+- `qwen3:14b`: ожидаем небольшой рост за счёт `integrations team`, но не 20/20 из-за нерешённых `SLA reports` symptom object и language heuristic;
+- после full run нужно сравнить эти ожидания с реальностью и отдельно решить, нужен ли класс `allowed_symptom_object_mentions`.
+
+Фактический full run после targeted fixes:
+
+- 20 examples x 4 models = 80 summary calls завершились успешно;
+- `gemma4:12b`: 20/20 safe, errors=0, repair_retries=0, avg_latency около 8.2s;
+- `qwen3.5:9b`: 20/20 safe, errors=0, repair_retries=2, avg_latency около 5.1s;
+- `qwen2.5:7b-instruct-q8_0`: 18/20 safe, errors=0, repair_retries=0, avg_latency около 4.8s;
+- `qwen3:14b`: 16/20 safe, errors=0, repair_retries=0, avg_latency около 11.2s;
+- `main_topic_forbidden_cases=0` и `discarded_topic_cases=0` у всех моделей;
+- `gemma4:12b` и `qwen3.5:9b` достигли 20/20, но `gemma4:12b` сделала это без repair retry.
+
+Сравнение ожиданий с реальностью:
+
+- ожидание по `gemma4:12b` подтвердилось полностью: единственный failure был operational mention `integrations team`;
+- ожидание по `qwen3.5:9b` подтвердилось: два schema failures закрылись repair retry;
+- ожидание по `qwen2.5:7b-instruct-q8_0` подтвердилось частично: модель выросла до 18/20, но остались `reports` symptom/boundary cases;
+- ожидание по `qwen3:14b` подтвердилось: модель выросла до 16/20, но остались `SLA reports` symptom object и language heuristic case;
+- `allowed_symptom_object_mentions` остаётся потенциальным будущим улучшением, но для выбора summarizer оно уже не блокирует M4.4.2.
+
+Итоговый вывод M4.4.2:
+
+- лучший primary summarizer candidate: `gemma4:12b` — 20/20 safe, ноль ошибок, ноль repair retries;
+- лучший fast fallback/alternative candidate: `qwen3.5:9b` — 20/20 safe, но требует repair retry для стабильности schema;
+- `qwen2.5:7b-instruct-q8_0` остаётся быстрым baseline candidate, но качество ниже;
+- `qwen3:14b` не выглядит оправданным для summarizer role: медленнее `gemma4:12b` и хуже по quality score.

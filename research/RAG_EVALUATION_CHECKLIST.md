@@ -390,6 +390,28 @@ Q5: А можешь без метрик?
 - `context_policy.numeric_line_sanitization=true`;
 - ответ не должен содержать numeric KPI/percent-style метрики.
 
+## Test 20: LLM Structured Summary
+
+Запросы в одной `session_id`:
+
+```text
+Q1: Какие проблемы с notifications влияют на enterprise-клиентов?
+Q2: Понял. Какие риски для команды?
+Q3: Как это объяснить PO?
+Q4: Что с этим делать в первую очередь?
+Q5: А какие из них самые критичные?
+```
+
+Ожидания:
+
+- `conversation_context.summary_available=true`;
+- `conversation_context.summary_used=true`;
+- `conversation_context.summary_strategy` равен `hybrid` или `llm`;
+- `conversation_context.summary_model` содержит выбранную summarizer-модель;
+- `conversation_context.summary_fallback_used=false` для clean LLM path;
+- `conversation_context.summary_structured.summary` непустой;
+- sources остаются связаны с исходной темой `notifications`.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

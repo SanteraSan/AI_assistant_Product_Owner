@@ -23,6 +23,12 @@ class ConversationContextDecision:
     summary_features: list[str]
     summary_mode: str
     summary_reason: str
+    summary_strategy: str
+    summary_model: str | None
+    summary_structured: dict[str, object]
+    summary_fallback_used: bool
+    summary_validation_error: str | None
+    summary_validation_warnings: list[str]
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -42,6 +48,12 @@ class ConversationContextDecision:
             "summary_features": self.summary_features,
             "summary_mode": self.summary_mode,
             "summary_reason": self.summary_reason,
+            "summary_strategy": self.summary_strategy,
+            "summary_model": self.summary_model,
+            "summary_structured": self.summary_structured,
+            "summary_fallback_used": self.summary_fallback_used,
+            "summary_validation_error": self.summary_validation_error,
+            "summary_validation_warnings": self.summary_validation_warnings,
         }
 
 
@@ -148,6 +160,12 @@ class ConversationContextService:
                 summary_features=summary_context.features,
                 summary_mode=summary_context.mode,
                 summary_reason=summary_context.reason,
+                summary_strategy=summary_context.strategy,
+                summary_model=summary_context.summary_model,
+                summary_structured=summary_context.structured_summary,
+                summary_fallback_used=summary_context.fallback_used,
+                summary_validation_error=summary_context.validation_error,
+                summary_validation_warnings=summary_context.validation_warnings,
             )
         if not follow_up_detected:
             return self._empty_decision(
@@ -214,6 +232,12 @@ class ConversationContextService:
             summary_features=summary_context.features,
             summary_mode=summary_context.mode,
             summary_reason=summary_context.reason,
+            summary_strategy=summary_context.strategy,
+            summary_model=summary_context.summary_model,
+            summary_structured=summary_context.structured_summary,
+            summary_fallback_used=summary_context.fallback_used,
+            summary_validation_error=summary_context.validation_error,
+            summary_validation_warnings=summary_context.validation_warnings,
         )
 
     def _is_follow_up(self, normalized_message: str) -> bool:
@@ -276,6 +300,12 @@ class ConversationContextService:
             summary_features=summary_context.features,
             summary_mode=summary_context.mode,
             summary_reason=summary_context.reason,
+            summary_strategy=summary_context.strategy,
+            summary_model=summary_context.summary_model,
+            summary_structured=summary_context.structured_summary,
+            summary_fallback_used=summary_context.fallback_used,
+            summary_validation_error=summary_context.validation_error,
+            summary_validation_warnings=summary_context.validation_warnings,
         )
 
 
@@ -291,6 +321,12 @@ def _empty_summary_context() -> ConversationSummaryContext:
         token_estimate=0,
         mode="not_available",
         reason="not_provided",
+        strategy="rule_based",
+        summary_model=None,
+        structured_summary={},
+        fallback_used=False,
+        validation_error=None,
+        validation_warnings=[],
     )
 
 

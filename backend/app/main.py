@@ -56,6 +56,10 @@ conversation_context_service = ConversationContextService(
 conversation_summary_service = ConversationSummaryService(
     session_factory=db_session_factory,
     feature_extractor=feature_extractor,
+    ollama_client=ollama_client,
+    summary_strategy=settings.conversation_summary_strategy,
+    summary_model=settings.conversation_summary_model,
+    summary_temperature=settings.conversation_summary_temperature,
 )
 
 
@@ -233,6 +237,12 @@ async def _build_conversation_context(
             "summary_features": [],
             "summary_mode": "error",
             "summary_reason": "conversation_context_build_failed",
+            "summary_strategy": settings.conversation_summary_strategy,
+            "summary_model": settings.conversation_summary_model,
+            "summary_structured": {},
+            "summary_fallback_used": False,
+            "summary_validation_error": "conversation_context_build_failed",
+            "summary_validation_warnings": [],
         }
 
 

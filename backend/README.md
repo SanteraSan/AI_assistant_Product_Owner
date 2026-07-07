@@ -512,3 +512,58 @@ python -m scripts.run_rag_evaluation \
 Targeted M4.3 run `d48f20eb-0289-44f2-8832-c47de7e99863`: 4 новых summary scenarios x 1 модель, `errors=0`, `zero_sources=0`, `failed_flags=0`.
 
 Full regression M4.3 run `35a9f4df-bf83-4643-9623-d179735016fd`: 5 моделей x 19 сценариев = 95 результатов, `errors=0`, `zero_sources=0`, `failed_flags=0`.
+
+## M4.4: LLM-Based Structured Summary
+
+M4.4 добавляет production-like режим summary: локальная LLM строит структурированный JSON, а rule-based summary остается fallback.
+
+Настройки:
+
+```bash
+CONVERSATION_SUMMARY_STRATEGY=hybrid
+CONVERSATION_SUMMARY_MODEL=qwen2.5:3b
+CONVERSATION_SUMMARY_TEMPERATURE=0.0
+```
+
+Поддерживаемые стратегии:
+
+- `rule_based` - старый M4.3 режим без вызова LLM;
+- `llm` - пробовать LLM summary;
+- `hybrid` - пробовать LLM summary, но при ошибке JSON/валидации сохранить rule-based summary.
+
+LLM summary возвращает JSON:
+
+```json
+{
+  "main_topics": ["notifications"],
+  "user_goals": ["понять критичные проблемы enterprise-клиентов"],
+  "decisions": [],
+  "open_questions": [],
+  "constraints": [],
+  "summary": "Пользователь обсуждает проблемы notifications..."
+}
+```
+
+Backend валидирует JSON и сохраняет structured summary в `conversation_summaries.metadata_json`. Важно: `features` для retrieval по-прежнему извлекаются `FeatureExtractor` из реального текста диалога, а не берутся на веру из LLM summary.
+
+Новые debug fields:
+
+```json
+{
+  "summary_strategy": "hybrid",
+  "summary_model": "qwen2.5:3b",
+  "summary_structured": {
+    "summary": "..."
+  },
+  "summary_fallback_used": false,
+  "summary_validation_error": null
+}
+```
+
+Targeted M4.4 run `7337aeab-9946-4447-b4ba-258ca56654a4`: `llm_summary_structured` x 1 модель, `errors=0`, `failed_flags=0`.
+
+Targeted memory regression `1b58271c-9955-4c03-b7f5-7e3ef93b6ac1`: 5 summary/memory scenarios x 1 модель, `errors=0`, `zero_sources=0`, `failed_flags=0`.
+
+Diagnostic full run `31d78815-3424-4270-9d7b-d8a5befd2f0f` поймал router-priority regression: LLM-summary добавил technical markers, и explicit metric follow-up иногда не получал `metric_row`. После fix explicit metric question markers имеют приоритет над technical markers из summary.
+
+Clean full regression M4.4 run `8fd546bb-ea64-426e-bd2d-d5350f9becc1`: 5 моделей x 20 сценариев = 100 результатов, `errors=0`, `zero_sources=0`, `failed_flags=0`.

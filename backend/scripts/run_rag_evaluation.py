@@ -213,6 +213,22 @@ SCENARIOS = [
             "А можешь без метрик?",
         ),
     ),
+    EvaluationScenario(
+        id="llm_summary_structured",
+        name="LLM Structured Summary",
+        prompt=(
+            "Q1: Какие проблемы с notifications влияют на enterprise-клиентов?\n"
+            "Q2-Q4: follow-up без явного feature\n"
+            "Q5: А какие из них самые критичные?"
+        ),
+        turns=(
+            "Какие проблемы с notifications влияют на enterprise-клиентов?",
+            "Понял. Какие риски для команды?",
+            "Как это объяснить PO?",
+            "Что с этим делать в первую очередь?",
+            "А какие из них самые критичные?",
+        ),
+    ),
 ]
 
 
@@ -570,6 +586,27 @@ def _build_quality_flags(
             context_policy.get("numeric_line_sanitization") is True
         )
         flags["no_percent_symbol"] = "%" not in response
+    elif scenario.id == "llm_summary_structured":
+        structured_summary = conversation_context.get("summary_structured") or {}
+        flags["summary_available"] = conversation_context.get("summary_available") is True
+        flags["summary_used"] = conversation_context.get("summary_used") is True
+        flags["summary_strategy_hybrid_or_llm"] = conversation_context.get(
+            "summary_strategy"
+        ) in {"hybrid", "llm"}
+        flags["summary_mode_llm"] = conversation_context.get("summary_mode") in {
+            "llm_structured",
+            "stored_summary",
+        }
+        flags["summary_no_fallback"] = (
+            conversation_context.get("summary_fallback_used") is not True
+        )
+        flags["structured_summary_ok"] = _structured_summary_ok(structured_summary)
+        flags["notifications_context_ok"] = _has_context_feature(
+            feature="notifications",
+            response_features=response_features,
+            source_features=source_features,
+            conversation_context=conversation_context,
+        )
 
     return flags
 
@@ -593,6 +630,13 @@ def _has_context_feature(
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     return any(marker in text for marker in markers)
+
+
+def _structured_summary_ok(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    summary = value.get("summary")
+    return isinstance(summary, str) and bool(summary.strip())
 
 
 def _default_run_name() -> str:

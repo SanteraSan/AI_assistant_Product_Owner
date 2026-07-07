@@ -24,6 +24,15 @@ class QueryRouter:
             "delay",
             "задержк",
         )
+        self._explicit_metric_question_markers = (
+            "какие метрики",
+            "какие показатели",
+            "метрики по",
+            "показатели по",
+            "какие kpi",
+            "какие metrics",
+            "which metrics",
+        )
         self._metric_negative_markers = (
             "без метрик",
             "без metrics",
@@ -135,6 +144,10 @@ class QueryRouter:
             normalized,
             self._metric_positive_markers,
         )
+        has_explicit_metric_question = _contains_any(
+            normalized,
+            self._explicit_metric_question_markers,
+        )
         has_strong_technical_marker = _contains_any(
             normalized,
             self._strong_technical_root_cause_markers,
@@ -142,7 +155,7 @@ class QueryRouter:
         metric_intent = (
             has_metric_positive_marker
             and not has_metric_negative_marker
-            and not has_strong_technical_marker
+            and (has_explicit_metric_question or not has_strong_technical_marker)
         )
         release_notes_intent = (
             _contains_any(normalized, self._release_notes_markers)
@@ -155,7 +168,7 @@ class QueryRouter:
         )
         technical_root_cause_intent = (
             _contains_any(normalized, self._technical_root_cause_markers)
-            and (has_strong_technical_marker or not metric_intent)
+            and not metric_intent
             and not release_notes_intent
             and not support_feedback_intent
         )

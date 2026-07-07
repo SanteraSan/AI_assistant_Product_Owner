@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     raw_data_dir: str = "../data/raw"
     rag_top_k: int = 5
     rag_score_threshold: float | None = 0.68
+    conversation_summary_strategy: str = "hybrid"
+    conversation_summary_model: str = "qwen2.5:3b"
+    conversation_summary_temperature: float = 0.0
 
     model_config = SettingsConfigDict(
         env_file=".env",
