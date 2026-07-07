@@ -432,6 +432,28 @@ Q5: А что нужно объяснить PO в первую очередь?
 - `conversation_context.prompt_memory.token_estimate <= token_budget`;
 - prompt memory используется только как память диалога, а факты продукта по-прежнему должны приходить из Qdrant sources.
 
+## Test 22: PDF Text Ingestion
+
+Запрос:
+
+```text
+Что в PDF brief сказано про delayed Slack notifications?
+```
+
+Параметры:
+
+- `source_types=["pdf"]`;
+- `score_threshold=0.0` для короткого synthetic PDF smoke.
+
+Ожидания:
+
+- sources содержит `source_type=pdf`;
+- source path указывает на `data/raw/tech_knowledge/notifications_pdf_brief.pdf`;
+- `source.metadata.document_metadata.page_number=1`;
+- `source.metadata.bucket_id=taskflow_seed`;
+- ответ упоминает `notifications` / delayed Slack notifications;
+- automatic flags: `has_pdf_source=true`, `pdf_page_metadata_ok=true`, `pdf_bucket_metadata_ok=true`.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

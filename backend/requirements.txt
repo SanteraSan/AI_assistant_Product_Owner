@@ -4,6 +4,7 @@ httpx
 pydantic-settings
 qdrant-client
 pandas
+pypdf
 pyyaml
 sqlalchemy
 asyncpg

@@ -1730,3 +1730,45 @@ Reindex verification:
 - scenarios: `metric_intent`, `negative_metric_intent`, `general_po_summary`, `technical_root_cause`, `summary_long_follow_up`, `summary_topic_switch`, `prompt_memory_budget`;
 - model: `qwen3.5:9b`;
 - result: 7/7 `ok`, `failed_flags=0`, `errors=0`, avg latency около 4.6s.
+
+## 2026-07-08: M5.1 PDF Text Ingestion
+
+Контекст:
+
+- следующий шаг после M5.0 foundation: научиться индексировать text-based PDF;
+- OCR, scanned PDF, charts и vision models не входят в baseline M5.1;
+- для картинок и сканов позже отдельно рассмотрим OCR/Qwen-VL-like ingestion pipeline.
+
+Решение:
+
+- добавить dependency `pypdf`;
+- читать `.pdf` в `document_loader.py` постранично;
+- каждая страница PDF становится отдельным `RawDocument`;
+- сохранять metadata: `file_name`, `page_number`, `page_count`, `source_type=pdf`, `tenant_id`, `bucket_id`;
+- добавить sample PDF `data/raw/tech_knowledge/notifications_pdf_brief.pdf`;
+- добавить evaluation scenario `pdf_text_ingestion` с `source_types=["pdf"]` и `score_threshold=0.0` для короткого synthetic PDF.
+
+Smoke:
+
+- temporary PDF loader smoke: 1 document, 1 chunk, `source_type=pdf`, `page_number=1`, `bucket_id=test_bucket`;
+- real corpus smoke after sample PDF: 174 documents total, 1 PDF document;
+- PDF payload содержит `source_type=pdf`, `tenant_id=local_demo`, `bucket_id=taskflow_seed`, `processing_status=indexed`, `document_metadata.page_number=1`.
+
+Reindex and evaluation:
+
+- выполнен `scripts.ingest_seed_data --recreate`;
+- результат ingestion: 174 documents, 174 chunks;
+- targeted PDF RAG smoke с default threshold вернул 0 sources, что показало чувствительность короткого PDF к retrieval score;
+- повтор с `score_threshold=0.0` вернул 1 PDF source, `page_number=1`, `bucket_id=taskflow_seed`;
+- PDF evaluation run id: `66901498-4411-4bf7-a159-758f3aba0603`;
+- `pdf_text_ingestion`: sources=1, `has_pdf_source=true`, `pdf_page_metadata_ok=true`, `pdf_bucket_metadata_ok=true`, `failed_flags=0`;
+- M5.1 regression run id: `aff5a8e9-8799-4a01-b398-d8b0aebc7a6d`;
+- scenarios: `metric_intent`, `negative_metric_intent`, `general_po_summary`, `summary_topic_switch`, `prompt_memory_budget`, `pdf_text_ingestion`;
+- result: 6/6 `ok`, `failed_flags=0`, `errors=0`, avg latency около 4.2s.
+
+Вывод:
+
+- базовый PDF text ingestion работает end-to-end через Qdrant/RAG;
+- page-level metadata и bucket metadata доходят до source metadata;
+- для document QA evaluation важно явно управлять `source_types` и threshold, особенно на коротких PDF;
+- следующий логичный шаг: расширять document QA evaluation и сравнить `qwen3.5:9b`, `gemma4:12b`, возможно `qwen3:14b` на ответах по document context.

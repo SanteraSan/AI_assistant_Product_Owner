@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from pypdf import PdfReader
 import yaml
 
 DEFAULT_TENANT_ID = "local_demo"
@@ -36,6 +37,7 @@ def load_raw_documents(
     documents.extend(_load_markdown_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_text_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_json_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
+    documents.extend(_load_pdf_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_csv_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_openapi_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     return [document for document in documents if document.content.strip()]
@@ -117,6 +119,39 @@ def _load_json_documents(
                 bucket_id=bucket_id,
             )
         )
+    return documents
+
+
+def _load_pdf_documents(
+    raw_data_dir: Path,
+    *,
+    tenant_id: str,
+    bucket_id: str,
+) -> list[RawDocument]:
+    documents: list[RawDocument] = []
+    for path in sorted(raw_data_dir.rglob("*.pdf")):
+        reader = PdfReader(path)
+        page_count = len(reader.pages)
+        for page_index, page in enumerate(reader.pages, start=1):
+            content = (page.extract_text() or "").strip()
+            documents.append(
+                RawDocument(
+                    id=f"{_stable_document_id(path)}:page:{page_index}",
+                    title=f"{path.stem.replace('_', ' ').title()} - page {page_index}",
+                    content=content,
+                    source_type="pdf",
+                    source_path=str(path),
+                    domain=_domain_for_path(path),
+                    feature=_features_from_text(content),
+                    metadata={
+                        "file_name": path.name,
+                        "page_number": page_index,
+                        "page_count": page_count,
+                    },
+                    tenant_id=tenant_id,
+                    bucket_id=bucket_id,
+                )
+            )
     return documents
 
 

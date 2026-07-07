@@ -22,6 +22,8 @@ class EvaluationScenario:
     name: str
     prompt: str
     turns: tuple[str, ...] = ()
+    source_types: tuple[str, ...] = ()
+    score_threshold: float | None = None
     expected_feature: str | None = None
     expected_prompt_memory_used: bool | None = None
     expected_metric_intent: bool | None = None
@@ -409,6 +411,13 @@ SCENARIOS = [
         ),
         expected_feature="notifications",
     ),
+    EvaluationScenario(
+        id="pdf_text_ingestion",
+        name="PDF Text Ingestion",
+        prompt="Что в PDF brief сказано про delayed Slack notifications?",
+        source_types=("pdf",),
+        score_threshold=0.0,
+    ),
 ]
 
 
@@ -559,6 +568,10 @@ async def _run_scenario(
             "model": model,
             "top_k": top_k,
         }
+        if scenario.source_types:
+            payload["source_types"] = list(scenario.source_types)
+        if scenario.score_threshold is not None:
+            payload["score_threshold"] = scenario.score_threshold
         if session_id:
             payload["session_id"] = session_id
         response = await client.post("/rag/chat", json=payload)
@@ -807,6 +820,19 @@ def _build_quality_flags(
             source_features=source_features,
             conversation_context=conversation_context,
         )
+    elif scenario.id == "pdf_text_ingestion":
+        pdf_sources = [source for source in sources if source.get("source_type") == "pdf"]
+        flags["has_pdf_source"] = bool(pdf_sources)
+        flags["pdf_page_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "page_number"
+            )
+            for source in pdf_sources
+        )
+        flags["pdf_bucket_metadata_ok"] = any(
+            (source.get("metadata") or {}).get("bucket_id") for source in pdf_sources
+        )
+        flags["pdf_mentions_notifications"] = "notifications" in response
 
     if scenario.id.startswith("memory_"):
         prompt_memory = conversation_context.get("prompt_memory") or {}

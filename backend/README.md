@@ -640,3 +640,39 @@ M5.0 добавляет:
 - compatibility с текущим seed ingestion: старые markdown/csv/yaml документы получают default bucket/tenant metadata.
 
 Важно: `bucket_id` добавлен сразу как лёгкая metadata-рельса. Полноценный retrieval filter и no-leak evaluation между buckets остаются отдельным подэтапом M5 после базового PDF/document QA.
+
+## M5.1: PDF Text Ingestion
+
+M5.1 добавляет минимальную поддержку text-based PDF без OCR. PDF читается через `pypdf`, каждая страница становится отдельным `RawDocument`, чтобы source traceability могла ссылаться на конкретный `page_number`.
+
+PDF metadata:
+
+```json
+{
+  "source_type": "pdf",
+  "document_metadata": {
+    "file_name": "notifications_pdf_brief.pdf",
+    "page_number": 1,
+    "page_count": 1
+  },
+  "bucket_id": "taskflow_seed",
+  "tenant_id": "local_demo"
+}
+```
+
+Добавлен sample PDF:
+
+```text
+data/raw/tech_knowledge/notifications_pdf_brief.pdf
+```
+
+Evaluation:
+
+- scenario: `pdf_text_ingestion`;
+- request ограничивает `source_types=["pdf"]`;
+- `score_threshold=0.0` для короткого synthetic PDF smoke;
+- quality flags проверяют `has_pdf_source`, `pdf_page_metadata_ok`, `pdf_bucket_metadata_ok`, `pdf_mentions_notifications`.
+
+M5.1 smoke `66901498-4411-4bf7-a159-758f3aba0603`: `pdf_text_ingestion` на `qwen3.5:9b`, sources=1, `failed_flags=0`.
+
+M5.1 regression `aff5a8e9-8799-4a01-b398-d8b0aebc7a6d`: 5 baseline scenarios + `pdf_text_ingestion`, `failed_flags=0`, `errors=0`.
