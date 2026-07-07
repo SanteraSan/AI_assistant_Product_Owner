@@ -620,3 +620,23 @@ M4.5 stability check:
 - `prompt_memory.used=false`: 21 случай, все с `reason=topic_switch`.
 
 Итог по модели: `qwen3.5:9b` выбран как основной кандидат для дальнейших summary/context-memory и частых RAG regression прогонов. `gemma4:12b` остаётся эталонной моделью для сравнения и более осторожным summarizer baseline.
+
+## M5.0: File Ingestion Skeleton
+
+M5 начинается с production-minded document ingestion: сначала учимся принимать и индексировать простые файлы, но сразу добавляем metadata foundation для будущих buckets и tenant isolation.
+
+Настройки по умолчанию:
+
+```bash
+DEFAULT_TENANT_ID=local_demo
+DEFAULT_BUCKET_ID=taskflow_seed
+```
+
+M5.0 добавляет:
+
+- загрузку `.txt`, `.md`, `.json` через общий `RawDocument` pipeline;
+- `tenant_id`, `bucket_id`, `processing_status` на уровне документа и chunk;
+- `tenant_id`, `bucket_id`, `processing_status`, `document_metadata` в Qdrant payload;
+- compatibility с текущим seed ingestion: старые markdown/csv/yaml документы получают default bucket/tenant metadata.
+
+Важно: `bucket_id` добавлен сразу как лёгкая metadata-рельса. Полноценный retrieval filter и no-leak evaluation между buckets остаются отдельным подэтапом M5 после базового PDF/document QA.

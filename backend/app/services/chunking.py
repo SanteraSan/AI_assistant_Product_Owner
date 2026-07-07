@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from app.services.document_loader import RawDocument
 
@@ -14,6 +15,10 @@ class DocumentChunk:
     domain: str
     feature: list[str]
     chunk_index: int
+    tenant_id: str
+    bucket_id: str
+    processing_status: str
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def chunk_documents(
@@ -37,6 +42,10 @@ def chunk_documents(
                     domain=document.domain,
                     feature=document.feature,
                     chunk_index=index,
+                    tenant_id=document.tenant_id,
+                    bucket_id=document.bucket_id,
+                    processing_status=document.processing_status,
+                    metadata=dict(document.metadata),
                 )
             )
     return chunks

@@ -1689,3 +1689,44 @@ Targeted smoke:
 - на текущем M4.5 наборе модель показывает стабильное качество: 105/105 без failed flags;
 - скорость заметно лучше `gemma4:12b`, поэтому `qwen3.5:9b` стоит оставить главным кандидатом для дальнейших больших M4.5/M5 прогонов;
 - `gemma4:12b` остаётся полезной эталонной моделью для сравнения и summarizer baseline, но для частых regression runs `qwen3.5:9b` выглядит практичнее.
+
+## 2026-07-08: M5.0 File Ingestion Skeleton
+
+Контекст:
+
+- M5 начинаем не как демо-загрузку файлов, а как production-minded ingestion/retrieval слой;
+- главный продуктовый фокус M5: научиться принимать, парсить, индексировать и проверять файлы;
+- `bucket_id` и `tenant_id` нужны сразу как metadata foundation для будущей isolation, но полноценный no-leak retrieval test между buckets не должен блокировать первый file ingestion step.
+
+Решение:
+
+- добавить default settings `DEFAULT_TENANT_ID=local_demo` и `DEFAULT_BUCKET_ID=taskflow_seed`;
+- расширить `RawDocument` полями `tenant_id`, `bucket_id`, `processing_status`;
+- добавить skeleton loaders для `.txt` и `.json` рядом с существующими `.md`, `.csv`, `.yaml/.yml`;
+- прокинуть `tenant_id`, `bucket_id`, `processing_status` и `document_metadata` в `DocumentChunk` и Qdrant payload;
+- не добавлять пока активный `/rag/chat` filter по bucket: это отдельный M5.3 подэтап после базового PDF/document QA.
+
+Smoke без записи в Qdrant:
+
+- documents loaded: 173;
+- chunks produced: 173;
+- first payload содержит `tenant_id=local_demo`, `bucket_id=taskflow_seed`, `processing_status=indexed`;
+- payload keys включают `tenant_id`, `bucket_id`, `document_id`, `chunk_id`, `source_type`, `source_path`, `document_metadata`;
+- diagnostics и `py_compile` по изменённым Python-файлам прошли без ошибок.
+
+Вывод:
+
+- M5.0 foundation добавлен маленьким шагом и не ломает текущий seed ingestion;
+- будущая bucket isolation будет строиться поверх уже существующего payload metadata, а не через переиндексацию всего корпуса;
+- legacy `.doc` не берём в baseline: пользователь может конвертировать в `.docx`, а полноценная поддержка `.doc` остаётся future support.
+
+Reindex verification:
+
+- выполнен `scripts.ingest_seed_data --recreate` для текущего seed corpus;
+- результат ingestion: 173 documents, 173 chunks, collection `documents`;
+- новый Qdrant payload содержит `tenant_id=local_demo`, `bucket_id=taskflow_seed`, `processing_status=indexed`, `document_metadata`;
+- API smoke через `/rag/chat` подтвердил, что эти поля возвращаются в `source.metadata`;
+- post-reindex regression run id: `5070234d-6e65-48e8-bf70-75763a92c7d1`;
+- scenarios: `metric_intent`, `negative_metric_intent`, `general_po_summary`, `technical_root_cause`, `summary_long_follow_up`, `summary_topic_switch`, `prompt_memory_budget`;
+- model: `qwen3.5:9b`;
+- result: 7/7 `ok`, `failed_flags=0`, `errors=0`, avg latency около 4.6s.

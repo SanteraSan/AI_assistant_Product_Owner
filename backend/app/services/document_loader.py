@@ -1,9 +1,14 @@
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import yaml
+
+DEFAULT_TENANT_ID = "local_demo"
+DEFAULT_BUCKET_ID = "taskflow_seed"
+INDEXED_STATUS = "indexed"
 
 
 @dataclass(frozen=True)
@@ -16,17 +21,32 @@ class RawDocument:
     domain: str
     feature: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    tenant_id: str = DEFAULT_TENANT_ID
+    bucket_id: str = DEFAULT_BUCKET_ID
+    processing_status: str = INDEXED_STATUS
 
 
-def load_raw_documents(raw_data_dir: Path) -> list[RawDocument]:
+def load_raw_documents(
+    raw_data_dir: Path,
+    *,
+    tenant_id: str = DEFAULT_TENANT_ID,
+    bucket_id: str = DEFAULT_BUCKET_ID,
+) -> list[RawDocument]:
     documents: list[RawDocument] = []
-    documents.extend(_load_markdown_documents(raw_data_dir))
-    documents.extend(_load_csv_documents(raw_data_dir))
-    documents.extend(_load_openapi_documents(raw_data_dir))
+    documents.extend(_load_markdown_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
+    documents.extend(_load_text_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
+    documents.extend(_load_json_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
+    documents.extend(_load_csv_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
+    documents.extend(_load_openapi_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     return [document for document in documents if document.content.strip()]
 
 
-def _load_markdown_documents(raw_data_dir: Path) -> list[RawDocument]:
+def _load_markdown_documents(
+    raw_data_dir: Path,
+    *,
+    tenant_id: str,
+    bucket_id: str,
+) -> list[RawDocument]:
     documents: list[RawDocument] = []
     for path in sorted(raw_data_dir.rglob("*.md")):
         content = path.read_text(encoding="utf-8")
@@ -40,12 +60,72 @@ def _load_markdown_documents(raw_data_dir: Path) -> list[RawDocument]:
                 domain=_domain_for_path(path),
                 feature=_features_from_text(content),
                 metadata={"file_name": path.name},
+                tenant_id=tenant_id,
+                bucket_id=bucket_id,
             )
         )
     return documents
 
 
-def _load_csv_documents(raw_data_dir: Path) -> list[RawDocument]:
+def _load_text_documents(
+    raw_data_dir: Path,
+    *,
+    tenant_id: str,
+    bucket_id: str,
+) -> list[RawDocument]:
+    documents: list[RawDocument] = []
+    for path in sorted(raw_data_dir.rglob("*.txt")):
+        content = path.read_text(encoding="utf-8")
+        documents.append(
+            RawDocument(
+                id=_stable_document_id(path),
+                title=path.stem.replace("_", " ").title(),
+                content=content,
+                source_type=_source_type_for_path(path),
+                source_path=str(path),
+                domain=_domain_for_path(path),
+                feature=_features_from_text(content),
+                metadata={"file_name": path.name},
+                tenant_id=tenant_id,
+                bucket_id=bucket_id,
+            )
+        )
+    return documents
+
+
+def _load_json_documents(
+    raw_data_dir: Path,
+    *,
+    tenant_id: str,
+    bucket_id: str,
+) -> list[RawDocument]:
+    documents: list[RawDocument] = []
+    for path in sorted(raw_data_dir.rglob("*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        content = _json_to_text(data)
+        documents.append(
+            RawDocument(
+                id=_stable_document_id(path),
+                title=_title_from_json(data) or path.stem.replace("_", " ").title(),
+                content=content,
+                source_type=_source_type_for_path(path),
+                source_path=str(path),
+                domain=_domain_for_path(path),
+                feature=_features_from_text(content),
+                metadata={"file_name": path.name},
+                tenant_id=tenant_id,
+                bucket_id=bucket_id,
+            )
+        )
+    return documents
+
+
+def _load_csv_documents(
+    raw_data_dir: Path,
+    *,
+    tenant_id: str,
+    bucket_id: str,
+) -> list[RawDocument]:
     documents: list[RawDocument] = []
     for path in sorted(raw_data_dir.rglob("*.csv")):
         frame = pd.read_csv(path)
@@ -63,12 +143,19 @@ def _load_csv_documents(raw_data_dir: Path) -> list[RawDocument]:
                     domain=_domain_for_path(path),
                     feature=feature,
                     metadata={"row_index": int(index), "file_name": path.name, **row_data},
+                    tenant_id=tenant_id,
+                    bucket_id=bucket_id,
                 )
             )
     return documents
 
 
-def _load_openapi_documents(raw_data_dir: Path) -> list[RawDocument]:
+def _load_openapi_documents(
+    raw_data_dir: Path,
+    *,
+    tenant_id: str,
+    bucket_id: str,
+) -> list[RawDocument]:
     documents: list[RawDocument] = []
     for path in sorted(list(raw_data_dir.rglob("*.yaml")) + list(raw_data_dir.rglob("*.yml"))):
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -108,6 +195,8 @@ def _load_openapi_documents(raw_data_dir: Path) -> list[RawDocument]:
                             "tags": tags,
                             "file_name": path.name,
                         },
+                        tenant_id=tenant_id,
+                        bucket_id=bucket_id,
                     )
                 )
     return documents
@@ -117,6 +206,16 @@ def _title_from_markdown(content: str) -> str | None:
     for line in content.splitlines():
         if line.startswith("# "):
             return line[2:].strip()
+    return None
+
+
+def _title_from_json(data: Any) -> str | None:
+    if not isinstance(data, dict):
+        return None
+    for key in ("title", "name", "id"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return None
 
 
@@ -168,3 +267,7 @@ def _split_features(value: str) -> list[str]:
 
 def _row_to_text(row: dict[str, str]) -> str:
     return "\n".join(f"{key}: {value}" for key, value in row.items() if value)
+
+
+def _json_to_text(data: Any) -> str:
+    return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)

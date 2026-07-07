@@ -19,7 +19,11 @@ async def main() -> None:
     settings = get_settings()
     raw_data_dir = (Path(__file__).resolve().parents[1] / settings.raw_data_dir).resolve()
 
-    documents = load_raw_documents(raw_data_dir)
+    documents = load_raw_documents(
+        raw_data_dir,
+        tenant_id=settings.default_tenant_id,
+        bucket_id=settings.default_bucket_id,
+    )
     chunks = chunk_documents(documents)
 
     if not chunks:
@@ -39,6 +43,8 @@ async def main() -> None:
     print(f"Chunks produced: {len(chunks)}")
     print(f"Embedding model: {settings.embedding_model}")
     print(f"Qdrant collection: {settings.qdrant_collection}")
+    print(f"Tenant ID: {settings.default_tenant_id}")
+    print(f"Bucket ID: {settings.default_bucket_id}")
 
     first_vector = await ollama_client.embed(settings.embedding_model, chunks[0].content)
     qdrant_store.ensure_collection(vector_size=len(first_vector), recreate=args.recreate)
@@ -70,14 +76,18 @@ def _point_id_for_chunk(chunk: DocumentChunk) -> str:
 def _payload_for_chunk(chunk: DocumentChunk) -> dict[str, object]:
     return {
         "document_id": chunk.document_id,
+        "tenant_id": chunk.tenant_id,
+        "bucket_id": chunk.bucket_id,
         "chunk_id": chunk.id,
         "chunk_index": chunk.chunk_index,
         "domain": chunk.domain,
         "source_type": chunk.source_type,
         "source_path": chunk.source_path,
+        "processing_status": chunk.processing_status,
         "title": chunk.title,
         "content": chunk.content,
         "feature": chunk.feature,
+        "document_metadata": chunk.metadata,
         "language": "ru",
     }
 
