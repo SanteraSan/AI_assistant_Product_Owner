@@ -1832,3 +1832,56 @@ Verification:
 - повторный RAG smoke: вопрос про IP-камеры вернул 46 шт, вопрос про кабели вернул витую пару 3860 м и оптический кабель 460 м, summary equipment list собрал позиции с единицами измерения и количеством;
 - regression after fix run id: `f478c298-289c-45bc-a6db-86f4c11efd10`, `pdf_text_ingestion` на `qwen3.5:9b`, sources=1, status `ok`;
 - вывод: text-based PDF с простыми таблицами уже можно использовать для exploratory QA, но это ещё не полноценный table extraction - структура строк может быть шумной, поэтому для production-quality таблиц нужен отдельный M5 table pipeline.
+
+## 2026-07-08: M5.3 Bucket Isolation
+
+Контекст:
+
+- M5.0 уже добавил `tenant_id` и `bucket_id` в document/chunk metadata;
+- M5.2 добавил deterministic document filters `document_ids/source_paths`;
+- M5.3 должен доказать no-leak retrieval между buckets до передачи chunks в LLM.
+
+Архитектурное решение:
+
+- `tenant_id` и `bucket_ids` добавлены в `/rag/chat` request;
+- если `tenant_id` не передан, backend использует `DEFAULT_TENANT_ID`;
+- `bucket_ids=[]` означает все buckets внутри tenant, что сохраняет совместимость с текущими запросами;
+- Qdrant payload filter теперь применяет `tenant_id`, `bucket_id`, `features`, `source_types`, `document_ids`, `source_paths` вместе;
+- применённый scope возвращается в `response.retrieval` для debug/evaluation;
+- фильтрация доступа происходит до prompt, поэтому LLM не видит chunks из forbidden buckets.
+
+Synthetic fixtures:
+
+- добавлены безопасные markdown fixtures `alpha_notifications.md` и `beta_notifications.md`;
+- добавлен `data/raw/ingestion_manifest.json`;
+- manifest назначает fixtures разные `bucket_id`: `bucket_alpha` и `bucket_beta`;
+- manifest не индексируется как обычный JSON-документ;
+- loader smoke: 196 documents, 2 bucket fixtures, `manifest_indexed=0`.
+
+Bucket vs access model:
+
+- в M5.3 `bucket` - это логическая область/подборка документов;
+- это не полноценная RBAC-модель;
+- будущая production-модель должна отделять `bucket` от `users/groups/roles/access_policies`;
+- общий документ можно будет выдать группе, например `developers`, а Иванов/Петров получат доступ через membership;
+- row-level/field-level доступы для финансовых таблиц остаются future hardening после structured table extraction.
+
+Evaluation:
+
+- reindex result: 196 documents, 229 chunks;
+- final M5.3 run id: `af815661-b073-417d-91c1-b7d6a33a6934`;
+- scenarios: `bucket_alpha_positive`, `bucket_beta_positive`, `bucket_no_leak_negative`;
+- model: `qwen3.5:9b`;
+- result: 3/3 `ok`, `failed_flags=0`, errors=0;
+- short regression run id: `8b5ab873-1e6a-4ef1-8655-8193cd581733`;
+- short regression scenarios: `general_po_summary`, `pdf_text_ingestion`, `bucket_no_leak_negative`, result 3/3 `ok`;
+- `bucket_alpha_positive`: only `bucket_alpha`, forbidden `bucket_beta` absent;
+- `bucket_beta_positive`: only `bucket_beta`, forbidden `bucket_alpha` absent;
+- `bucket_no_leak_negative`: query asks about Alpha while scope is `bucket_beta`; sources only from `bucket_beta`, forbidden Alpha facts absent;
+- all bucket scenarios passed `tenant_metadata_ok`, `retrieval_tenant_ok`, `retrieval_bucket_scope_ok`, `all_sources_allowed_bucket`, `forbidden_bucket_absent`.
+
+Вывод:
+
+- M5.3 закрывает первый no-leak retrieval boundary на уровне tenant/bucket metadata;
+- это ещё не auth system, но уже правильная backend-гарантия: forbidden chunks не попадают в prompt;
+- следующий слой доступа лучше добавлять только после upload/UI или structured table extraction, чтобы не превратить RAG этап в отдельный auth-проект.

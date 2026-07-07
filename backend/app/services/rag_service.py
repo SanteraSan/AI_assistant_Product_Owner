@@ -37,6 +37,8 @@ class RagService:
         retrieval_query: str | None = None,
         top_k: int | None = None,
         score_threshold: float | None = None,
+        tenant_id: str | None = None,
+        bucket_ids: list[str] | None = None,
         features: list[str] | None = None,
         source_types: list[str] | None = None,
         document_ids: list[str] | None = None,
@@ -53,6 +55,8 @@ class RagService:
             score_threshold if score_threshold is not None else self._default_score_threshold
         )
         candidate_k = selected_top_k * 3
+        selected_tenant_id = tenant_id.strip() if tenant_id else None
+        selected_bucket_ids = _normalize_values(bucket_ids or [])
         selected_features = _normalize_features(features or [])
         selected_source_types = _normalize_values(source_types or [])
         selected_document_ids = _normalize_values(document_ids or [])
@@ -78,6 +82,8 @@ class RagService:
         sources = self._qdrant_store.search(
             query_vector=query_vector,
             limit=candidate_k,
+            tenant_id=selected_tenant_id,
+            bucket_ids=selected_bucket_ids,
             features=selected_features,
             source_types=selected_source_types,
             document_ids=selected_document_ids,
@@ -90,6 +96,8 @@ class RagService:
         sources = self._supplement_required_source_types(
             sources=sources,
             query_vector=query_vector,
+            selected_tenant_id=selected_tenant_id,
+            selected_bucket_ids=selected_bucket_ids,
             selected_features=selected_features,
             selected_document_ids=selected_document_ids,
             selected_source_paths=selected_source_paths,
@@ -145,6 +153,8 @@ class RagService:
                 "candidate_k": candidate_k,
                 "retrieval_query": selected_retrieval_query,
                 "required_source_types": required_source_types,
+                "tenant_id": selected_tenant_id,
+                "bucket_ids": selected_bucket_ids,
                 "document_ids": selected_document_ids,
                 "source_paths": selected_source_paths,
                 "final_top_k": len(sources),
@@ -159,6 +169,8 @@ class RagService:
         *,
         sources: list[SourceChunk],
         query_vector: list[float],
+        selected_tenant_id: str | None,
+        selected_bucket_ids: list[str],
         selected_features: list[str],
         selected_document_ids: list[str],
         selected_source_paths: list[str],
@@ -172,6 +184,8 @@ class RagService:
             supplemental_sources = self._qdrant_store.search(
                 query_vector=query_vector,
                 limit=limit,
+                tenant_id=selected_tenant_id,
+                bucket_ids=selected_bucket_ids,
                 features=selected_features,
                 source_types=[required_source_type],
                 document_ids=selected_document_ids,

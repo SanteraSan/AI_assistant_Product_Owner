@@ -48,6 +48,8 @@ class QdrantStore:
         self,
         query_vector: list[float],
         limit: int,
+        tenant_id: str | None = None,
+        bucket_ids: list[str] | None = None,
         features: list[str] | None = None,
         source_types: list[str] | None = None,
         document_ids: list[str] | None = None,
@@ -57,6 +59,8 @@ class QdrantStore:
             collection_name=self._collection_name,
             query=query_vector,
             query_filter=_payload_filter(
+                tenant_id=tenant_id,
+                bucket_ids=bucket_ids or [],
                 features=features or [],
                 source_types=source_types or [],
                 document_ids=document_ids or [],
@@ -104,12 +108,32 @@ def _as_str_list(value: Any) -> list[str]:
 
 
 def _payload_filter(
+    tenant_id: str | None,
+    bucket_ids: list[str],
     features: list[str],
     source_types: list[str],
     document_ids: list[str],
     source_paths: list[str],
 ) -> models.Filter | None:
     conditions: list[models.FieldCondition] = []
+
+    normalized_tenant_id = tenant_id.strip() if tenant_id else ""
+    if normalized_tenant_id:
+        conditions.append(
+            models.FieldCondition(
+                key="tenant_id",
+                match=models.MatchValue(value=normalized_tenant_id),
+            )
+        )
+
+    normalized_bucket_ids = [bucket_id.strip() for bucket_id in bucket_ids if bucket_id.strip()]
+    if normalized_bucket_ids:
+        conditions.append(
+            models.FieldCondition(
+                key="bucket_id",
+                match=models.MatchAny(any=normalized_bucket_ids),
+            )
+        )
 
     normalized = [feature.strip() for feature in features if feature.strip()]
     if normalized:

@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass, field
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ import yaml
 DEFAULT_TENANT_ID = "local_demo"
 DEFAULT_BUCKET_ID = "taskflow_seed"
 INDEXED_STATUS = "indexed"
+INGESTION_MANIFEST_FILE_NAME = "ingestion_manifest.json"
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,7 @@ def load_raw_documents(
     documents.extend(_load_pdf_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_csv_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_openapi_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
+    documents = _apply_ingestion_manifest(raw_data_dir, documents)
     return [document for document in documents if document.content.strip()]
 
 
@@ -103,6 +106,8 @@ def _load_json_documents(
 ) -> list[RawDocument]:
     documents: list[RawDocument] = []
     for path in sorted(raw_data_dir.rglob("*.json")):
+        if path.name == INGESTION_MANIFEST_FILE_NAME:
+            continue
         data = json.loads(path.read_text(encoding="utf-8"))
         content = _json_to_text(data)
         documents.append(
@@ -279,6 +284,47 @@ def _stable_document_id(path: Path) -> str:
     return path.as_posix().replace("/", "_").replace(".", "_")
 
 
+def _apply_ingestion_manifest(
+    raw_data_dir: Path,
+    documents: list[RawDocument],
+) -> list[RawDocument]:
+    manifest_path = raw_data_dir / INGESTION_MANIFEST_FILE_NAME
+    if not manifest_path.exists():
+        return documents
+
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entries = data.get("documents", []) if isinstance(data, dict) else []
+    overrides_by_path = {
+        str(entry.get("path")): entry
+        for entry in entries
+        if isinstance(entry, dict) and entry.get("path")
+    }
+    if not overrides_by_path:
+        return documents
+
+    updated_documents: list[RawDocument] = []
+    for document in documents:
+        relative_path = Path(document.source_path).relative_to(raw_data_dir).as_posix()
+        override = overrides_by_path.get(relative_path)
+        if not override:
+            updated_documents.append(document)
+            continue
+
+        metadata = dict(document.metadata)
+        metadata.update(_as_dict(override.get("metadata")))
+        updated_documents.append(
+            replace(
+                document,
+                tenant_id=str(override.get("tenant_id") or document.tenant_id),
+                bucket_id=str(override.get("bucket_id") or document.bucket_id),
+                source_type=str(override.get("source_type") or document.source_type),
+                feature=_as_str_list(override.get("features")) or document.feature,
+                metadata=metadata,
+            )
+        )
+    return updated_documents
+
+
 def _features_from_text(text: str) -> list[str]:
     known_features = [
         "tasks",
@@ -298,6 +344,18 @@ def _features_from_text(text: str) -> list[str]:
 
 def _split_features(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _as_str_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
 
 
 def _row_to_text(row: dict[str, str]) -> str:

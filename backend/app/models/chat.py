@@ -36,6 +36,8 @@ class RagChatRequest(BaseModel):
     session_id: str | None = Field(default=None, min_length=1, max_length=36)
     top_k: int | None = Field(default=None, ge=1, le=20)
     score_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    tenant_id: str | None = Field(default=None, min_length=1)
+    bucket_ids: list[str] = Field(default_factory=list)
     features: list[str] = Field(default_factory=list)
     source_types: list[str] = Field(default_factory=list)
     document_ids: list[str] = Field(default_factory=list)

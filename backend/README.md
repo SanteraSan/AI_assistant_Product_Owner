@@ -702,3 +702,32 @@ M5.2 synthetic PDF comparison `dc24ce47-e9e4-4755-9ed9-e9f987c8945b`:
 - `qwen3:14b`: sources=1, `failed_flags=0`, latency около 15.5s.
 
 Локальный anonymized resume check не коммитит PDF и не сохраняет PII в документацию. Проверяются только категории extraction: страницы извлечены, контактные блоки распознаны как наличие данных, опыт/навыки/AI-LLM-RAG/CI-CD/security tooling находятся в тексте. После добавления `source_paths` filtered resume QA возвращает sources только из выбранного PDF.
+
+## M5.3: Bucket Isolation
+
+M5.3 добавляет первый access boundary для retrieval: `tenant_id` и `bucket_ids` фильтруются в Qdrant до сборки prompt. LLM получает только chunks из разрешённого tenant/bucket scope.
+
+Пример `/rag/chat` request:
+
+```json
+{
+  "message": "Что нужно сделать для Alpha enterprise clients по notifications?",
+  "model": "qwen3.5:9b",
+  "tenant_id": "local_demo",
+  "bucket_ids": ["bucket_alpha"],
+  "source_types": ["bucket_fixture"],
+  "score_threshold": 0.0
+}
+```
+
+Если `tenant_id` не передан, backend использует `DEFAULT_TENANT_ID`. Пустой `bucket_ids` означает все buckets внутри tenant. В production `tenant_id/bucket_ids` должны приходить из auth/session/access layer, а не напрямую от пользователя.
+
+Для synthetic fixtures добавлен `data/raw/ingestion_manifest.json`: он назначает отдельным seed-файлам `tenant_id`, `bucket_id`, `source_type`, `features` и metadata, не индексируясь как обычный JSON-документ.
+
+M5.3 smoke `af815661-b073-417d-91c1-b7d6a33a6934`:
+
+- `bucket_alpha_positive`: sources=1, only `bucket_alpha`, `failed_flags=0`;
+- `bucket_beta_positive`: sources=1, only `bucket_beta`, `failed_flags=0`;
+- `bucket_no_leak_negative`: query asks about Alpha while scope is `bucket_beta`; sources only from `bucket_beta`, forbidden Alpha facts absent, `failed_flags=0`.
+
+Важно: bucket сейчас - это логическая область/подборка документов. Полноценные `users`, `groups`, `roles`, `access_policies`, а также row-level/field-level permissions для таблиц остаются future hardening после upload/UI и structured table extraction.

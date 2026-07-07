@@ -1,0 +1,26 @@
+{
+  "documents": [
+    {
+      "path": "bucket_isolation/alpha_notifications.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "bucket_alpha",
+      "source_type": "bucket_fixture",
+      "features": ["notifications"],
+      "metadata": {
+        "fixture": "bucket_isolation",
+        "bucket_name": "Alpha workspace"
+      }
+    },
+    {
+      "path": "bucket_isolation/beta_notifications.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "bucket_beta",
+      "source_type": "bucket_fixture",
+      "features": ["notifications"],
+      "metadata": {
+        "fixture": "bucket_isolation",
+        "bucket_name": "Beta workspace"
+      }
+    }
+  ]
+}

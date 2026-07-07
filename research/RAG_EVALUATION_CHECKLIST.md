@@ -476,6 +476,51 @@ Q5: А что нужно объяснить PO в первую очередь?
 - source metadata сохраняет `page_number`, `page_count`, `bucket_id`, `tenant_id`;
 - LLM не получает chunks из других PDF fixtures даже при широком вопросе.
 
+## Test 24: Bucket Isolation Positive
+
+Запрос:
+
+```text
+Что нужно сделать для Alpha enterprise clients по notifications?
+```
+
+Параметры:
+
+- `tenant_id="local_demo"`;
+- `bucket_ids=["bucket_alpha"]`;
+- `source_types=["bucket_fixture"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- все returned sources имеют `source.metadata.bucket_id=bucket_alpha`;
+- `bucket_beta` отсутствует в sources;
+- `retrieval.tenant_id=local_demo`;
+- `retrieval.bucket_ids=["bucket_alpha"]`;
+- ответ использует только Alpha evidence.
+
+## Test 25: Bucket No-Leak Negative
+
+Запрос:
+
+```text
+Что Alpha customers need for delayed Slack notifications? Отвечай только по доступному bucket.
+```
+
+Параметры:
+
+- `tenant_id="local_demo"`;
+- `bucket_ids=["bucket_beta"]`;
+- `source_types=["bucket_fixture"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources относятся только к `bucket_beta`;
+- `bucket_alpha` отсутствует в sources;
+- ответ не содержит forbidden Alpha facts вроде `delayed delivery status` / `slack delivery visibility`;
+- LLM не получает Alpha chunks в prompt.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

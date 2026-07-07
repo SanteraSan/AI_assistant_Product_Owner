@@ -22,9 +22,15 @@ class EvaluationScenario:
     name: str
     prompt: str
     turns: tuple[str, ...] = ()
+    tenant_id: str | None = None
+    bucket_ids: tuple[str, ...] = ()
     source_types: tuple[str, ...] = ()
     document_ids: tuple[str, ...] = ()
     source_paths: tuple[str, ...] = ()
+    expected_bucket_ids: tuple[str, ...] = ()
+    forbidden_bucket_ids: tuple[str, ...] = ()
+    required_response_markers: tuple[str, ...] = ()
+    forbidden_response_markers: tuple[str, ...] = ()
     score_threshold: float | None = None
     expected_feature: str | None = None
     expected_prompt_memory_used: bool | None = None
@@ -420,6 +426,47 @@ SCENARIOS = [
         source_types=("pdf",),
         score_threshold=0.0,
     ),
+    EvaluationScenario(
+        id="bucket_alpha_positive",
+        name="Bucket Alpha Positive",
+        prompt="Что нужно сделать для Alpha enterprise clients по notifications?",
+        tenant_id="local_demo",
+        bucket_ids=("bucket_alpha",),
+        source_types=("bucket_fixture",),
+        expected_bucket_ids=("bucket_alpha",),
+        forbidden_bucket_ids=("bucket_beta",),
+        required_response_markers=("alpha", "delayed", "slack"),
+        forbidden_response_markers=("retry banner", "email notification outage"),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
+        id="bucket_beta_positive",
+        name="Bucket Beta Positive",
+        prompt="Что нужно сделать для Beta pilot clients по notifications?",
+        tenant_id="local_demo",
+        bucket_ids=("bucket_beta",),
+        source_types=("bucket_fixture",),
+        expected_bucket_ids=("bucket_beta",),
+        forbidden_bucket_ids=("bucket_alpha",),
+        required_response_markers=("beta", "email"),
+        forbidden_response_markers=("delayed delivery status", "slack delivery visibility"),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
+        id="bucket_no_leak_negative",
+        name="Bucket No-Leak Negative",
+        prompt=(
+            "Что Alpha customers need for delayed Slack notifications? "
+            "Отвечай только по доступному bucket."
+        ),
+        tenant_id="local_demo",
+        bucket_ids=("bucket_beta",),
+        source_types=("bucket_fixture",),
+        expected_bucket_ids=("bucket_beta",),
+        forbidden_bucket_ids=("bucket_alpha",),
+        forbidden_response_markers=("delayed delivery status", "slack delivery visibility"),
+        score_threshold=0.0,
+    ),
 ]
 
 
@@ -570,6 +617,10 @@ async def _run_scenario(
             "model": model,
             "top_k": top_k,
         }
+        if scenario.tenant_id:
+            payload["tenant_id"] = scenario.tenant_id
+        if scenario.bucket_ids:
+            payload["bucket_ids"] = list(scenario.bucket_ids)
         if scenario.source_types:
             payload["source_types"] = list(scenario.source_types)
         if scenario.document_ids:
@@ -630,6 +681,16 @@ def _build_quality_flags(
         feature
         for source in sources
         for feature in (source.get("feature") or [])
+    }
+    source_bucket_ids = {
+        (source.get("metadata") or {}).get("bucket_id")
+        for source in sources
+        if (source.get("metadata") or {}).get("bucket_id")
+    }
+    source_tenant_ids = {
+        (source.get("metadata") or {}).get("tenant_id")
+        for source in sources
+        if (source.get("metadata") or {}).get("tenant_id")
     }
     response_features = set(data.get("features") or [])
 
@@ -839,6 +900,30 @@ def _build_quality_flags(
             (source.get("metadata") or {}).get("bucket_id") for source in pdf_sources
         )
         flags["pdf_mentions_notifications"] = "notifications" in response
+
+    if scenario.expected_bucket_ids:
+        expected_bucket_ids = set(scenario.expected_bucket_ids)
+        forbidden_bucket_ids = set(scenario.forbidden_bucket_ids)
+        flags["all_sources_allowed_bucket"] = bool(sources) and source_bucket_ids <= expected_bucket_ids
+        flags["forbidden_bucket_absent"] = not (source_bucket_ids & forbidden_bucket_ids)
+        flags["bucket_metadata_ok"] = bool(source_bucket_ids)
+        if scenario.tenant_id:
+            flags["tenant_metadata_ok"] = source_tenant_ids == {scenario.tenant_id}
+            flags["retrieval_tenant_ok"] = (data.get("retrieval") or {}).get("tenant_id") == scenario.tenant_id
+        flags["retrieval_bucket_scope_ok"] = set(
+            (data.get("retrieval") or {}).get("bucket_ids") or []
+        ) == set(scenario.bucket_ids)
+
+    if scenario.required_response_markers:
+        flags["response_has_required_markers"] = all(
+            marker.lower() in response for marker in scenario.required_response_markers
+        )
+
+    if scenario.forbidden_response_markers:
+        flags["response_no_forbidden_fact"] = not _contains_any(
+            response,
+            tuple(marker.lower() for marker in scenario.forbidden_response_markers),
+        )
 
     if scenario.id.startswith("memory_"):
         prompt_memory = conversation_context.get("prompt_memory") or {}

@@ -156,6 +156,8 @@ async def rag_chat(request: RagChatRequest) -> RagChatResponse:
             ),
             top_k=request.top_k,
             score_threshold=request.score_threshold,
+            tenant_id=request.tenant_id or settings.default_tenant_id,
+            bucket_ids=request.bucket_ids,
             features=request.features,
             source_types=request.source_types,
             document_ids=request.document_ids,
