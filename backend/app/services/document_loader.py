@@ -1,4 +1,5 @@
 import json
+import warnings
 from dataclasses import dataclass, field
 from dataclasses import replace
 from pathlib import Path
@@ -6,6 +7,8 @@ from typing import Any
 
 from docx import Document
 import pandas as pd
+from PIL import Image
+import pytesseract
 from pypdf import PdfReader
 import yaml
 
@@ -15,6 +18,8 @@ INDEXED_STATUS = "indexed"
 INGESTION_MANIFEST_FILE_NAME = "ingestion_manifest.json"
 DOCX_PARAGRAPH_WINDOW_SIZE = 8
 DOCX_PARAGRAPH_WINDOW_OVERLAP = 2
+IMAGE_OCR_EXTENSIONS = (".png", ".jpg", ".jpeg")
+IMAGE_OCR_LANGUAGES = "rus+eng"
 
 
 @dataclass(frozen=True)
@@ -44,6 +49,7 @@ def load_raw_documents(
     documents.extend(_load_json_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_pdf_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_docx_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
+    documents.extend(_load_image_ocr_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_excel_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_csv_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_openapi_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
@@ -290,6 +296,80 @@ def _load_docx_documents(
                     )
                 )
     return documents
+
+
+def _load_image_ocr_documents(
+    raw_data_dir: Path,
+    *,
+    tenant_id: str,
+    bucket_id: str,
+) -> list[RawDocument]:
+    documents: list[RawDocument] = []
+    image_paths = sorted(
+        path
+        for extension in IMAGE_OCR_EXTENSIONS
+        for path in raw_data_dir.rglob(f"*{extension}")
+    )
+    if not image_paths:
+        return documents
+
+    if not _tesseract_available():
+        warnings.warn(
+            (
+                "Tesseract OCR is not available. Image OCR ingestion skipped. "
+                "Install system packages: tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng."
+            ),
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return documents
+
+    for path in image_paths:
+        with Image.open(path) as image:
+            width, height = image.size
+            image_format = image.format or path.suffix.lstrip(".").upper()
+            content = pytesseract.image_to_string(image, lang=IMAGE_OCR_LANGUAGES).strip()
+        if not content:
+            continue
+
+        documents.append(
+            RawDocument(
+                id=f"{_stable_document_id(path)}:ocr",
+                title=f"{path.stem} - OCR text",
+                content="\n".join(
+                    [
+                        f"File: {path.name}",
+                        "Block type: image_ocr",
+                        "OCR text:",
+                        content,
+                    ]
+                ),
+                source_type="image_ocr",
+                source_path=str(path),
+                domain=_domain_for_path(path),
+                feature=_features_from_text(content),
+                metadata={
+                    "file_name": path.name,
+                    "block_type": "image_ocr",
+                    "image_width": width,
+                    "image_height": height,
+                    "image_format": image_format,
+                    "ocr_engine": "tesseract",
+                    "ocr_languages": IMAGE_OCR_LANGUAGES,
+                },
+                tenant_id=tenant_id,
+                bucket_id=bucket_id,
+            )
+        )
+    return documents
+
+
+def _tesseract_available() -> bool:
+    try:
+        pytesseract.get_tesseract_version()
+    except pytesseract.TesseractNotFoundError:
+        return False
+    return True
 
 
 def _build_docx_paragraph_windows(

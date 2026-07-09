@@ -898,3 +898,47 @@ M5.5.2 усиливает DOCX retrieval после baseline adjacent context. �
 - `research/m552_frontback_docx_hybrid_latest.jsonl`: 3 сценария x 3 модели = 9 результатов, `failed_flags=0`;
 - `docx_supplement_count`: 12-14 на `Front&Back_C#.docx`;
 - short regression `fc2604a2-230f-485a-9444-eb63d52e4dac`: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`, `failed_flags=0`.
+
+## M5.6.1: Image OCR Baseline
+
+M5.6 начинается с OCR-only baseline для изображений. Vision/caption digest остаётся следующим шагом: сначала извлекаем текст из `.png`, `.jpg`, `.jpeg`, сохраняем его как searchable evidence и прогоняем обычный RAG.
+
+Системная зависимость:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng
+```
+
+Python-зависимости:
+
+```text
+pillow
+pytesseract
+```
+
+Image OCR loader:
+
+- ищет `.png`, `.jpg`, `.jpeg` в `data/raw`;
+- создаёт `RawDocument` с `source_type=image_ocr`;
+- content содержит `File`, `Block type: image_ocr`, `OCR text`;
+- metadata содержит `image_width`, `image_height`, `image_format`, `ocr_engine`, `ocr_languages`;
+- `tenant_id` и `bucket_id` проходят тем же путём, что PDF/Excel/DOCX.
+
+Если системный Tesseract не установлен, ingestion не падает: image OCR документы пропускаются с warning. Это позволяет backend работать без OCR, но для реального image smoke нужно установить системные пакеты.
+
+Выбранные пользовательские fixtures:
+
+- `data/raw/docx_fixtures/just_text.png` - чистый русский текст, основной OCR smoke;
+- `data/raw/docx_fixtures/tablet.png` - таблица/коммерческое предложение, future table OCR smoke;
+- `data/raw/docx_fixtures/charts.png` и `diagram.jpeg` - будущий chart/vision digest;
+- `image.png` и `zabbix.jpg` больше подходят для M5.6.2 Vision Digest.
+
+Проверки M5.6.1:
+
+- unit tests: 18 passed;
+- compile: `python -m compileall app scripts tests`;
+- real OCR loader smoke: 6 `image_ocr` documents;
+- reindex: 685 documents, 718 chunks;
+- `image_ocr_ingestion` smoke `4132007a-f610-423e-9f3a-4844525d9c31`: sources=1, `failed_flags=0`;
+- short regression `a7801121-cb2a-4278-950c-3b99f6dadb8b`: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`, `image_ocr_ingestion`, `failed_flags=0`.

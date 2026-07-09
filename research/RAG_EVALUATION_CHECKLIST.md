@@ -664,6 +664,31 @@ Retrieval config:
 - ответы проходят required markers для каждого scenario;
 - artifact: `research/m552_frontback_docx_hybrid_latest.jsonl`.
 
+## Test 32: Image OCR Ingestion
+
+Запрос:
+
+```text
+Что на изображении сказано про поле Найти и кнопку Начать обучение?
+```
+
+Retrieval config:
+
+- `source_types=["image_ocr"]`;
+- `source_paths=["/home/santera/Projects/data/raw/docx_fixtures/just_text.png"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- system dependency установлен: `tesseract-ocr`, `tesseract-ocr-rus`, `tesseract-ocr-eng`;
+- sources содержат `source_type=image_ocr`;
+- source metadata содержит `document_metadata.block_type=image_ocr`;
+- source metadata содержит `image_width`, `image_height`;
+- source metadata содержит `ocr_engine=tesseract`;
+- source metadata содержит `bucket_id` и `tenant_id`;
+- ответ упоминает `Найти`, `Начать обучение`, `термин`;
+- если Tesseract не установлен, loader пропускает изображения с warning, а scenario ожидаемо не готов к запуску.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

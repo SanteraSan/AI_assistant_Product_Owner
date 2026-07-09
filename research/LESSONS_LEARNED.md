@@ -2186,3 +2186,56 @@ Future scaling/access notes:
 - теперь backend не просто отдаёт raw top-k Qdrant, а собирает локальный evidence bundle;
 - это ближе к production RAG: vector search находит candidates, deterministic supplement добавляет точные/соседние chunks, reranking упорядочивает результат;
 - следующий возможный шаг - section-aware DOCX parsing и отдельное распознавание `code_block`.
+
+## 2026-07-09: M5.6.1 Image OCR Baseline Start
+
+Контекст:
+
+- после PDF/Excel/DOCX следующий формат M5 - изображения;
+- пользователь добавил реальные fixtures в `data/raw/docx_fixtures`;
+- для M5.6 решили идти поэтапно:
+  - сначала OCR-only baseline;
+  - затем vision digest/caption через multimodal model.
+
+Выбранные fixtures:
+
+- `just_text.png` - чистый русский текст, лучший первый OCR smoke;
+- `tablet.png` - таблица/коммерческое предложение, будущий table OCR case;
+- `charts.png` и `diagram.jpeg` - графики, лучше подходят для chart/vision digest;
+- `image.png` - фото с крупной надписью UFA, подходит для vision/caption smoke;
+- `zabbix.jpg` - monitoring chart, сложнее для OCR, полезен позже для vision/chart understanding.
+
+Что сделано:
+
+- добавлены Python dependencies: `pillow`, `pytesseract`;
+- добавлен image OCR loader для `.png`, `.jpg`, `.jpeg`;
+- loader создаёт `RawDocument` с `source_type=image_ocr`;
+- metadata: `file_name`, `block_type=image_ocr`, `image_width`, `image_height`, `image_format`, `ocr_engine=tesseract`, `ocr_languages=rus+eng`;
+- `tenant_id/bucket_id` propagation сохраняется;
+- если системный Tesseract недоступен, loader не валит весь ingestion, а пропускает image OCR с warning;
+- добавлен unit test без реального Tesseract через monkeypatch;
+- добавлен evaluation scenario `image_ocr_ingestion`.
+
+Проверки:
+
+- попытка установить Tesseract через `sudo apt-get install ...` не прошла, потому что sudo требует интерактивную авторизацию;
+- пользователь установил системный Tesseract вручную;
+- доступные языки: `eng`, `rus`, `osd`;
+- unit tests: 18 passed;
+- compile: `python -m compileall app scripts tests`;
+- real loader smoke: 6 `image_ocr` documents;
+- `just_text.png` и `tablet.png` распознаны хорошо;
+- `charts.png`, `diagram.jpeg`, `zabbix.jpg` распознаются частично, что подтверждает необходимость отдельного vision/chart digest;
+- reindex: 685 documents, 718 chunks;
+- `image_ocr_ingestion` smoke: run id `4132007a-f610-423e-9f3a-4844525d9c31`;
+- result: sources=1, `failed_flags=0`;
+- short regression: run id `a7801121-cb2a-4278-950c-3b99f6dadb8b`;
+- scenarios: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`, `image_ocr_ingestion`;
+- result: 5/5 `ok`, `failed_flags=0`.
+
+Вывод:
+
+- M5.6.1 OCR baseline работает end-to-end;
+- OCR хорошо подходит для картинок с текстом и простых таблиц;
+- графики/фото/monitoring charts требуют vision/caption digest, а не только OCR;
+- vision/caption остаётся отдельным M5.6.2, потому что OCR и visual understanding решают разные задачи.

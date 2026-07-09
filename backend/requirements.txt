@@ -8,6 +8,8 @@ openpyxl
 xlrd
 pypdf
 python-docx
+pillow
+pytesseract
 pyyaml
 sqlalchemy
 asyncpg

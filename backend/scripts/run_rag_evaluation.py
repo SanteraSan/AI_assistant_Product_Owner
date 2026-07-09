@@ -443,6 +443,17 @@ SCENARIOS = [
         score_threshold=0.0,
     ),
     EvaluationScenario(
+        id="image_ocr_ingestion",
+        name="Image OCR Ingestion",
+        prompt="Что на изображении сказано про поле Найти и кнопку Начать обучение?",
+        source_types=("image_ocr",),
+        source_paths=(
+            "/home/santera/Projects/data/raw/docx_fixtures/just_text.png",
+        ),
+        required_response_markers=("найти", "начать обучение", "термин"),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
         id="bucket_alpha_positive",
         name="Bucket Alpha Positive",
         prompt="Что нужно сделать для Alpha enterprise clients по notifications?",
@@ -956,6 +967,35 @@ def _build_quality_flags(
         )
         flags["docx_bucket_metadata_ok"] = any(
             (source.get("metadata") or {}).get("bucket_id") for source in docx_sources
+        )
+    elif scenario.id == "image_ocr_ingestion":
+        image_sources = [source for source in sources if source.get("source_type") == "image_ocr"]
+        flags["has_image_ocr_source"] = bool(image_sources)
+        flags["image_ocr_block_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "block_type"
+            )
+            == "image_ocr"
+            for source in image_sources
+        )
+        flags["image_ocr_dimensions_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "image_width"
+            )
+            and ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "image_height"
+            )
+            for source in image_sources
+        )
+        flags["image_ocr_engine_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "ocr_engine"
+            )
+            == "tesseract"
+            for source in image_sources
+        )
+        flags["image_ocr_bucket_metadata_ok"] = any(
+            (source.get("metadata") or {}).get("bucket_id") for source in image_sources
         )
 
     if scenario.expected_bucket_ids:
