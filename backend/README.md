@@ -1129,3 +1129,38 @@ Future hardening:
 
 - legacy `.xls` layout linking остаётся отдельным экспериментом: нужен LibreOffice/headless conversion или BIFF/Escher parser, если понадобятся координаты картинок/shapes/OLE objects;
 - field-level access/redaction для таблиц нужно делать до prompt: например, обычный пользователь видит `Name` и `Params`, но `Price` заменяется на `[REDACTED]`; LLM не должен решать доступы самостоятельно.
+
+## M5.8.2: Scanned Table Layout OCR Baseline
+
+M5.8.2 добавляет первый baseline для сканов/скриншотов таблиц, где структуры DOCX/XLSX уже нет и всё представлено пикселями.
+
+Что добавлено:
+
+- grid-like table detection без новой тяжёлой зависимости: через Pillow анализируются длинные горизонтальные/вертикальные линии;
+- таблица разбивается на строки и ячейки по найденной сетке;
+- последняя колонка рассматривается как image cell baseline;
+- строка таблицы OCR-ится через Tesseract, чтобы получить `linked_text`;
+- image cell вырезается как crop и индексируется через существующие `image_ocr` / `image_digest`;
+- metadata содержит `parent_source_type=scanned_table`, `anchor_type=scanned_table_cell`, `table_row_index`, `table_cell_index`, `table_row_bbox`, `image_cell_bbox`, `linked_text`.
+
+Ограничения baseline:
+
+- рассчитан на хорошие сканы/скриншоты с видимой табличной сеткой;
+- пока предполагает, что картинка находится в последней колонке;
+- OCR linked text может быть шумным, особенно на маленьком/смазанном тексте;
+- сложные layout cases без линий таблицы оставлены на следующий research layer.
+
+Проверки M5.8.2:
+
+- fixture: `data/raw/scanned_fixtures/scanned-table-products.png`;
+- reindex: 1440 documents, 1629 chunks;
+- `scanned_table_image_anchor_digest` three-model smoke `86d7cdf3-4a8a-4d26-b653-f6970715b83d`;
+- `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b` прошли scenario без failed flags;
+- artifact: `research/m582_scanned_table_layout_ocr_latest.jsonl`.
+
+Next research spike:
+
+- PaddleOCR PP-Structure для table/layout parsing;
+- docTR как OCR/document understanding кандидат;
+- layoutparser и table detection models для сложных layouts;
+- Donut/LayoutLM/Florence-like модели позже, когда baseline покажет реальные точки отказа.

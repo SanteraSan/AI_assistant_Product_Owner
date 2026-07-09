@@ -2513,3 +2513,52 @@ Future access-control note:
 - field-level access для таблиц возможен, но это отдельный policy/redaction layer;
 - правильная граница: parsing -> structured cell/row metadata -> authorization/redaction -> retrieval/prompt;
 - LLM не должен решать, можно ли показывать `price`; backend должен удалить или заменить restricted fields до prompt.
+
+## 2026-07-09: M5.8.2 Scanned Table Layout OCR Baseline
+
+Контекст:
+
+- после DOCX/XLSX anchor metadata пользователь спросил про сканы/скриншоты таблиц, где документ уже не содержит структурных anchors;
+- цель этапа: проверить, можно ли восстановить минимальную table structure из пикселей и связать image cell с row text;
+- продвинутые инструменты (`PaddleOCR PP-Structure`, `docTR`, `layoutparser`, table detection models, Donut/LayoutLM/Florence-like) решено оставить отдельным research spike после baseline.
+
+Что сделано:
+
+- добавлен PIL-based grid detector без новой тяжёлой зависимости;
+- detector ищет длинные непрерывные горизонтальные/вертикальные линии таблицы;
+- найденная сетка превращается в row/cell regions;
+- последняя колонка используется как baseline image column;
+- row crop OCR-ится через Tesseract для `linked_text`;
+- image cell crop превращается в `EmbeddedImage` с `parent_source_type=scanned_table` и `anchor_type=scanned_table_cell`;
+- `image_ocr` и `image_digest` автоматически получают `linked_text`, `table_row_bbox`, `image_cell_bbox`;
+- добавлен fixture `data/raw/scanned_fixtures/scanned-table-products.png`;
+- добавлен scenario `scanned_table_image_anchor_digest`.
+
+Проверки:
+
+- focused tests: 10 passed;
+- reindex: 1440 documents, 1629 chunks;
+- three-model smoke: run id `86d7cdf3-4a8a-4d26-b653-f6970715b83d`;
+- artifact: `research/m582_scanned_table_layout_ocr_latest.jsonl`;
+- models: `gemma4:12b`, `qwen3.5:9b`, `qwen3:14b`;
+- result: 1 scenario x 3 models, `failed_flags=0`.
+
+Наблюдения:
+
+- первый вариант line detector считал суммарные line pixels и ошибочно принимал повторяющиеся края этикеток за линии таблицы;
+- fix: считать самый длинный непрерывный сегмент линии, а не сумму пикселей по всей оси;
+- Tesseract linked text остаётся шумным, но для retrieval достаточно наличия ключевых фактов (`3500`, `4,1`, `11%`);
+- vision digest по crop хорошо описывает именно image cell, а не всю страницу.
+
+Вывод:
+
+- для хороших сканов с явной сеткой можно построить полезный baseline без OpenCV/PaddleOCR;
+- задача принципиально отличается от DOCX/XLSX: там структура читается из файла, здесь структура восстанавливается из pixels;
+- следующий разумный шаг - отдельный PaddleOCR PP-Structure spike и сравнение с текущим baseline на тех же fixtures.
+
+Future hardening:
+
+- поддержать таблицы без видимых линий;
+- определять image column не только как последнюю колонку;
+- добавить PDF page rendering для scanned PDF;
+- сравнить PaddleOCR PP-Structure, docTR, layoutparser, table detection models и Donut/LayoutLM/Florence-like подходы.

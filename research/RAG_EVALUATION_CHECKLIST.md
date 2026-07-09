@@ -944,6 +944,31 @@ Retrieval config:
 - ответ описывает картинку/изображение/этикетку;
 - `required_numeric_values=["3500"]` проходит.
 
+## Test 44: Scanned Table Image Anchor Digest
+
+Запрос:
+
+```text
+Что написано или изображено на картинке у продукта в scanned-table-products.png, где указано 4,1 % алкоголь, 11% плотность и цена за кегу 3500 р.?
+```
+
+Retrieval config:
+
+- `source_types=["image_digest"]`;
+- `source_paths=["/home/santera/Projects/data/raw/scanned_fixtures/scanned-table-products.png"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources содержат `source_type=image_digest`;
+- source metadata содержит `parent_source_type=scanned_table`;
+- source metadata содержит `anchor_type=scanned_table_cell`;
+- source metadata содержит `linked_text` с `3500` и `4,1`/`4.1`;
+- source metadata содержит `table_row_bbox` и `image_cell_bbox`;
+- ответ описывает картинку/изображение/этикетку;
+- `required_numeric_values=["3500"]` проходит;
+- важно: это baseline для grid-like scans, а не полноценный layout parser для любых сканов.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

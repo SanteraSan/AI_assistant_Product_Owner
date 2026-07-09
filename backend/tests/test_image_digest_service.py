@@ -3,8 +3,9 @@ from pathlib import Path
 from docx import Document
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as ExcelImage
-from PIL import Image
+from PIL import Image, ImageDraw
 
+from app.services import document_loader
 from app.services.image_digest_service import load_image_digest_documents
 
 
@@ -161,4 +162,58 @@ def test_load_image_digest_documents_includes_xlsx_anchor_context(tmp_path: Path
     assert documents[0].metadata["anchor_cell"] == "B2"
     assert "ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ" in documents[0].metadata["linked_text"]
     assert "Linked text: ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ" in documents[0].content
+    assert ollama_client.generate_kwargs["images"]
+
+
+def test_load_image_digest_documents_includes_scanned_table_anchor_context(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    raw_data_dir = tmp_path / "raw"
+    raw_data_dir.mkdir()
+    image_path = raw_data_dir / "scanned_table.png"
+    image = Image.new("RGB", (500, 260), color="white")
+    draw = ImageDraw.Draw(image)
+    grid_color = (60, 120, 210)
+    columns = [20, 160, 300, 420, 480]
+    rows = [20, 60, 140, 220]
+    for x in columns:
+        draw.line((x, rows[0], x, rows[-1]), fill=grid_color, width=2)
+    for y in rows:
+        draw.line((columns[0], y, columns[-1], y), fill=grid_color, width=2)
+    draw.text((30, 75), "PYA TNITSKOE", fill="black")
+    draw.text((170, 75), "3500 r", fill="black")
+    draw.text((310, 75), "4.1 11", fill="black")
+    draw.rectangle((430, 80, 470, 125), fill=(160, 40, 40), outline=(220, 180, 60), width=3)
+    image.save(image_path)
+    monkeypatch.setattr(
+        document_loader,
+        "_ocr_image_region",
+        lambda image: "ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ Цена за кегу 3500 р. 4,1 % алкоголь, 11% плотность",
+    )
+    ollama_client = _FakeOllamaClient()
+
+    async def run_loader():
+        return await load_image_digest_documents(
+            raw_data_dir,
+            ollama_client=ollama_client,
+            vision_model="vision-model",
+            tenant_id="tenant",
+            bucket_id="bucket",
+        )
+
+    import asyncio
+
+    documents = asyncio.run(run_loader())
+    scanned_documents = [
+        document
+        for document in documents
+        if document.metadata.get("parent_source_type") == "scanned_table"
+    ]
+
+    assert len(scanned_documents) == 1
+    assert scanned_documents[0].source_path == str(image_path)
+    assert scanned_documents[0].metadata["anchor_type"] == "scanned_table_cell"
+    assert "ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ" in scanned_documents[0].metadata["linked_text"]
+    assert "Linked text: ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ" in scanned_documents[0].content
     assert ollama_client.generate_kwargs["images"]

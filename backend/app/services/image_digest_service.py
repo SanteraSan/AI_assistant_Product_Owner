@@ -17,6 +17,7 @@ from app.services.document_loader import (
     _features_from_text,
     _stable_document_id,
     iter_office_embedded_images,
+    iter_scanned_table_images,
 )
 from app.services.ollama_client import OllamaClient
 
@@ -88,6 +89,38 @@ async def load_image_digest_documents(
         )
 
     for embedded_image in iter_office_embedded_images(raw_data_dir):
+        documents.extend(
+            await _load_embedded_image_digest_documents(
+                [embedded_image],
+                ollama_client=ollama_client,
+                vision_model=vision_model,
+                tenant_id=tenant_id,
+                bucket_id=bucket_id,
+            )
+        )
+
+    documents.extend(
+        await _load_embedded_image_digest_documents(
+            iter_scanned_table_images(raw_data_dir),
+            ollama_client=ollama_client,
+            vision_model=vision_model,
+            tenant_id=tenant_id,
+            bucket_id=bucket_id,
+        )
+    )
+    return documents
+
+
+async def _load_embedded_image_digest_documents(
+    embedded_images: list[EmbeddedImage],
+    *,
+    ollama_client: OllamaClient,
+    vision_model: str,
+    tenant_id: str,
+    bucket_id: str,
+) -> list[RawDocument]:
+    documents: list[RawDocument] = []
+    for embedded_image in embedded_images:
         try:
             digest = await _build_embedded_image_digest(
                 embedded_image,

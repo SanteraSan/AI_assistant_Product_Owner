@@ -642,6 +642,24 @@ SCENARIOS = [
         score_threshold=0.0,
     ),
     EvaluationScenario(
+        id="scanned_table_image_anchor_digest",
+        name="Scanned Table Image Anchor Digest",
+        prompt=(
+            "Что написано или изображено на картинке у продукта в scanned-table-products.png, "
+            "где указано 4,1 % алкоголь, 11% плотность и цена за кегу 3500 р.?"
+        ),
+        source_types=("image_digest",),
+        source_paths=(
+            "/home/santera/Projects/data/raw/scanned_fixtures/scanned-table-products.png",
+        ),
+        required_marker_groups=(
+            ("4,1", "4.1"),
+            ("изображ", "картин", "image", "этикет"),
+        ),
+        required_numeric_values=("3500",),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
         id="bucket_alpha_positive",
         name="Bucket Alpha Positive",
         prompt="Что нужно сделать для Alpha enterprise clients по notifications?",
@@ -1383,6 +1401,46 @@ def _build_quality_flags(
                 ((source.get("metadata") or {}).get("document_metadata") or {}).get(
                     "linked_text",
                     "",
+                )
+            )
+            for source in image_sources
+        )
+    elif scenario.id == "scanned_table_image_anchor_digest":
+        image_sources = [source for source in sources if source.get("source_type") == "image_digest"]
+        flags["has_scanned_table_image_digest_source"] = bool(image_sources)
+        flags["scanned_table_anchor_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "anchor_type"
+            )
+            == "scanned_table_cell"
+            for source in image_sources
+        )
+        flags["scanned_table_parent_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "parent_source_type"
+            )
+            == "scanned_table"
+            for source in image_sources
+        )
+        flags["scanned_table_linked_text_ok"] = any(
+            "3500" in str(
+                ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                    "linked_text",
+                    "",
+                )
+            )
+            and (
+                "4,1" in str(
+                    ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                        "linked_text",
+                        "",
+                    )
+                )
+                or "4.1" in str(
+                    ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                        "linked_text",
+                        "",
+                    )
                 )
             )
             for source in image_sources
