@@ -827,6 +827,29 @@ Retrieval config:
 - ответ упоминает, что текст говорит про gradient, а фактическая embedded image показывает график прибыли;
 - retrieval supplement должен поднимать явно запрошенные source types в первые `top_k` внутри document scope.
 
+## Test 39: Office Media Consistency Mismatch
+
+Запрос:
+
+```text
+Есть ли в sample-with-images.docx заранее найденное расхождение между текстом документа и встроенной картинкой?
+```
+
+Retrieval config:
+
+- `source_types=["office_media_consistency"]`;
+- `source_paths=["/home/santera/Projects/data/raw/docx_fixtures/sample-with-images.docx"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources содержат `source_type=office_media_consistency`;
+- source metadata содержит `consistency_status=potential_mismatch`;
+- source metadata содержит `parent_source_type=docx`;
+- ответ говорит, что есть mismatch / расхождение / несоответствие;
+- ответ упоминает gradient в тексте документа и график прибыли в visual evidence;
+- model answer может использовать только precomputed consistency evidence, без ручной сборки `docx + image_digest + image_ocr` в запросе.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

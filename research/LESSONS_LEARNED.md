@@ -2374,3 +2374,40 @@ Future scaling/access notes:
 
 - M5.7.5 подтверждает, что разные representations одного файла могут использоваться совместно;
 - следующий hardening-кандидат: создавать отдельный `office_media_consistency` evidence на ingestion этапе, чтобы mismatch был вычислен заранее, а не только во время RAG-answer.
+
+## 2026-07-09: M5.7.6 Office Media Consistency Evidence
+
+Контекст:
+
+- после M5.7.5 стало понятно, что retrieval-time comparison работает, но продуктово удобнее иметь заранее созданный consistency evidence;
+- пользователь подтвердил идею: backend должен уметь отвечать на вопрос “есть ли расхождение между текстом и картинками?” без ручного перечисления `docx/image_digest/image_ocr`.
+
+Что сделано:
+
+- добавлен `office_media_consistency_service.py`;
+- ingestion создаёт `RawDocument` с `source_type=office_media_consistency` после добавления image digests;
+- consistency evidence объединяет document text, embedded image digest и embedded image OCR;
+- metadata содержит `parent_source_type`, `embedded_path`, `embedded_image_index`, `compared_source_types`, `consistency_status`;
+- deterministic baseline ставит `potential_mismatch`, если document text говорит про gradient, а visual evidence говорит про chart/profit.
+
+Проверки:
+
+- unit tests: 30 passed;
+- compile: `python -m compileall app scripts tests`;
+- reindex: 1014 documents, 1061 chunks;
+- qwen smoke после summary fix: run id `3bcf0552-db06-4c0a-b3e2-dec89b99f8d5`, `failed_flags=0`;
+- three-model smoke: run id `ebf63ad4-3b31-4ae0-a259-20579fc3744f`;
+- artifact: `research/m576_office_media_consistency_latest.jsonl`;
+- result: `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b` прошли scenario без failed flags.
+
+Наблюдения:
+
+- первая версия consistency evidence была слишком длинной: retrieval находил source, но chunk не всегда содержал явный mismatch summary;
+- после добавления `Consistency reason` в начало content все модели стабильно увидели расхождение;
+- `diagramms.xlsx` получил `review_needed`, потому что декоративная embedded image и табличный Pareto chart не срабатывают на текущую deterministic mismatch rule.
+
+Вывод:
+
+- M5.7.6 добавил первый ingestion-level media consistency layer;
+- это лучше, чем каждый раз заставлять RAG собирать `docx + image_digest + image_ocr` вручную;
+- future hardening: заменить/дополнить deterministic rule LLM-based consistency checker для сложных caption/image/table случаев.

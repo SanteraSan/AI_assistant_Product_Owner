@@ -1036,3 +1036,33 @@ M5.7.5 добавляет первый scenario на сравнение разн
 - `docx_text_image_mismatch` three-model smoke `9bde5707-a50c-4dc7-b250-4b50e739b103`;
 - `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b` прошли scenario без failed flags;
 - artifact: `research/m575_docx_text_image_mismatch_latest.jsonl`.
+
+## M5.7.6: Office Media Consistency Evidence
+
+M5.7.6 переносит проверку согласованности Office media на ingestion layer. Backend создаёт отдельный `RawDocument` с `source_type=office_media_consistency`, который объединяет:
+
+- текстовое evidence документа (`docx`, `excel_row`, `excel_chart`);
+- `image_digest` по embedded image;
+- `image_ocr`, если OCR доступен.
+
+Baseline пока deterministic: если текст документа говорит про gradient image, а visual evidence говорит про график/прибыль, document получает `consistency_status=potential_mismatch`. Для остальных случаев ставится `review_needed`.
+
+Metadata:
+
+```json
+{
+  "block_type": "office_media_consistency",
+  "parent_source_type": "docx",
+  "embedded_path": "word/media/image1.jpg",
+  "embedded_image_index": 1,
+  "consistency_status": "potential_mismatch"
+}
+```
+
+Проверки M5.7.6:
+
+- unit tests: 30 passed;
+- reindex: 1014 documents, 1061 chunks;
+- `office_media_consistency_mismatch` three-model smoke `ebf63ad4-3b31-4ae0-a259-20579fc3744f`;
+- `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b` прошли scenario без failed flags;
+- artifact: `research/m576_office_media_consistency_latest.jsonl`.

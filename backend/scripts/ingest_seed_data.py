@@ -8,6 +8,9 @@ from app.core.config import get_settings
 from app.services.chunking import DocumentChunk, chunk_documents
 from app.services.document_loader import load_raw_documents
 from app.services.image_digest_service import load_image_digest_documents
+from app.services.office_media_consistency_service import (
+    build_office_media_consistency_documents,
+)
 from app.services.ollama_client import OllamaClient
 
 
@@ -38,6 +41,7 @@ async def main() -> None:
             bucket_id=settings.default_bucket_id,
         )
         documents.extend(image_digest_documents)
+    documents.extend(build_office_media_consistency_documents(documents))
 
     chunks = chunk_documents(documents)
 

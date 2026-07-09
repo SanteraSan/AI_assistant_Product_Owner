@@ -508,6 +508,24 @@ SCENARIOS = [
         score_threshold=0.0,
     ),
     EvaluationScenario(
+        id="office_media_consistency_mismatch",
+        name="Office Media Consistency Mismatch",
+        prompt=(
+            "Есть ли в sample-with-images.docx заранее найденное расхождение "
+            "между текстом документа и встроенной картинкой?"
+        ),
+        source_types=("office_media_consistency",),
+        source_paths=(
+            "/home/santera/Projects/data/raw/docx_fixtures/sample-with-images.docx",
+        ),
+        required_marker_groups=(
+            ("расхожд", "не совпад", "mismatch", "несоответ"),
+            ("градиент", "gradient"),
+            ("график", "прибыл", "profit"),
+        ),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
         id="excel_embedded_image_digest",
         name="Excel Embedded Image Digest",
         prompt="Что изображено на встроенной картинке в Excel diagramms?",
@@ -1158,6 +1176,27 @@ def _build_quality_flags(
             )
             == "docx"
             for source in image_sources
+        )
+    elif scenario.id == "office_media_consistency_mismatch":
+        consistency_sources = [
+            source
+            for source in sources
+            if source.get("source_type") == "office_media_consistency"
+        ]
+        flags["has_office_media_consistency_source"] = bool(consistency_sources)
+        flags["consistency_status_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "consistency_status"
+            )
+            == "potential_mismatch"
+            for source in consistency_sources
+        )
+        flags["consistency_parent_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "parent_source_type"
+            )
+            == "docx"
+            for source in consistency_sources
         )
     elif scenario.id == "excel_embedded_image_digest":
         image_sources = [source for source in sources if source.get("source_type") == "image_digest"]
