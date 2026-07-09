@@ -82,3 +82,36 @@ def test_load_image_digest_documents_includes_docx_embedded_images(tmp_path: Pat
     assert documents[0].metadata["image_width"] == 200
     assert documents[0].metadata["image_height"] == 100
     assert ollama_client.generate_kwargs["images"]
+
+
+def test_load_image_digest_documents_includes_legacy_xls_embedded_images(tmp_path: Path) -> None:
+    raw_data_dir = tmp_path / "raw"
+    raw_data_dir.mkdir()
+    image_path = tmp_path / "embedded.jpg"
+    Image.new("RGB", (120, 90), color="white").save(image_path, format="JPEG")
+    xls_path = raw_data_dir / "legacy.xls"
+    xls_path.write_bytes(b"legacy-biff-prefix" + image_path.read_bytes() + b"legacy-biff-suffix")
+    ollama_client = _FakeOllamaClient()
+
+    async def run_loader():
+        return await load_image_digest_documents(
+            raw_data_dir,
+            ollama_client=ollama_client,
+            vision_model="vision-model",
+            tenant_id="tenant",
+            bucket_id="bucket",
+        )
+
+    import asyncio
+
+    documents = asyncio.run(run_loader())
+
+    assert len(documents) == 1
+    assert documents[0].source_type == "image_digest"
+    assert documents[0].source_path == str(xls_path)
+    assert documents[0].metadata["parent_source_type"] == "xls"
+    assert documents[0].metadata["embedded_path"] == "legacy-binary/image1.jpg"
+    assert documents[0].metadata["embedded_image_index"] == 1
+    assert documents[0].metadata["image_width"] == 120
+    assert documents[0].metadata["image_height"] == 90
+    assert ollama_client.generate_kwargs["images"]

@@ -850,6 +850,51 @@ Retrieval config:
 - ответ упоминает gradient в тексте документа и график прибыли в visual evidence;
 - model answer может использовать только precomputed consistency evidence, без ручной сборки `docx + image_digest + image_ocr` в запросе.
 
+## Test 40: Legacy XLS Text Ingestion
+
+Запрос:
+
+```text
+Что известно из hard_for_analis.xls про ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ: город, алкоголь, срок годности, объем и цену за кегу?
+```
+
+Retrieval config:
+
+- `source_types=["excel_row"]`;
+- `source_paths=["/home/santera/Projects/data/raw/excel_fixtures/hard_for_analis.xls"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources содержат `source_type=excel_row`;
+- source path указывает на `hard_for_analis.xls`;
+- source metadata содержит `excel_row_number`;
+- retrieval supplement поднимает строку по lexical product terms, а не только по dense similarity;
+- ответ упоминает `ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ`, `Набережные Челны`, `4,1 %`;
+- `required_numeric_values=["30", "3500"]` проходит для срока годности и цены за кегу.
+
+## Test 41: Legacy XLS Embedded Image Digest
+
+Запрос:
+
+```text
+Что визуально изображено на встроенных картинках в hard_for_analis.xls? Используй image_digest как evidence.
+```
+
+Retrieval config:
+
+- `source_types=["image_digest"]`;
+- `source_paths=["/home/santera/Projects/data/raw/excel_fixtures/hard_for_analis.xls"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources содержат `source_type=image_digest`;
+- source metadata содержит `parent_source_type=xls`;
+- source metadata содержит `embedded_path`, начинающийся с `legacy-binary/`;
+- ответ описывает визуальное содержимое embedded images: пиво/напитки/бутылки/этикетки;
+- old `.xls` images не считаются structured Office media, поэтому metadata явно показывает legacy fallback origin.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

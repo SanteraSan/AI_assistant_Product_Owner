@@ -2411,3 +2411,51 @@ Future scaling/access notes:
 - M5.7.6 добавил первый ingestion-level media consistency layer;
 - это лучше, чем каждый раз заставлять RAG собирать `docx + image_digest + image_ocr` вручную;
 - future hardening: заменить/дополнить deterministic rule LLM-based consistency checker для сложных caption/image/table случаев.
+
+## 2026-07-09: M5.8 Legacy/Hard Excel Edge Cases
+
+Контекст:
+
+- пользователь добавил `data/raw/excel_fixtures/hard_for_analis.xls`;
+- цель этапа: понять, что реально достаёт `pandas/xlrd` из старого `.xls`, есть ли embedded/visual элементы, и нужен ли отдельный heavy fallback.
+
+Что выяснили:
+
+- файл является `Composite Document File V2` / legacy OLE/BIFF Excel;
+- `xlrd` видит 1 лист `Прайс с 01.05`, 140+ строк, 12 колонок при `formatting_info=True`, 157 merged cells;
+- `pandas.read_excel` достаёт row-level text, включая строку с `ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ`;
+- `xlrd` не отдаёт embedded images как структурированные pictures;
+- бинарный scan файла показывает JPEG/PNG signatures;
+- после полного Pillow validation найдено 27 читаемых embedded images.
+
+Что сделано:
+
+- `iter_office_embedded_images()` теперь учитывает `.xls`;
+- для `.xls` добавлен lightweight fallback: валидные JPEG/PNG blobs извлекаются по binary signatures;
+- повреждённые blobs отсекаются через полную загрузку изображения, а не только `Image.verify()`;
+- legacy images получают metadata `parent_source_type=xls` и `embedded_path=legacy-binary/imageN.jpg|png`;
+- existing `image_ocr` и `image_digest` pipelines автоматически начали работать для `.xls` embedded images;
+- Excel retrieval supplement усилен: кроме длинных numeric terms он учитывает значимые lexical terms из вопроса, чтобы product-name queries находили нужную row.
+
+Проверки:
+
+- targeted tests после реализации: 21 passed;
+- reindex после фильтрации broken blob: 1073 documents, 1145 chunks;
+- M5.8 final three-model smoke: run id `1232422c-65b0-4e20-9660-7b65d95f04be`;
+- artifact: `research/m58_legacy_hard_excel_latest.jsonl`;
+- scenarios: `legacy_xls_text_ingestion`, `legacy_xls_embedded_image_digest`;
+- models: `gemma4:12b`, `qwen3.5:9b`, `qwen3:14b`;
+- result: 2/2 scenarios x 3 models, `failed_flags=0`.
+
+Наблюдения:
+
+- первый text scenario показал retrieval gap: dense top-k находил похожие строки прайса, но не точную строку с `ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ`;
+- это не ingestion problem: строка была в Qdrant, но требовался lexical supplement по product name;
+- после добавления Excel lexical exact terms row 11 стала попадать в контекст, и все модели ответили корректно;
+- evaluator numeric markers не стоит использовать для каждого числа подряд: `4,1 %` лучше проверять marker group, а `30` и `3500` - numeric normalization.
+
+Вывод:
+
+- для M5 baseline не нужен LibreOffice/headless converter;
+- текущий production-minded компромисс: `.xls` rows через `pandas/xlrd`, embedded images через lightweight binary fallback, ограничения честно фиксируются в metadata;
+- future hardening: если понадобятся координаты картинок, shapes, OLE objects или восстановление layout, тогда понадобится отдельный legacy Office conversion/parsing layer.

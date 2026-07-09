@@ -570,6 +570,42 @@ SCENARIOS = [
         score_threshold=0.0,
     ),
     EvaluationScenario(
+        id="legacy_xls_text_ingestion",
+        name="Legacy XLS Text Ingestion",
+        prompt=(
+            "Что известно из hard_for_analis.xls про ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ: "
+            "город, алкоголь, срок годности, объем и цену за кегу?"
+        ),
+        source_types=("excel_row",),
+        source_paths=(
+            "/home/santera/Projects/data/raw/excel_fixtures/hard_for_analis.xls",
+        ),
+        required_marker_groups=(
+            ("пятниц", "pyatn"),
+            ("нефильтр", "unfiltered"),
+            ("набереж", "челн"),
+            ("4,1", "4.1"),
+        ),
+        required_numeric_values=("30", "3500"),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
+        id="legacy_xls_embedded_image_digest",
+        name="Legacy XLS Embedded Image Digest",
+        prompt=(
+            "Что визуально изображено на встроенных картинках в hard_for_analis.xls? "
+            "Используй image_digest как evidence."
+        ),
+        source_types=("image_digest",),
+        source_paths=(
+            "/home/santera/Projects/data/raw/excel_fixtures/hard_for_analis.xls",
+        ),
+        required_marker_groups=(
+            ("пиво", "beer", "напит", "бутыл", "этикет"),
+        ),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
         id="bucket_alpha_positive",
         name="Bucket Alpha Positive",
         prompt="Что нужно сделать для Alpha enterprise clients по notifications?",
@@ -1225,6 +1261,38 @@ def _build_quality_flags(
         )
         flags["excel_chart_bucket_metadata_ok"] = any(
             (source.get("metadata") or {}).get("bucket_id") for source in chart_sources
+        )
+    elif scenario.id == "legacy_xls_text_ingestion":
+        excel_sources = [source for source in sources if source.get("source_type") == "excel_row"]
+        flags["has_legacy_xls_excel_row_source"] = bool(excel_sources)
+        flags["legacy_xls_source_path_ok"] = any(
+            str(source.get("source_path", "")).endswith("hard_for_analis.xls")
+            for source in excel_sources
+        )
+        flags["legacy_xls_row_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "excel_row_number"
+            )
+            for source in excel_sources
+        )
+    elif scenario.id == "legacy_xls_embedded_image_digest":
+        image_sources = [source for source in sources if source.get("source_type") == "image_digest"]
+        flags["has_legacy_xls_image_digest_source"] = bool(image_sources)
+        flags["legacy_xls_parent_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "parent_source_type"
+            )
+            == "xls"
+            for source in image_sources
+        )
+        flags["legacy_xls_embedded_path_metadata_ok"] = any(
+            str(
+                ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                    "embedded_path",
+                    "",
+                )
+            ).startswith("legacy-binary/")
+            for source in image_sources
         )
 
     if scenario.expected_bucket_ids:

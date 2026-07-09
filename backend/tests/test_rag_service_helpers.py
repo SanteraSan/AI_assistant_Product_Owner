@@ -3,6 +3,8 @@ from app.services.rag_service import (
     _apply_source_diversity,
     _docx_neighbor_sources,
     _docx_rerank_score,
+    _excel_exact_match_count,
+    _extract_excel_exact_terms,
     _extract_exact_numeric_terms,
     _extract_docx_exact_terms,
     _filter_sources_by_score,
@@ -97,6 +99,34 @@ def test_extract_exact_numeric_terms_for_excel_identifiers() -> None:
     )
 
     assert terms == ["4600682643425"]
+
+
+def test_extract_excel_exact_terms_keeps_product_names_without_question_noise() -> None:
+    terms = _extract_excel_exact_terms(
+        "Что известно из hard_for_analis.xls про ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ: город и цену?"
+    )
+
+    assert "пятницкое" in terms
+    assert "нефильтрованное" in terms
+    assert "hard_for_analis" not in terms
+    assert "город" not in terms
+    assert "цену" not in terms
+
+
+def test_excel_exact_match_count_boosts_product_row() -> None:
+    terms = ["пятницкое", "нефильтрованное", "алкоголь"]
+    generic = _source(
+        "generic",
+        source_type="excel_row",
+        content="Срок годности 30 суток. Объем 50 л. Цена за кегу 3500 р.",
+    )
+    product = _source(
+        "product",
+        source_type="excel_row",
+        content="ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ 4,1 % алкоголь, цена за кегу 3500 р.",
+    )
+
+    assert _excel_exact_match_count(product, terms) > _excel_exact_match_count(generic, terms)
 
 
 def test_document_header_question_detection_is_not_triggered_by_price_word_only() -> None:

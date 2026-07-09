@@ -4,7 +4,7 @@ from docx import Document
 from PIL import Image
 
 from app.services import document_loader
-from app.services.document_loader import load_raw_documents
+from app.services.document_loader import iter_office_embedded_images, load_raw_documents
 
 
 def test_image_ocr_loader_extracts_text_and_metadata(
@@ -72,3 +72,21 @@ def test_docx_embedded_image_ocr_builds_parent_metadata(
     assert "Embedded chart text" in embedded_ocr_documents[0].content
     assert embedded_ocr_documents[0].metadata["embedded_path"].startswith("word/media/")
     assert embedded_ocr_documents[0].metadata["embedded_image_index"] == 1
+
+
+def test_legacy_xls_embedded_image_extractor_finds_binary_image_blobs(tmp_path: Path) -> None:
+    raw_data_dir = tmp_path / "raw"
+    raw_data_dir.mkdir()
+    image_buffer = tmp_path / "image.jpg"
+    Image.new("RGB", (64, 48), color="white").save(image_buffer, format="JPEG")
+
+    xls_path = raw_data_dir / "legacy.xls"
+    xls_path.write_bytes(b"legacy-biff-prefix" + image_buffer.read_bytes() + b"legacy-biff-suffix")
+
+    embedded_images = iter_office_embedded_images(raw_data_dir)
+
+    assert len(embedded_images) == 1
+    assert embedded_images[0].parent_path == xls_path
+    assert embedded_images[0].parent_source_type == "xls"
+    assert embedded_images[0].embedded_path == "legacy-binary/image1.jpg"
+    assert embedded_images[0].image_index == 1

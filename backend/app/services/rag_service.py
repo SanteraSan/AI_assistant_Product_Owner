@@ -303,13 +303,19 @@ class RagService:
         if not candidates:
             return []
 
-        exact_terms = _extract_exact_numeric_terms(message)
+        exact_terms = _extract_excel_exact_terms(message)
         exact_matches = [
             source
             for source in candidates
-            if exact_terms and all(term in source.content for term in exact_terms)
+            if exact_terms and _excel_exact_match_count(source, exact_terms) > 0
         ]
-        exact_matches = sorted(exact_matches, key=_excel_row_number)
+        exact_matches = sorted(
+            exact_matches,
+            key=lambda source: (
+                -_excel_exact_match_count(source, exact_terms),
+                _excel_row_number(source),
+            ),
+        )
 
         header_matches: list[SourceChunk] = []
         if _looks_like_document_header_question(message):
@@ -586,6 +592,49 @@ def _merge_values(left: list[str], right: list[str]) -> list[str]:
 
 def _extract_exact_numeric_terms(text: str) -> list[str]:
     return re.findall(r"\b\d{6,}\b", text)
+
+
+def _extract_excel_exact_terms(text: str) -> list[str]:
+    raw_terms = re.findall(r"[A-Za-zА-Яа-яЁё_#][A-Za-zА-Яа-яЁё0-9_#.-]{2,}|\b\d{6,}\b", text)
+    skipped_terms = {
+        "xls",
+        "xlsx",
+        "excel",
+        "hard_for_analis",
+        "известно",
+        "город",
+        "срок",
+        "годности",
+        "объем",
+        "объём",
+        "цену",
+        "цена",
+        "кегу",
+        "какой",
+        "какая",
+        "какие",
+        "какую",
+        "что",
+        "про",
+    }
+    terms: list[str] = []
+    seen: set[str] = set()
+    for term in raw_terms:
+        normalized = term.strip(".,:;()[]{}").lower()
+        if not normalized or normalized in skipped_terms:
+            continue
+        if len(normalized) < 4 and not normalized.isdigit():
+            continue
+        if normalized in seen:
+            continue
+        terms.append(normalized)
+        seen.add(normalized)
+    return terms
+
+
+def _excel_exact_match_count(source: SourceChunk, terms: list[str]) -> int:
+    body = source.content.lower()
+    return sum(1 for term in terms if term in body)
 
 
 def _looks_like_document_header_question(text: str) -> bool:

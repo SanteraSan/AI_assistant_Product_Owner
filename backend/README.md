@@ -1066,3 +1066,26 @@ Metadata:
 - `office_media_consistency_mismatch` three-model smoke `ebf63ad4-3b31-4ae0-a259-20579fc3744f`;
 - `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b` прошли scenario без failed flags;
 - artifact: `research/m576_office_media_consistency_latest.jsonl`.
+
+## M5.8: Legacy/Hard Excel Edge Cases
+
+M5.8 закрывает первый real-world `.xls` edge case на `hard_for_analis.xls`. Файл является legacy OLE/BIFF Excel: `pandas/xlrd` достаёт табличные строки, но embedded images не отдаёт как структурированные Office media.
+
+Что добавлено:
+
+- `.xls` embedded images извлекаются lightweight fallback-ом по валидным JPEG/PNG binary blobs;
+- повреждённые image blobs отсекаются полным чтением через Pillow;
+- найденные картинки индексируются как обычные embedded image evidence: `image_ocr` и `image_digest`;
+- metadata сохраняет `parent_source_type=xls`, `embedded_path=legacy-binary/imageN.jpg|png`, `embedded_image_index`;
+- Excel retrieval supplement теперь учитывает не только длинные numeric identifiers, но и значимые lexical terms из вопроса, чтобы product-name queries попадали в нужную row.
+
+Вывод по архитектуре: отдельный LibreOffice/headless fallback пока не нужен для baseline. Для текущего M5 достаточно явно поддержать `.xls` rows через `pandas/xlrd`, а embedded images доставать lightweight extractor-ом с честной metadata-пометкой `legacy-binary`.
+
+Проверки M5.8:
+
+- `hard_for_analis.xls`: 1 лист, 140+ строк, 27 полностью читаемых embedded images;
+- unit tests: 21 passed для M5.8-related helpers;
+- reindex: 1073 documents, 1145 chunks;
+- `legacy_xls_text_ingestion` и `legacy_xls_embedded_image_digest` three-model smoke `1232422c-65b0-4e20-9660-7b65d95f04be`;
+- `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b` прошли оба scenario без failed flags;
+- artifact: `research/m58_legacy_hard_excel_latest.jsonl`.

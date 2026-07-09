@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 import xml.etree.ElementTree as ET
 from zipfile import BadZipFile, ZipFile
 
@@ -27,6 +27,7 @@ IMAGE_OCR_LANGUAGES = "rus+eng"
 OFFICE_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg")
 DOCX_MEDIA_PREFIX = "word/media/"
 XLSX_MEDIA_PREFIX = "xl/media/"
+LEGACY_XLS_EMBEDDED_IMAGE_LIMIT = 50
 
 
 @dataclass(frozen=True)
@@ -453,12 +454,19 @@ def _tesseract_available() -> bool:
 
 def iter_office_embedded_images(raw_data_dir: Path) -> list[EmbeddedImage]:
     images: list[EmbeddedImage] = []
-    for path in sorted(list(raw_data_dir.rglob("*.docx")) + list(raw_data_dir.rglob("*.xlsx"))):
+    for path in sorted(
+        list(raw_data_dir.rglob("*.docx"))
+        + list(raw_data_dir.rglob("*.xlsx"))
+        + list(raw_data_dir.rglob("*.xls"))
+    ):
         images.extend(_embedded_images_from_office_file(path))
     return images
 
 
 def _embedded_images_from_office_file(path: Path) -> list[EmbeddedImage]:
+    if path.suffix.lower() == ".xls":
+        return _embedded_images_from_legacy_xls(path)
+
     media_prefix = DOCX_MEDIA_PREFIX if path.suffix.lower() == ".docx" else XLSX_MEDIA_PREFIX
     parent_source_type = path.suffix.lstrip(".").lower()
     try:
@@ -486,6 +494,69 @@ def _embedded_images_from_office_file(path: Path) -> list[EmbeddedImage]:
             stacklevel=2,
         )
         return []
+
+
+def _embedded_images_from_legacy_xls(path: Path) -> list[EmbeddedImage]:
+    data = path.read_bytes()
+    image_blobs = [
+        *list(_iter_jpeg_blobs(data)),
+        *list(_iter_png_blobs(data)),
+    ]
+    images: list[EmbeddedImage] = []
+    for image_index, (extension, content) in enumerate(
+        image_blobs[:LEGACY_XLS_EMBEDDED_IMAGE_LIMIT],
+        start=1,
+    ):
+        images.append(
+            EmbeddedImage(
+                parent_path=path,
+                embedded_path=f"legacy-binary/image{image_index}.{extension}",
+                image_index=image_index,
+                content=content,
+                parent_source_type="xls",
+            )
+        )
+    return images
+
+
+def _iter_jpeg_blobs(data: bytes) -> Iterator[tuple[str, bytes]]:
+    position = 0
+    while True:
+        start = data.find(b"\xff\xd8\xff", position)
+        if start < 0:
+            return
+        end = data.find(b"\xff\xd9", start)
+        if end < 0:
+            return
+        blob = data[start : end + 2]
+        if _valid_image_blob(blob):
+            yield "jpg", blob
+        position = end + 2
+
+
+def _iter_png_blobs(data: bytes) -> Iterator[tuple[str, bytes]]:
+    signature = b"\x89PNG\r\n\x1a\n"
+    position = 0
+    while True:
+        start = data.find(signature, position)
+        if start < 0:
+            return
+        end = data.find(b"IEND", start)
+        if end < 0:
+            return
+        blob = data[start : end + 8]
+        if _valid_image_blob(blob):
+            yield "png", blob
+        position = end + 8
+
+
+def _valid_image_blob(blob: bytes) -> bool:
+    try:
+        with Image.open(BytesIO(blob)) as image:
+            image.load()
+    except Exception:
+        return False
+    return True
 
 
 def _open_embedded_image(embedded_image: EmbeddedImage) -> tuple[Image.Image, int, int, str]:
