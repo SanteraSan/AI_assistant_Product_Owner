@@ -662,6 +662,7 @@ Retrieval config:
 - среди sources есть exact/neighbor evidence для `ModifyUsers` и `async Task`;
 - source metadata содержит `document_metadata.block_type`;
 - ответы проходят required markers для каждого scenario;
+- если формулировка может отличаться, использовать marker groups вместо одного хрупкого marker-а, например `("провер", "валидац", "validation")`;
 - artifact: `research/m552_frontback_docx_hybrid_latest.jsonl`.
 
 ## Test 32: Image OCR Ingestion

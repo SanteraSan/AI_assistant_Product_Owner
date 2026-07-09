@@ -34,3 +34,24 @@ def test_quality_flags_check_required_numeric_values() -> None:
     )
 
     assert flags["response_has_required_numeric_values"] is True
+
+
+def test_quality_flags_check_required_marker_groups() -> None:
+    scenario = EvaluationScenario(
+        id="marker_group_smoke",
+        name="Marker Group Smoke",
+        prompt="Какая рекомендация?",
+        required_response_markers=("enterprise", "excel"),
+        required_marker_groups=(("провер", "валидац", "validation"),),
+    )
+
+    flags = _build_quality_flags(
+        scenario,
+        {
+            "response": "Enterprise onboarding требует guided Excel import validation.",
+            "sources": [{"source_type": "docx"}],
+        },
+    )
+
+    assert flags["response_has_required_markers"] is True
+    assert flags["response_has_required_marker_groups"] is True

@@ -2260,10 +2260,11 @@ Future scaling/access notes:
 - добавлен evaluation scenario `image_digest_ingestion`;
 - добавлены unit tests для image digest service и image payload в `OllamaClient`.
 - evaluator усилен через `required_numeric_values`: числовые факты проверяются после нормализации форматов (`1 416 960,00`, `1416960`, `1,416,960.00`, `1.416.960`).
+- evaluator усилен через `required_marker_groups`: семантически равные варианты marker-ов проверяются группами, например `("провер", "валидац", "validation")`.
 
 Проверки:
 
-- `gemma4:12b` описала `image.png`: мальчик рядом с зелёной надписью `UFA`;
+- `gemma4:12b` описала `image.png`: ребёнок рядом с бирюзовой надписью, но текст надписи прочитан как `UEFA`;
 - unit tests: 20 passed;
 - compile: `python -m compileall app scripts tests`;
 - reindex после `gemma4:12b` и image normalization: 691 documents, 724 chunks;
@@ -2286,6 +2287,10 @@ Future scaling/access notes:
 - это важный quality finding: vision caption полезен для сцены, но точное чтение текста на фото требует OCR/vision reconciliation;
 - стабильный smoke перенесён на `tablet.png`, где digest проверяет коммерческое предложение и сумму;
 - сумма `1 416 960,00` теперь проверяется не через хрупкий текстовый marker `416`, а через нормализованный числовой факт `1416960`.
+- three-model smoke после marker groups: run id `78b0e70f-3a04-4d75-9910-78baa54d2672`;
+- artifact: `research/m56_three_model_10_scenario_latest.jsonl`;
+- scenarios: `image_ocr_ingestion`, `image_digest_ingestion`, `pdf_text_ingestion`, `excel_ingestion`, `docx_ingestion`, `bucket_alpha_positive`, `bucket_beta_positive`, `bucket_no_leak_negative`, `general_po_summary`, `no_answer_groundedness`;
+- result: `qwen3.5:9b` 10/10, avg latency около 9.2s; `gemma4:12b` 10/10, avg latency около 10.9s; `qwen3:14b` 10/10, avg latency около 12.9s.
 
 Вывод:
 

@@ -975,6 +975,8 @@ Image digest:
 - `image_digest_ingestion` smoke `43a7e78b-743b-47c9-b606-ed4cc7adce78`: sources=1, `failed_flags=0`;
 - final short regression `a21a3e9e-00f3-44b0-b494-be338cdb79fa`: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`, `image_ocr_ingestion`, `image_digest_ingestion`, `failed_flags=0`.
 - evaluator теперь поддерживает `required_numeric_values`: суммы вроде `1 416 960,00`, `1416960`, `1,416,960.00`, `1.416.960` нормализуются перед сравнением.
+- evaluator также поддерживает `required_marker_groups`: для семантически одинаковых формулировок можно задать варианты вроде `("провер", "валидац", "validation")`;
+- three-model smoke `78b0e70f-3a04-4d75-9910-78baa54d2672`: `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b` прошли 10/10 сценариев, artifact `research/m56_three_model_10_scenario_latest.jsonl`.
 
 Важно: `charts.png` оказался WEBP-like файлом с расширением `.png`. Это частый пользовательский сценарий, поэтому vision digest нормализует изображение в настоящий PNG перед отправкой модели.
 

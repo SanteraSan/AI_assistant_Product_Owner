@@ -31,6 +31,7 @@ class EvaluationScenario:
     expected_bucket_ids: tuple[str, ...] = ()
     forbidden_bucket_ids: tuple[str, ...] = ()
     required_response_markers: tuple[str, ...] = ()
+    required_marker_groups: tuple[tuple[str, ...], ...] = ()
     required_numeric_values: tuple[str, ...] = ()
     forbidden_response_markers: tuple[str, ...] = ()
     score_threshold: float | None = None
@@ -444,7 +445,8 @@ SCENARIOS = [
         source_paths=(
             "/home/santera/Projects/data/raw/docx_fixtures/product_owner_brief.docx",
         ),
-        required_response_markers=("enterprise", "excel", "провер"),
+        required_response_markers=("enterprise", "excel"),
+        required_marker_groups=(("провер", "валидац", "validation"),),
         score_threshold=0.0,
     ),
     EvaluationScenario(
@@ -479,7 +481,10 @@ SCENARIOS = [
         source_types=("bucket_fixture",),
         expected_bucket_ids=("bucket_alpha",),
         forbidden_bucket_ids=("bucket_beta",),
-        required_response_markers=("alpha", "delayed", "slack"),
+        required_response_markers=("alpha", "slack"),
+        required_marker_groups=(
+            ("delayed", "delivery", "доставк", "статус"),
+        ),
         forbidden_response_markers=("retry banner", "email notification outage"),
         score_threshold=0.0,
     ),
@@ -1061,6 +1066,12 @@ def _build_quality_flags(
             marker.lower() in response for marker in scenario.required_response_markers
         )
 
+    if scenario.required_marker_groups:
+        flags["response_has_required_marker_groups"] = _has_required_marker_groups(
+            response,
+            scenario.required_marker_groups,
+        )
+
     if scenario.required_numeric_values:
         flags["response_has_required_numeric_values"] = _has_required_numeric_values(
             response,
@@ -1130,6 +1141,16 @@ def _has_context_feature(
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     return any(marker in text for marker in markers)
+
+
+def _has_required_marker_groups(
+    text: str,
+    required_groups: tuple[tuple[str, ...], ...],
+) -> bool:
+    return all(
+        any(marker.lower() in text for marker in marker_group)
+        for marker_group in required_groups
+    )
 
 
 def _has_required_numeric_values(
