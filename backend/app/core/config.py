@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     rag_generation_top_p: float = 0.9
     excel_supplement_scroll_limit: int = 1000
     docx_supplement_scroll_limit: int = 1000
+    image_vision_enabled: bool = True
+    image_vision_model: str = "gemma4:12b"
     conversation_summary_strategy: str = "hybrid"
     conversation_summary_model: str = "gemma4:12b"
     conversation_summary_temperature: float = 0.0

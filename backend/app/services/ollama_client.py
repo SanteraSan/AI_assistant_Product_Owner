@@ -27,6 +27,7 @@ class OllamaClient:
         model: str,
         prompt: str,
         *,
+        images: list[str] | None = None,
         keep_alive: str | int | None = None,
         options: dict[str, Any] | None = None,
         think: bool | None = None,
@@ -38,6 +39,8 @@ class OllamaClient:
         }
         if keep_alive is not None:
             payload["keep_alive"] = keep_alive
+        if images is not None:
+            payload["images"] = images
         if options is not None:
             payload["options"] = options
         if think is not None:

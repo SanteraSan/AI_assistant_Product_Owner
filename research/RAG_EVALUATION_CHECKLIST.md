@@ -689,6 +689,35 @@ Retrieval config:
 - ответ упоминает `Найти`, `Начать обучение`, `термин`;
 - если Tesseract не установлен, loader пропускает изображения с warning, а scenario ожидаемо не готов к запуску.
 
+## Test 33: Image Vision Digest Ingestion
+
+Запрос:
+
+```text
+Что image digest говорит про коммерческое предложение для конференц-залов и общую стоимость?
+```
+
+Retrieval config:
+
+- `source_types=["image_digest"]`;
+- `source_paths=["/home/santera/Projects/data/raw/docx_fixtures/tablet.png"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- `IMAGE_VISION_ENABLED=true`;
+- `IMAGE_VISION_MODEL=gemma4:12b` или другая локальная vision model;
+- изображение нормализуется в PNG/JPEG перед vision call, даже если расширение файла не совпадает с реальным форматом;
+- sources содержат `source_type=image_digest`;
+- source metadata содержит `document_metadata.block_type=image_digest`;
+- source metadata содержит `image_width`, `image_height`;
+- source metadata содержит `vision_model`;
+- source metadata содержит `bucket_id` и `tenant_id`;
+- ответ упоминает коммерческое предложение, конференц-залы и итоговую сумму;
+- `required_numeric_values=["1416960"]` проходит независимо от форматирования суммы (`1 416 960,00`, `1416960`, `1,416,960.00`);
+- исходная картинка не передаётся в RAG-answer prompt, только сохранённый digest text.
+- quality note: точное чтение надписи `UFA` на `image.png` не считается обязательным для stable vision digest smoke, потому что OCR-like текст на фото может требовать отдельного OCR/vision reconciliation.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

@@ -7,6 +7,7 @@ from app.clients.qdrant_store import QdrantStore
 from app.core.config import get_settings
 from app.services.chunking import DocumentChunk, chunk_documents
 from app.services.document_loader import load_raw_documents
+from app.services.image_digest_service import load_image_digest_documents
 from app.services.ollama_client import OllamaClient
 
 
@@ -19,20 +20,30 @@ async def main() -> None:
     settings = get_settings()
     raw_data_dir = (Path(__file__).resolve().parents[1] / settings.raw_data_dir).resolve()
 
+    ollama_client = OllamaClient(
+        base_url=settings.ollama_base_url,
+        timeout_seconds=settings.request_timeout_seconds,
+    )
     documents = load_raw_documents(
         raw_data_dir,
         tenant_id=settings.default_tenant_id,
         bucket_id=settings.default_bucket_id,
     )
+    if settings.image_vision_enabled:
+        image_digest_documents = await load_image_digest_documents(
+            raw_data_dir,
+            ollama_client=ollama_client,
+            vision_model=settings.image_vision_model,
+            tenant_id=settings.default_tenant_id,
+            bucket_id=settings.default_bucket_id,
+        )
+        documents.extend(image_digest_documents)
+
     chunks = chunk_documents(documents)
 
     if not chunks:
         raise SystemExit(f"No chunks produced from raw data dir: {raw_data_dir}")
 
-    ollama_client = OllamaClient(
-        base_url=settings.ollama_base_url,
-        timeout_seconds=settings.request_timeout_seconds,
-    )
     qdrant_store = QdrantStore(
         url=settings.qdrant_url,
         collection_name=settings.qdrant_collection,
@@ -45,6 +56,8 @@ async def main() -> None:
     print(f"Qdrant collection: {settings.qdrant_collection}")
     print(f"Tenant ID: {settings.default_tenant_id}")
     print(f"Bucket ID: {settings.default_bucket_id}")
+    print(f"Image vision enabled: {settings.image_vision_enabled}")
+    print(f"Image vision model: {settings.image_vision_model}")
 
     first_vector = await ollama_client.embed(settings.embedding_model, chunks[0].content)
     qdrant_store.ensure_collection(vector_size=len(first_vector), recreate=args.recreate)
@@ -67,6 +80,7 @@ async def main() -> None:
         print(f"Upserted chunks: {len(pending)}")
 
     print("Ingestion complete.")
+    await ollama_client.aclose()
 
 
 def _point_id_for_chunk(chunk: DocumentChunk) -> str:

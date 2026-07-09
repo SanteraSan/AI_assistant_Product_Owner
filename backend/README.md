@@ -942,3 +942,40 @@ Image OCR loader:
 - reindex: 685 documents, 718 chunks;
 - `image_ocr_ingestion` smoke `4132007a-f610-423e-9f3a-4844525d9c31`: sources=1, `failed_flags=0`;
 - short regression `a7801121-cb2a-4278-950c-3b99f6dadb8b`: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`, `image_ocr_ingestion`, `failed_flags=0`.
+
+## M5.6.2: Image Vision Digest
+
+M5.6.2 добавляет второй слой для изображений: vision-модель создаёт compact digest/caption, а backend индексирует его как обычный text evidence. Это нужно для фото, графиков, диаграмм и monitoring screenshots, где OCR видит мало или видит шум.
+
+Настройки:
+
+```text
+IMAGE_VISION_ENABLED=true
+IMAGE_VISION_MODEL=gemma4:12b
+```
+
+Image digest:
+
+- создаётся во время `scripts.ingest_seed_data`;
+- использует Ollama `/api/generate` с `images`;
+- перед отправкой нормализует изображение в PNG через Pillow, поэтому ошибочное расширение файла не должно ломать vision call;
+- создаёт `RawDocument` с `source_type=image_digest`;
+- content содержит `File`, `Block type: image_digest`, `Vision digest`;
+- metadata содержит размеры, формат, `vision_model`, `digest_type=vision_caption`;
+- исходная картинка не попадает в prompt ответа, туда попадает только digest text.
+
+Проверки M5.6.2:
+
+- `gemma4:12b` подтвердил vision input через Ollama;
+- unit tests: 20 passed;
+- compile: `python -m compileall app scripts tests`;
+- reindex: 690 documents, 723 chunks;
+- after image normalization: 691 documents, 724 chunks;
+- `image_digest` sources: 6;
+- `image_digest_ingestion` smoke `43a7e78b-743b-47c9-b606-ed4cc7adce78`: sources=1, `failed_flags=0`;
+- final short regression `a21a3e9e-00f3-44b0-b494-be338cdb79fa`: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`, `image_ocr_ingestion`, `image_digest_ingestion`, `failed_flags=0`.
+- evaluator теперь поддерживает `required_numeric_values`: суммы вроде `1 416 960,00`, `1416960`, `1,416,960.00`, `1.416.960` нормализуются перед сравнением.
+
+Важно: `charts.png` оказался WEBP-like файлом с расширением `.png`. Это частый пользовательский сценарий, поэтому vision digest нормализует изображение в настоящий PNG перед отправкой модели.
+
+Quality note: на `image.png` модель `gemma4:12b` прочитала крупную надпись как `UEFA`, хотя визуально ожидается `UFA`. Поэтому стабильный vision smoke использует `tablet.png`, а точное чтение текста на фото остаётся задачей OCR/vision reconciliation.

@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -30,6 +31,7 @@ class EvaluationScenario:
     expected_bucket_ids: tuple[str, ...] = ()
     forbidden_bucket_ids: tuple[str, ...] = ()
     required_response_markers: tuple[str, ...] = ()
+    required_numeric_values: tuple[str, ...] = ()
     forbidden_response_markers: tuple[str, ...] = ()
     score_threshold: float | None = None
     expected_feature: str | None = None
@@ -439,7 +441,10 @@ SCENARIOS = [
         name="DOCX Ingestion",
         prompt="Что DOCX brief говорит про enterprise onboarding handoff risk и какую рекомендацию даёт?",
         source_types=("docx",),
-        required_response_markers=("enterprise", "onboarding", "валидац"),
+        source_paths=(
+            "/home/santera/Projects/data/raw/docx_fixtures/product_owner_brief.docx",
+        ),
+        required_response_markers=("enterprise", "excel", "провер"),
         score_threshold=0.0,
     ),
     EvaluationScenario(
@@ -451,6 +456,18 @@ SCENARIOS = [
             "/home/santera/Projects/data/raw/docx_fixtures/just_text.png",
         ),
         required_response_markers=("найти", "начать обучение", "термин"),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
+        id="image_digest_ingestion",
+        name="Image Vision Digest Ingestion",
+        prompt="Что image digest говорит про коммерческое предложение для конференц-залов и общую стоимость?",
+        source_types=("image_digest",),
+        source_paths=(
+            "/home/santera/Projects/data/raw/docx_fixtures/tablet.png",
+        ),
+        required_response_markers=("коммерчес", "конференц"),
+        required_numeric_values=("1416960",),
         score_threshold=0.0,
     ),
     EvaluationScenario(
@@ -997,6 +1014,34 @@ def _build_quality_flags(
         flags["image_ocr_bucket_metadata_ok"] = any(
             (source.get("metadata") or {}).get("bucket_id") for source in image_sources
         )
+    elif scenario.id == "image_digest_ingestion":
+        image_sources = [source for source in sources if source.get("source_type") == "image_digest"]
+        flags["has_image_digest_source"] = bool(image_sources)
+        flags["image_digest_block_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "block_type"
+            )
+            == "image_digest"
+            for source in image_sources
+        )
+        flags["image_digest_dimensions_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "image_width"
+            )
+            and ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "image_height"
+            )
+            for source in image_sources
+        )
+        flags["image_digest_model_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "vision_model"
+            )
+            for source in image_sources
+        )
+        flags["image_digest_bucket_metadata_ok"] = any(
+            (source.get("metadata") or {}).get("bucket_id") for source in image_sources
+        )
 
     if scenario.expected_bucket_ids:
         expected_bucket_ids = set(scenario.expected_bucket_ids)
@@ -1014,6 +1059,12 @@ def _build_quality_flags(
     if scenario.required_response_markers:
         flags["response_has_required_markers"] = all(
             marker.lower() in response for marker in scenario.required_response_markers
+        )
+
+    if scenario.required_numeric_values:
+        flags["response_has_required_numeric_values"] = _has_required_numeric_values(
+            response,
+            scenario.required_numeric_values,
         )
 
     if scenario.forbidden_response_markers:
@@ -1079,6 +1130,79 @@ def _has_context_feature(
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     return any(marker in text for marker in markers)
+
+
+def _has_required_numeric_values(
+    text: str,
+    required_values: tuple[str, ...],
+) -> bool:
+    observed_values = _normalized_numeric_values(text)
+    expected_values = {
+        normalized
+        for value in required_values
+        if (normalized := _normalize_numeric_value(value))
+    }
+    return expected_values <= observed_values
+
+
+def _normalized_numeric_values(text: str) -> set[str]:
+    candidates = re.findall(r"(?<!\w)\d[\d\s\u00a0.,]*\d|\b\d\b", text)
+    return {
+        normalized
+        for candidate in candidates
+        if (normalized := _normalize_numeric_value(candidate))
+    }
+
+
+def _normalize_numeric_value(value: str) -> str:
+    compact = value.replace(" ", "").replace("\u00a0", "")
+    compact = re.sub(r"[^0-9,.-]", "", compact)
+    compact = compact.lstrip("+-")
+    if not compact or not any(character.isdigit() for character in compact):
+        return ""
+
+    separators = [index for index, character in enumerate(compact) if character in ",."]
+    if not separators:
+        return _normalize_integer_digits(compact)
+
+    decimal_separator_index = _detect_decimal_separator_index(compact, separators)
+    if decimal_separator_index is None:
+        return _normalize_integer_digits(re.sub(r"[,.]", "", compact))
+
+    integer_part = re.sub(r"[,.]", "", compact[:decimal_separator_index])
+    fractional_part = re.sub(r"[,.]", "", compact[decimal_separator_index + 1 :])
+    integer_part = _normalize_integer_digits(integer_part)
+    fractional_part = fractional_part.rstrip("0")
+    if not fractional_part:
+        return integer_part
+    return f"{integer_part}.{fractional_part}"
+
+
+def _detect_decimal_separator_index(
+    value: str,
+    separator_indexes: list[int],
+) -> int | None:
+    separator_chars = {value[index] for index in separator_indexes}
+    if len(separator_chars) > 1:
+        return separator_indexes[-1]
+
+    separator = value[separator_indexes[0]]
+    parts = value.split(separator)
+    if len(parts) > 2 and all(len(part) == 3 for part in parts[1:]):
+        return None
+
+    last_separator_index = separator_indexes[-1]
+    fractional_digits = re.sub(r"\D", "", value[last_separator_index + 1 :])
+    integer_digits = re.sub(r"\D", "", value[:last_separator_index])
+    if len(separator_indexes) == 1 and len(fractional_digits) == 3 and 1 <= len(integer_digits) <= 3:
+        return None
+    return last_separator_index
+
+
+def _normalize_integer_digits(value: str) -> str:
+    digits = re.sub(r"\D", "", value)
+    normalized = digits.lstrip("0")
+    return normalized or "0"
 
 
 def _structured_summary_ok(value: object) -> bool:

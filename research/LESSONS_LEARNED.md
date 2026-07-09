@@ -2239,3 +2239,56 @@ Future scaling/access notes:
 - OCR хорошо подходит для картинок с текстом и простых таблиц;
 - графики/фото/monitoring charts требуют vision/caption digest, а не только OCR;
 - vision/caption остаётся отдельным M5.6.2, потому что OCR и visual understanding решают разные задачи.
+
+## 2026-07-09: M5.6.2 Image Vision Digest
+
+Контекст:
+
+- OCR baseline хорошо распознаёт `just_text.png` и `tablet.png`, но плохо подходит для фото, графиков и monitoring charts;
+- локальная модель `gemma4:12b` уже установлена в Ollama и является более актуальным кандидатом для vision digest;
+- проверка через `/api/generate` с `images` подтвердила, что `gemma4:12b` умеет vision input.
+
+Что сделано:
+
+- `OllamaClient.generate()` получил optional `images`;
+- добавлен `image_digest_service.py`;
+- vision digest создаётся во время `scripts.ingest_seed_data`;
+- добавлены settings: `image_vision_enabled`, `image_vision_model`;
+- изображение нормализуется в PNG через Pillow перед отправкой в vision model;
+- digest documents имеют `source_type=image_digest`;
+- metadata: `block_type=image_digest`, `image_width`, `image_height`, `image_format`, `vision_model`, `digest_type=vision_caption`;
+- добавлен evaluation scenario `image_digest_ingestion`;
+- добавлены unit tests для image digest service и image payload в `OllamaClient`.
+- evaluator усилен через `required_numeric_values`: числовые факты проверяются после нормализации форматов (`1 416 960,00`, `1416960`, `1,416,960.00`, `1.416.960`).
+
+Проверки:
+
+- `gemma4:12b` описала `image.png`: мальчик рядом с зелёной надписью `UFA`;
+- unit tests: 20 passed;
+- compile: `python -m compileall app scripts tests`;
+- reindex после `gemma4:12b` и image normalization: 691 documents, 724 chunks;
+- `image_digest` sources: 6;
+- `image_digest_ingestion` smoke на `tablet.png`: run id `43a7e78b-743b-47c9-b606-ed4cc7adce78`;
+- result: sources=1, `failed_flags=0`;
+- final short regression: run id `a21a3e9e-00f3-44b0-b494-be338cdb79fa`;
+- scenarios: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`, `image_ocr_ingestion`, `image_digest_ingestion`;
+- result: 6/6 `ok`, `failed_flags=0`.
+
+Наблюдения:
+
+- `image.png`: vision digest хорошо описывает сцену, тогда как OCR почти бесполезен;
+- `tablet.png`: OCR и vision оба полезны, но дают разные представления: OCR точнее по строкам, vision лучше summarization;
+- `diagram.jpeg` и `zabbix.jpg`: vision digest уже полезнее OCR для смысла графика;
+- `charts.png` сначала был пропущен vision digest с HTTP 400 от Ollama, потому что Pillow определяет файл как `WEBP` при расширении `.png`;
+- это частый пользовательский сценарий: файл переименован без реальной конвертации;
+- добавлена нормализация изображения в PNG перед vision call.
+- после перехода на `gemma4:12b` модель прочитала надпись на `image.png` как `UEFA` вместо ожидаемого `UFA`;
+- это важный quality finding: vision caption полезен для сцены, но точное чтение текста на фото требует OCR/vision reconciliation;
+- стабильный smoke перенесён на `tablet.png`, где digest проверяет коммерческое предложение и сумму;
+- сумма `1 416 960,00` теперь проверяется не через хрупкий текстовый marker `416`, а через нормализованный числовой факт `1416960`.
+
+Вывод:
+
+- для изображений теперь есть два независимых evidence слоя: `image_ocr` для текста и `image_digest` для визуального смысла;
+- это соответствует общей M5 retrieval стратегии: разные представления одного source индексируются как text evidence;
+- RAG-answer модель получает уже извлечённый текст/digest, а не исходную картинку.

@@ -25,6 +25,7 @@ class _FakeAsyncClient:
     def __init__(self, *args: object, **kwargs: object) -> None:
         self.is_closed = False
         self.posts: list[str] = []
+        self.payloads: list[dict[str, object]] = []
         _FakeAsyncClient.instances.append(self)
 
     async def get(self, url: str) -> _FakeResponse:
@@ -32,6 +33,7 @@ class _FakeAsyncClient:
 
     async def post(self, url: str, json: dict[str, object]) -> _FakeResponse:
         self.posts.append(url)
+        self.payloads.append(json)
         if url.endswith("/api/embeddings"):
             return _FakeResponse({"embedding": [1.0, 2.0, 3.0]})
         return _FakeResponse({"response": "ok"})
@@ -56,3 +58,17 @@ def test_ollama_client_reuses_http_client_and_closes_it(monkeypatch: pytest.Monk
     assert len(_FakeAsyncClient.instances) == 1
     assert len(_FakeAsyncClient.instances[0].posts) == 2
     assert _FakeAsyncClient.instances[0].is_closed is True
+
+
+def test_ollama_client_sends_images_for_vision_generate(monkeypatch: pytest.MonkeyPatch) -> None:
+    _FakeAsyncClient.instances = []
+    monkeypatch.setattr(ollama_module.httpx, "AsyncClient", _FakeAsyncClient)
+
+    client = OllamaClient(base_url="http://ollama.test", timeout_seconds=1)
+
+    async def run_client_call() -> None:
+        await client.generate("vision-model", "describe", images=["base64-image"])
+
+    asyncio.run(run_client_call())
+
+    assert _FakeAsyncClient.instances[0].payloads[0]["images"] == ["base64-image"]
