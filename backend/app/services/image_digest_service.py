@@ -10,10 +10,12 @@ from app.services.document_loader import (
     DEFAULT_BUCKET_ID,
     DEFAULT_TENANT_ID,
     IMAGE_OCR_EXTENSIONS,
+    EmbeddedImage,
     RawDocument,
     _domain_for_path,
     _features_from_text,
     _stable_document_id,
+    iter_office_embedded_images,
 )
 from app.services.ollama_client import OllamaClient
 
@@ -83,6 +85,61 @@ async def load_image_digest_documents(
                 bucket_id=bucket_id,
             )
         )
+
+    for embedded_image in iter_office_embedded_images(raw_data_dir):
+        try:
+            digest = await _build_embedded_image_digest(
+                embedded_image,
+                ollama_client=ollama_client,
+                vision_model=vision_model,
+            )
+        except Exception as exc:
+            warnings.warn(
+                (
+                    "Embedded image vision digest skipped for "
+                    f"{embedded_image.parent_path}:{embedded_image.embedded_path}: {exc}"
+                ),
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            continue
+        if not digest["content"].strip():
+            continue
+
+        parent_path = embedded_image.parent_path
+        documents.append(
+            RawDocument(
+                id=f"{_stable_document_id(parent_path)}:embedded_image:{embedded_image.image_index}:vision_digest",
+                title=f"{parent_path.stem} - embedded image {embedded_image.image_index} vision digest",
+                content="\n".join(
+                    [
+                        f"File: {parent_path.name}",
+                        f"Embedded image: {embedded_image.embedded_path}",
+                        "Block type: image_digest",
+                        "Vision digest:",
+                        digest["content"],
+                    ]
+                ),
+                source_type="image_digest",
+                source_path=str(parent_path),
+                domain=_domain_for_path(parent_path),
+                feature=_features_from_text(digest["content"]),
+                metadata={
+                    "file_name": parent_path.name,
+                    "block_type": "image_digest",
+                    "parent_source_type": embedded_image.parent_source_type,
+                    "embedded_path": embedded_image.embedded_path,
+                    "embedded_image_index": embedded_image.image_index,
+                    "image_width": digest["image_width"],
+                    "image_height": digest["image_height"],
+                    "image_format": digest["image_format"],
+                    "vision_model": vision_model,
+                    "digest_type": "vision_caption",
+                },
+                tenant_id=tenant_id,
+                bucket_id=bucket_id,
+            )
+        )
     return documents
 
 
@@ -103,6 +160,31 @@ async def _build_image_digest(
     with Image.open(path) as image:
         width, height = image.size
         image_format = image.format or path.suffix.lstrip(".").upper()
+        encoded = _encode_image_as_png(image)
+
+    result = await ollama_client.generate(
+        model=vision_model,
+        prompt=IMAGE_DIGEST_PROMPT,
+        images=[encoded],
+        think=False,
+    )
+    return {
+        "content": str(result.get("response") or "").strip(),
+        "image_width": width,
+        "image_height": height,
+        "image_format": image_format,
+    }
+
+
+async def _build_embedded_image_digest(
+    embedded_image: EmbeddedImage,
+    *,
+    ollama_client: OllamaClient,
+    vision_model: str,
+) -> dict[str, Any]:
+    with Image.open(BytesIO(embedded_image.content)) as image:
+        width, height = image.size
+        image_format = image.format or Path(embedded_image.embedded_path).suffix.lstrip(".").upper()
         encoded = _encode_image_as_png(image)
 
     result = await ollama_client.generate(

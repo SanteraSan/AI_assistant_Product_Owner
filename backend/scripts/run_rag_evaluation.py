@@ -473,6 +473,65 @@ SCENARIOS = [
         score_threshold=0.0,
     ),
     EvaluationScenario(
+        id="docx_embedded_image_digest",
+        name="DOCX Embedded Image Digest",
+        prompt="Что изображено на встроенной картинке в DOCX sample-with-images?",
+        source_types=("image_digest",),
+        source_paths=(
+            "/home/santera/Projects/data/raw/docx_fixtures/sample-with-images.docx",
+        ),
+        required_marker_groups=(
+            ("изображ", "картин", "image"),
+            ("график", "диаграм"),
+            ("прибыл", "profit"),
+        ),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
+        id="excel_embedded_image_digest",
+        name="Excel Embedded Image Digest",
+        prompt="Что изображено на встроенной картинке в Excel diagramms?",
+        source_types=("image_digest",),
+        source_paths=(
+            "/home/santera/Projects/data/raw/excel_fixtures/diagramms.xlsx",
+        ),
+        required_marker_groups=(
+            ("абстракт", "abstract", "декоратив"),
+        ),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
+        id="excel_chart_pareto_ingestion",
+        name="Excel Chart Pareto Ingestion",
+        prompt="Что native Excel chart в diagramms говорит про defect analysis Pareto?",
+        source_types=("excel_chart",),
+        source_paths=(
+            "/home/santera/Projects/data/raw/excel_fixtures/diagramms.xlsx",
+        ),
+        required_marker_groups=(
+            ("defect", "дефект"),
+            ("pareto", "парето"),
+            ("occurrences", "случа", "колич"),
+        ),
+        required_numeric_values=("35",),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
+        id="excel_native_chart_ingestion",
+        name="Excel Native Chart Ingestion",
+        prompt="Какую цель по весу и какие первые значения показывает native Excel chart в журнале снижения веса?",
+        source_types=("excel_chart",),
+        source_paths=(
+            "/home/santera/Projects/data/raw/excel_fixtures/diagramms2.xlsx",
+        ),
+        required_marker_groups=(
+            ("вес", "weight"),
+            ("сниж", "потер", "журнал"),
+        ),
+        required_numeric_values=("176",),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
         id="bucket_alpha_positive",
         name="Bucket Alpha Positive",
         prompt="Что нужно сделать для Alpha enterprise clients по notifications?",
@@ -1046,6 +1105,50 @@ def _build_quality_flags(
         )
         flags["image_digest_bucket_metadata_ok"] = any(
             (source.get("metadata") or {}).get("bucket_id") for source in image_sources
+        )
+    elif scenario.id == "docx_embedded_image_digest":
+        image_sources = [source for source in sources if source.get("source_type") == "image_digest"]
+        flags["has_image_digest_source"] = bool(image_sources)
+        flags["docx_parent_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "parent_source_type"
+            )
+            == "docx"
+            for source in image_sources
+        )
+        flags["embedded_path_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "embedded_path"
+            )
+            for source in image_sources
+        )
+    elif scenario.id == "excel_embedded_image_digest":
+        image_sources = [source for source in sources if source.get("source_type") == "image_digest"]
+        flags["has_image_digest_source"] = bool(image_sources)
+        flags["excel_parent_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "parent_source_type"
+            )
+            == "xlsx"
+            for source in image_sources
+        )
+        flags["embedded_path_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "embedded_path"
+            )
+            for source in image_sources
+        )
+    elif scenario.id in {"excel_chart_pareto_ingestion", "excel_native_chart_ingestion"}:
+        chart_sources = [source for source in sources if source.get("source_type") == "excel_chart"]
+        flags["has_excel_chart_source"] = bool(chart_sources)
+        flags["excel_chart_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "chart_type"
+            )
+            for source in chart_sources
+        )
+        flags["excel_chart_bucket_metadata_ok"] = any(
+            (source.get("metadata") or {}).get("bucket_id") for source in chart_sources
         )
 
     if scenario.expected_bucket_ids:

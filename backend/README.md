@@ -981,3 +981,41 @@ Image digest:
 Важно: `charts.png` оказался WEBP-like файлом с расширением `.png`. Это частый пользовательский сценарий, поэтому vision digest нормализует изображение в настоящий PNG перед отправкой модели.
 
 Quality note: на `image.png` модель `gemma4:12b` прочитала крупную надпись как `UEFA`, хотя визуально ожидается `UFA`. Поэтому стабильный vision smoke использует `tablet.png`, а точное чтение текста на фото остаётся задачей OCR/vision reconciliation.
+
+## M5.7: Complex Office Files
+
+M5.7 расширяет Office ingestion за пределы простых строк и paragraphs:
+
+- DOCX embedded images извлекаются из `word/media/*` и становятся `image_ocr` / `image_digest` evidence с `parent_source_type=docx`;
+- XLSX embedded images извлекаются из `xl/media/*` и становятся `image_ocr` / `image_digest` evidence с `parent_source_type=xlsx`;
+- native Excel charts становятся `excel_chart` evidence через `openpyxl` chart objects;
+- если chart object не распознан openpyxl, loader использует fallback по `xl/charts/chart*.xml` и добавляет visible workbook context.
+
+M5.7 metadata:
+
+```json
+{
+  "block_type": "image_digest",
+  "parent_source_type": "docx",
+  "embedded_path": "word/media/image1.jpg",
+  "embedded_image_index": 1
+}
+```
+
+```json
+{
+  "block_type": "excel_chart",
+  "chart_type": "clusteredColumn, paretoLine",
+  "chart_xml_path": "xl/charts/chartEx1.xml"
+}
+```
+
+Проверки M5.7:
+
+- unit tests: 28 passed;
+- reindex: 1012 documents, 1057 chunks;
+- `docx_embedded_image_digest`, `excel_embedded_image_digest`, `excel_chart_pareto_ingestion`, `excel_native_chart_ingestion`;
+- three-model smoke `c59e112c-aa33-472c-a15e-55f15a066428`: `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b` прошли 4/4 сценария;
+- artifact: `research/m57_complex_office_three_model_latest.jsonl`.
+
+Quality note: `sample-with-images.docx` намеренно содержит рассинхрон - текст документа описывает gradient image, а embedded image фактически является графиком прибыли. Ingestion корректно разделяет эти evidence layers: `docx` text остаётся текстом документа, а `image_digest` / `image_ocr` описывают фактическое содержимое картинки.

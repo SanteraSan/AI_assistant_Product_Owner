@@ -719,6 +719,91 @@ Retrieval config:
 - исходная картинка не передаётся в RAG-answer prompt, только сохранённый digest text.
 - quality note: точное чтение надписи `UFA` на `image.png` не считается обязательным для stable vision digest smoke, потому что OCR-like текст на фото может требовать отдельного OCR/vision reconciliation.
 
+## Test 34: DOCX Embedded Image Digest
+
+Запрос:
+
+```text
+Что изображено на встроенной картинке в DOCX sample-with-images?
+```
+
+Retrieval config:
+
+- `source_types=["image_digest"]`;
+- `source_paths=["/home/santera/Projects/data/raw/docx_fixtures/sample-with-images.docx"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources содержат `source_type=image_digest`;
+- source metadata содержит `parent_source_type=docx`;
+- source metadata содержит `embedded_path`;
+- ответ упоминает картинку/изображение, график/диаграмму и прибыль/profit.
+
+## Test 35: Excel Embedded Image Digest
+
+Запрос:
+
+```text
+Что изображено на встроенной картинке в Excel diagramms?
+```
+
+Retrieval config:
+
+- `source_types=["image_digest"]`;
+- `source_paths=["/home/santera/Projects/data/raw/excel_fixtures/diagramms.xlsx"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources содержат `source_type=image_digest`;
+- source metadata содержит `parent_source_type=xlsx`;
+- source metadata содержит `embedded_path`;
+- ответ описывает абстрактную/декоративную embedded image;
+- важно: эта embedded image не является самим Pareto chart.
+
+## Test 36: Excel Chart Pareto Ingestion
+
+Запрос:
+
+```text
+Что native Excel chart в diagramms говорит про defect analysis Pareto?
+```
+
+Retrieval config:
+
+- `source_types=["excel_chart"]`;
+- `source_paths=["/home/santera/Projects/data/raw/excel_fixtures/diagramms.xlsx"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources содержат `source_type=excel_chart`;
+- source metadata содержит `chart_type` и `chart_xml_path`;
+- ответ упоминает defect/Pareto/occurrences;
+- `required_numeric_values=["35"]` проходит для top defect count.
+
+## Test 37: Excel Native Chart Ingestion
+
+Запрос:
+
+```text
+Какую цель по весу и какие первые значения показывает native Excel chart в журнале снижения веса?
+```
+
+Retrieval config:
+
+- `source_types=["excel_chart"]`;
+- `source_paths=["/home/santera/Projects/data/raw/excel_fixtures/diagramms2.xlsx"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources содержат `source_type=excel_chart`;
+- source metadata содержит `chart_type=AreaChart`;
+- ответ упоминает журнал/снижение/вес;
+- `required_numeric_values=["176"]` проходит для первых значений веса.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

@@ -2,10 +2,14 @@ import json
 import warnings
 from dataclasses import dataclass, field
 from dataclasses import replace
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+import xml.etree.ElementTree as ET
+from zipfile import BadZipFile, ZipFile
 
 from docx import Document
+from openpyxl import load_workbook
 import pandas as pd
 from PIL import Image
 import pytesseract
@@ -20,6 +24,9 @@ DOCX_PARAGRAPH_WINDOW_SIZE = 8
 DOCX_PARAGRAPH_WINDOW_OVERLAP = 2
 IMAGE_OCR_EXTENSIONS = (".png", ".jpg", ".jpeg")
 IMAGE_OCR_LANGUAGES = "rus+eng"
+OFFICE_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg")
+DOCX_MEDIA_PREFIX = "word/media/"
+XLSX_MEDIA_PREFIX = "xl/media/"
 
 
 @dataclass(frozen=True)
@@ -37,6 +44,15 @@ class RawDocument:
     processing_status: str = INDEXED_STATUS
 
 
+@dataclass(frozen=True)
+class EmbeddedImage:
+    parent_path: Path
+    embedded_path: str
+    image_index: int
+    content: bytes
+    parent_source_type: str
+
+
 def load_raw_documents(
     raw_data_dir: Path,
     *,
@@ -50,7 +66,9 @@ def load_raw_documents(
     documents.extend(_load_pdf_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_docx_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_image_ocr_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
+    documents.extend(_load_office_embedded_image_ocr_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_excel_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
+    documents.extend(_load_excel_chart_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_csv_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents.extend(_load_openapi_documents(raw_data_dir, tenant_id=tenant_id, bucket_id=bucket_id))
     documents = _apply_ingestion_manifest(raw_data_dir, documents)
@@ -364,12 +382,117 @@ def _load_image_ocr_documents(
     return documents
 
 
+def _load_office_embedded_image_ocr_documents(
+    raw_data_dir: Path,
+    *,
+    tenant_id: str,
+    bucket_id: str,
+) -> list[RawDocument]:
+    if not _tesseract_available():
+        return []
+
+    documents: list[RawDocument] = []
+    for embedded_image in iter_office_embedded_images(raw_data_dir):
+        try:
+            image, width, height, image_format = _open_embedded_image(embedded_image)
+            content = pytesseract.image_to_string(image, lang=IMAGE_OCR_LANGUAGES).strip()
+        except Exception as exc:
+            warnings.warn(
+                f"Embedded image OCR skipped for {embedded_image.parent_path}:{embedded_image.embedded_path}: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            continue
+        if not content:
+            continue
+
+        parent_path = embedded_image.parent_path
+        documents.append(
+            RawDocument(
+                id=f"{_stable_document_id(parent_path)}:embedded_image:{embedded_image.image_index}:ocr",
+                title=f"{parent_path.stem} - embedded image {embedded_image.image_index} OCR text",
+                content="\n".join(
+                    [
+                        f"File: {parent_path.name}",
+                        f"Embedded image: {embedded_image.embedded_path}",
+                        "Block type: image_ocr",
+                        "OCR text:",
+                        content,
+                    ]
+                ),
+                source_type="image_ocr",
+                source_path=str(parent_path),
+                domain=_domain_for_path(parent_path),
+                feature=_features_from_text(content),
+                metadata={
+                    "file_name": parent_path.name,
+                    "block_type": "image_ocr",
+                    "parent_source_type": embedded_image.parent_source_type,
+                    "embedded_path": embedded_image.embedded_path,
+                    "embedded_image_index": embedded_image.image_index,
+                    "image_width": width,
+                    "image_height": height,
+                    "image_format": image_format,
+                    "ocr_engine": "tesseract",
+                    "ocr_languages": IMAGE_OCR_LANGUAGES,
+                },
+                tenant_id=tenant_id,
+                bucket_id=bucket_id,
+            )
+        )
+    return documents
+
+
 def _tesseract_available() -> bool:
     try:
         pytesseract.get_tesseract_version()
     except pytesseract.TesseractNotFoundError:
         return False
     return True
+
+
+def iter_office_embedded_images(raw_data_dir: Path) -> list[EmbeddedImage]:
+    images: list[EmbeddedImage] = []
+    for path in sorted(list(raw_data_dir.rglob("*.docx")) + list(raw_data_dir.rglob("*.xlsx"))):
+        images.extend(_embedded_images_from_office_file(path))
+    return images
+
+
+def _embedded_images_from_office_file(path: Path) -> list[EmbeddedImage]:
+    media_prefix = DOCX_MEDIA_PREFIX if path.suffix.lower() == ".docx" else XLSX_MEDIA_PREFIX
+    parent_source_type = path.suffix.lstrip(".").lower()
+    try:
+        with ZipFile(path) as archive:
+            media_paths = sorted(
+                name
+                for name in archive.namelist()
+                if name.startswith(media_prefix)
+                and Path(name).suffix.lower() in OFFICE_IMAGE_EXTENSIONS
+            )
+            return [
+                EmbeddedImage(
+                    parent_path=path,
+                    embedded_path=media_path,
+                    image_index=image_index,
+                    content=archive.read(media_path),
+                    parent_source_type=parent_source_type,
+                )
+                for image_index, media_path in enumerate(media_paths, start=1)
+            ]
+    except BadZipFile:
+        warnings.warn(
+            f"Office embedded images skipped for non-zip Office file: {path}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return []
+
+
+def _open_embedded_image(embedded_image: EmbeddedImage) -> tuple[Image.Image, int, int, str]:
+    image = Image.open(BytesIO(embedded_image.content))
+    width, height = image.size
+    image_format = image.format or Path(embedded_image.embedded_path).suffix.lstrip(".").upper()
+    return image, width, height, image_format
 
 
 def _build_docx_paragraph_windows(
@@ -472,6 +595,127 @@ def _load_excel_documents(
                         bucket_id=bucket_id,
                     )
                 )
+    return documents
+
+
+def _load_excel_chart_documents(
+    raw_data_dir: Path,
+    *,
+    tenant_id: str,
+    bucket_id: str,
+) -> list[RawDocument]:
+    documents: list[RawDocument] = []
+    for path in sorted(raw_data_dir.rglob("*.xlsx")):
+        workbook = load_workbook(path, data_only=True, read_only=False)
+        path_documents: list[RawDocument] = []
+        for worksheet in workbook.worksheets:
+            charts = getattr(worksheet, "_charts", [])
+            if not charts:
+                continue
+            sheet_context = _worksheet_context(worksheet)
+            for chart_index, chart in enumerate(charts, start=1):
+                chart_type = type(chart).__name__
+                chart_refs = _chart_references(chart)
+                content = "\n".join(
+                    [
+                        f"File: {path.name}",
+                        f"Sheet: {worksheet.title}",
+                        "Block type: excel_chart",
+                        f"Chart type: {chart_type}",
+                        f"Chart references: {', '.join(chart_refs) if chart_refs else 'not available'}",
+                        "Visible sheet context:",
+                        sheet_context,
+                    ]
+                )
+                path_documents.append(
+                    RawDocument(
+                        id=f"{_stable_document_id(path)}:{worksheet.title}:chart:{chart_index}",
+                        title=f"{path.stem} - {worksheet.title} - chart {chart_index}",
+                        content=content,
+                        source_type="excel_chart",
+                        source_path=str(path),
+                        domain=_domain_for_path(path),
+                        feature=_features_from_text(content),
+                        metadata={
+                            "file_name": path.name,
+                            "sheet_name": worksheet.title,
+                            "block_type": "excel_chart",
+                            "chart_index": chart_index,
+                            "chart_type": chart_type,
+                            "chart_references": chart_refs,
+                        },
+                        tenant_id=tenant_id,
+                        bucket_id=bucket_id,
+                    )
+                )
+        documents.extend(path_documents)
+        if not path_documents:
+            documents.extend(
+                _load_excel_chart_xml_documents(
+                    path,
+                    workbook=workbook,
+                    tenant_id=tenant_id,
+                    bucket_id=bucket_id,
+                )
+            )
+    return documents
+
+
+def _load_excel_chart_xml_documents(
+    path: Path,
+    *,
+    workbook: Any,
+    tenant_id: str,
+    bucket_id: str,
+) -> list[RawDocument]:
+    documents: list[RawDocument] = []
+    try:
+        with ZipFile(path) as archive:
+            chart_paths = sorted(
+                name
+                for name in archive.namelist()
+                if name.startswith("xl/charts/chart") and name.endswith(".xml")
+            )
+            for chart_index, chart_path in enumerate(chart_paths, start=1):
+                xml_text = archive.read(chart_path).decode("utf-8", errors="replace")
+                chart_summary = _summarize_excel_chart_xml(xml_text)
+                workbook_context = _workbook_context(workbook)
+                content = "\n".join(
+                    [
+                        f"File: {path.name}",
+                        f"Chart XML: {chart_path}",
+                        "Block type: excel_chart",
+                        f"Chart type: {chart_summary['chart_type']}",
+                        f"Chart labels: {', '.join(chart_summary['labels']) if chart_summary['labels'] else 'not available'}",
+                        f"Chart references: {', '.join(chart_summary['references']) if chart_summary['references'] else 'not available'}",
+                        "Visible workbook context:",
+                        workbook_context,
+                    ]
+                )
+                documents.append(
+                    RawDocument(
+                        id=f"{_stable_document_id(path)}:chart_xml:{chart_index}",
+                        title=f"{path.stem} - chart XML {chart_index}",
+                        content=content,
+                        source_type="excel_chart",
+                        source_path=str(path),
+                        domain=_domain_for_path(path),
+                        feature=_features_from_text(content),
+                        metadata={
+                            "file_name": path.name,
+                            "block_type": "excel_chart",
+                            "chart_index": chart_index,
+                            "chart_type": chart_summary["chart_type"],
+                            "chart_xml_path": chart_path,
+                            "chart_labels": chart_summary["labels"],
+                            "chart_references": chart_summary["references"],
+                        },
+                        tenant_id=tenant_id,
+                        bucket_id=bucket_id,
+                    )
+                )
+    except BadZipFile:
+        return []
     return documents
 
 
@@ -649,6 +893,76 @@ def _row_to_text(row: dict[str, str]) -> str:
 
 def _compact_row_values(row: dict[str, str]) -> str:
     return " | ".join(value.strip() for value in row.values() if value.strip())
+
+
+def _worksheet_context(worksheet: Any, *, max_rows: int = 20) -> str:
+    rows: list[str] = []
+    for row in worksheet.iter_rows(values_only=True):
+        values = [str(value) for value in row if value is not None and str(value).strip()]
+        if not values:
+            continue
+        rows.append(" | ".join(values))
+        if len(rows) >= max_rows:
+            break
+    return "\n".join(rows)
+
+
+def _workbook_context(workbook: Any, *, max_rows_per_sheet: int = 12) -> str:
+    sections: list[str] = []
+    for worksheet in workbook.worksheets:
+        context = _worksheet_context(worksheet, max_rows=max_rows_per_sheet)
+        if context:
+            sections.append(f"Sheet: {worksheet.title}\n{context}")
+    return "\n\n".join(sections)
+
+
+def _chart_references(chart: Any) -> list[str]:
+    references: list[str] = []
+    for series in getattr(chart, "series", []) or []:
+        for ref_path in ("cat.numRef.f", "val.numRef.f", "xVal.numRef.f", "yVal.numRef.f"):
+            value = _nested_attr(series, ref_path)
+            if value and value not in references:
+                references.append(str(value))
+    return references
+
+
+def _nested_attr(value: Any, path: str) -> Any:
+    current = value
+    for attribute in path.split("."):
+        current = getattr(current, attribute, None)
+        if current is None:
+            return None
+    return current
+
+
+def _summarize_excel_chart_xml(xml_text: str) -> dict[str, Any]:
+    root = ET.fromstring(xml_text)
+    labels: list[str] = []
+    references: list[str] = []
+    chart_types: list[str] = []
+
+    for element in root.iter():
+        tag = _xml_local_name(element.tag)
+        text = (element.text or "").strip()
+        if tag in {"v", "f"} and text:
+            target = references if "!" in text or text.startswith("_xlchart") else labels
+            if text not in target:
+                target.append(text)
+        layout_id = element.attrib.get("layoutId")
+        if layout_id and layout_id not in chart_types:
+            chart_types.append(layout_id)
+        if tag.endswith("Chart") and tag not in chart_types:
+            chart_types.append(tag)
+
+    return {
+        "chart_type": ", ".join(chart_types[:5]) or "chartXml",
+        "labels": labels[:20],
+        "references": references[:20],
+    }
+
+
+def _xml_local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
 
 
 def _json_to_text(data: Any) -> str:

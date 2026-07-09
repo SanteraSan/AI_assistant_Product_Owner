@@ -2297,3 +2297,45 @@ Future scaling/access notes:
 - для изображений теперь есть два независимых evidence слоя: `image_ocr` для текста и `image_digest` для визуального смысла;
 - это соответствует общей M5 retrieval стратегии: разные представления одного source индексируются как text evidence;
 - RAG-answer модель получает уже извлечённый текст/digest, а не исходную картинку.
+
+## 2026-07-09: M5.7 Complex Office Files
+
+Контекст:
+
+- пользователь добавил fixtures: `sample-with-images.docx`, `sample-with-table.docx`, `diagramms.xlsx`, `diagramms2.xlsx`, `hard_for_analis.xls`;
+- цель этапа: проверить сложные Office-файлы до UI/M6, чтобы ingestion умел доставать не только plain text/table rows, но и embedded media/charts.
+
+Что сделано:
+
+- DOCX embedded images извлекаются из `word/media/*`;
+- XLSX embedded images извлекаются из `xl/media/*`;
+- embedded images проходят через уже существующие evidence-слои: `image_ocr` и `image_digest`;
+- metadata сохраняет `parent_source_type`, `embedded_path`, `embedded_image_index`;
+- Excel native charts индексируются как `source_type=excel_chart`;
+- для обычных openpyxl charts используется `_charts`;
+- для modern chartEx/chart XML добавлен fallback по `xl/charts/chart*.xml` плюс visible workbook context.
+
+Проверки:
+
+- unit tests: 28 passed;
+- compile: `python -m compileall app scripts tests`;
+- reindex: 1012 documents, 1057 chunks;
+- M5.7 qwen smoke: run id `c9633abd-ed9d-4351-b7db-33e1386f5147`, 4/4 сценария, `failed_flags=0`;
+- M5.7 three-model smoke: run id `c59e112c-aa33-472c-a15e-55f15a066428`;
+- artifact: `research/m57_complex_office_three_model_latest.jsonl`;
+- result: `qwen3.5:9b` 4/4, avg latency около 9.9s; `gemma4:12b` 4/4, avg latency около 15.3s; `qwen3:14b` 4/4, avg latency около 13.2s.
+
+Наблюдения:
+
+- `sample-with-images.docx` по тексту выглядит как sample с embedded image, но фактическая картинка оказалась графиком прибыли; evaluator был поправлен на реальное image evidence;
+- пользователь подтвердил, что картинка была намеренно заменена без обновления текста документа: это стало полезным mismatch fixture;
+- система корректно разделила evidence: `docx` paragraphs говорят про gradient, а `image_digest` / `image_ocr` по embedded image говорят про график прибыли;
+- `diagramms.xlsx` содержит декоративную embedded PNG image и отдельно chartEx Pareto chart в XML, поэтому это два разных evidence: `image_digest` и `excel_chart`;
+- `diagramms2.xlsx` содержит native `AreaChart`, который openpyxl распознаёт как chart object;
+- `.xls` остаётся сложнее для embedded media, потому что это legacy binary формат, не zip-based Office Open XML.
+
+Вывод:
+
+- M5.7 закрыл важную production-minded границу: Office-файл может содержать несколько типов evidence одновременно;
+- для графиков в Excel нельзя полагаться только на картинки: часть диаграмм живёт как native chart/XML и должна индексироваться отдельно;
+- следующий крупный шаг по M5 - расширить сценарии до большого M5 regression набора и отдельно решить, насколько глубоко поддерживать legacy `.xls` embedded media.
