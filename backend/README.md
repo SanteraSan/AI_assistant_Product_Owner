@@ -1089,3 +1089,43 @@ M5.8 закрывает первый real-world `.xls` edge case на `hard_for_
 - `legacy_xls_text_ingestion` и `legacy_xls_embedded_image_digest` three-model smoke `1232422c-65b0-4e20-9660-7b65d95f04be`;
 - `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b` прошли оба scenario без failed flags;
 - artifact: `research/m58_legacy_hard_excel_latest.jsonl`.
+
+## M5.8.1: DOCX/XLSX Image Anchor Metadata
+
+M5.8.1 добавляет связь embedded images с локальным Office-контекстом. Теперь картинка не просто принадлежит файлу, а может быть связана с конкретной DOCX table cell или XLSX anchor cell/row.
+
+Что добавлено:
+
+- DOCX image anchors извлекаются из `word/document.xml` + `word/_rels/document.xml.rels`;
+- для картинок внутри DOCX table cells сохраняются `table_index`, `table_row_index`, `table_cell_index`, `table_row_text`;
+- для картинок в DOCX paragraphs сохраняется `paragraph_index`, `paragraph_text` и ближайший previous paragraph fallback;
+- XLSX image anchors берутся из `openpyxl` worksheet images;
+- для XLSX сохраняются `sheet_name`, `anchor_row`, `anchor_col`, `anchor_cell`, `nearby_row_text`;
+- общий ключ `linked_text` попадает и в metadata, и в `image_ocr`/`image_digest` content, чтобы retrieval мог найти картинку по тексту товарной строки.
+
+Пример metadata:
+
+```json
+{
+  "parent_source_type": "xlsx",
+  "embedded_path": "xl/media/anchored_image5.png",
+  "anchor_type": "xlsx_cell",
+  "sheet_name": "Прайс с 01.05",
+  "anchor_cell": "B11",
+  "linked_text": "ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ ... Цена за кегу 3500 р."
+}
+```
+
+Проверки M5.8.1:
+
+- `sample-with-table 2.docx`: 5 embedded images linked to product table rows;
+- `hard_for_analis_2.xlsx`: 75 images with `openpyxl` anchors, including `B11`/`E11` for the row with `4,1 %` and `3500 р`;
+- reindex: 1423 documents, 1614 chunks;
+- `docx_table_image_anchor_digest` и `xlsx_row_image_anchor_digest` three-model smoke `ffb874c7-ba06-4d3b-a437-275df3928a6b`;
+- `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b` прошли оба scenario без failed flags;
+- artifact: `research/m581_office_image_anchor_latest.jsonl`.
+
+Future hardening:
+
+- legacy `.xls` layout linking остаётся отдельным экспериментом: нужен LibreOffice/headless conversion или BIFF/Escher parser, если понадобятся координаты картинок/shapes/OLE objects;
+- field-level access/redaction для таблиц нужно делать до prompt: например, обычный пользователь видит `Name` и `Params`, но `Price` заменяется на `[REDACTED]`; LLM не должен решать доступы самостоятельно.

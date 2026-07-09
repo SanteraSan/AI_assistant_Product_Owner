@@ -1,6 +1,8 @@
 from pathlib import Path
 
 from docx import Document
+from openpyxl import Workbook
+from openpyxl.drawing.image import Image as ExcelImage
 from PIL import Image
 
 from app.services.image_digest_service import load_image_digest_documents
@@ -79,6 +81,10 @@ def test_load_image_digest_documents_includes_docx_embedded_images(tmp_path: Pat
     assert documents[0].metadata["parent_source_type"] == "docx"
     assert documents[0].metadata["embedded_path"].startswith("word/media/")
     assert documents[0].metadata["embedded_image_index"] == 1
+    assert documents[0].metadata["anchor_type"] == "docx_paragraph"
+    assert documents[0].metadata["previous_paragraph_text"] == "Document with embedded image."
+    assert documents[0].metadata["linked_text"] == "Document with embedded image."
+    assert "Linked text: Document with embedded image." in documents[0].content
     assert documents[0].metadata["image_width"] == 200
     assert documents[0].metadata["image_height"] == 100
     assert ollama_client.generate_kwargs["images"]
@@ -114,4 +120,45 @@ def test_load_image_digest_documents_includes_legacy_xls_embedded_images(tmp_pat
     assert documents[0].metadata["embedded_image_index"] == 1
     assert documents[0].metadata["image_width"] == 120
     assert documents[0].metadata["image_height"] == 90
+    assert ollama_client.generate_kwargs["images"]
+
+
+def test_load_image_digest_documents_includes_xlsx_anchor_context(tmp_path: Path) -> None:
+    raw_data_dir = tmp_path / "raw"
+    raw_data_dir.mkdir()
+    image_path = tmp_path / "embedded.png"
+    Image.new("RGB", (80, 60), color="white").save(image_path)
+
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Прайс"
+    worksheet["B2"] = "ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ"
+    worksheet["C2"] = "Цена за кегу 3500 р."
+    worksheet["D2"] = "4,1 % алкоголь, 11% плотность"
+    worksheet.add_image(ExcelImage(str(image_path)), "B2")
+    xlsx_path = raw_data_dir / "with-anchor.xlsx"
+    workbook.save(xlsx_path)
+    ollama_client = _FakeOllamaClient()
+
+    async def run_loader():
+        return await load_image_digest_documents(
+            raw_data_dir,
+            ollama_client=ollama_client,
+            vision_model="vision-model",
+            tenant_id="tenant",
+            bucket_id="bucket",
+        )
+
+    import asyncio
+
+    documents = asyncio.run(run_loader())
+
+    assert len(documents) == 1
+    assert documents[0].source_path == str(xlsx_path)
+    assert documents[0].metadata["parent_source_type"] == "xlsx"
+    assert documents[0].metadata["anchor_type"] == "xlsx_cell"
+    assert documents[0].metadata["sheet_name"] == "Прайс"
+    assert documents[0].metadata["anchor_cell"] == "B2"
+    assert "ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ" in documents[0].metadata["linked_text"]
+    assert "Linked text: ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ" in documents[0].content
     assert ollama_client.generate_kwargs["images"]

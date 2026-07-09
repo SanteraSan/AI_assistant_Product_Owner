@@ -606,6 +606,42 @@ SCENARIOS = [
         score_threshold=0.0,
     ),
     EvaluationScenario(
+        id="docx_table_image_anchor_digest",
+        name="DOCX Table Image Anchor Digest",
+        prompt=(
+            "Что написано или изображено на картинке у продукта в sample-with-table 2.docx, "
+            "где указано 4,1 % алкоголь, 11% плотность и цена за кегу 3500 р.?"
+        ),
+        source_types=("image_digest",),
+        source_paths=(
+            "/home/santera/Projects/data/raw/docx_fixtures/sample-with-table 2.docx",
+        ),
+        required_marker_groups=(
+            ("4,1", "4.1"),
+            ("изображ", "картин", "image", "этикет"),
+        ),
+        required_numeric_values=("3500",),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
+        id="xlsx_row_image_anchor_digest",
+        name="XLSX Row Image Anchor Digest",
+        prompt=(
+            "Что написано или изображено на картинке у продукта в hard_for_analis_2.xlsx, "
+            "где указано 4,1 % алкоголь, 11% плотность и цена за кегу 3500 р.?"
+        ),
+        source_types=("image_digest",),
+        source_paths=(
+            "/home/santera/Projects/data/raw/excel_fixtures/hard_for_analis_2.xlsx",
+        ),
+        required_marker_groups=(
+            ("4,1", "4.1"),
+            ("изображ", "картин", "image", "этикет"),
+        ),
+        required_numeric_values=("3500",),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
         id="bucket_alpha_positive",
         name="Bucket Alpha Positive",
         prompt="Что нужно сделать для Alpha enterprise clients по notifications?",
@@ -1292,6 +1328,63 @@ def _build_quality_flags(
                     "",
                 )
             ).startswith("legacy-binary/")
+            for source in image_sources
+        )
+    elif scenario.id == "docx_table_image_anchor_digest":
+        image_sources = [source for source in sources if source.get("source_type") == "image_digest"]
+        flags["has_docx_table_image_digest_source"] = bool(image_sources)
+        flags["docx_table_anchor_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "anchor_type"
+            )
+            == "docx_table_cell"
+            for source in image_sources
+        )
+        flags["docx_table_linked_text_ok"] = any(
+            "пятниц" in str(
+                ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                    "linked_text",
+                    "",
+                )
+            ).lower()
+            and "3500" in str(
+                ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                    "linked_text",
+                    "",
+                )
+            )
+            for source in image_sources
+        )
+    elif scenario.id == "xlsx_row_image_anchor_digest":
+        image_sources = [source for source in sources if source.get("source_type") == "image_digest"]
+        flags["has_xlsx_row_image_digest_source"] = bool(image_sources)
+        flags["xlsx_anchor_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "anchor_type"
+            )
+            == "xlsx_cell"
+            for source in image_sources
+        )
+        flags["xlsx_anchor_row_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "anchor_row"
+            )
+            == 11
+            for source in image_sources
+        )
+        flags["xlsx_linked_text_ok"] = any(
+            "пятниц" in str(
+                ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                    "linked_text",
+                    "",
+                )
+            ).lower()
+            and "3500" in str(
+                ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                    "linked_text",
+                    "",
+                )
+            )
             for source in image_sources
         )
 

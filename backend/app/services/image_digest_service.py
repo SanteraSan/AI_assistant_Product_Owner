@@ -13,6 +13,7 @@ from app.services.document_loader import (
     EmbeddedImage,
     RawDocument,
     _domain_for_path,
+    _embedded_image_context_lines,
     _features_from_text,
     _stable_document_id,
     iter_office_embedded_images,
@@ -116,6 +117,7 @@ async def load_image_digest_documents(
                         f"File: {parent_path.name}",
                         f"Embedded image: {embedded_image.embedded_path}",
                         "Block type: image_digest",
+                        *_embedded_image_context_lines(embedded_image.metadata),
                         "Vision digest:",
                         digest["content"],
                     ]
@@ -135,6 +137,7 @@ async def load_image_digest_documents(
                     "image_format": digest["image_format"],
                     "vision_model": vision_model,
                     "digest_type": "vision_caption",
+                    **embedded_image.metadata,
                 },
                 tenant_id=tenant_id,
                 bucket_id=bucket_id,

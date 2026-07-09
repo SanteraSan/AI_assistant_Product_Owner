@@ -895,6 +895,55 @@ Retrieval config:
 - ответ описывает визуальное содержимое embedded images: пиво/напитки/бутылки/этикетки;
 - old `.xls` images не считаются structured Office media, поэтому metadata явно показывает legacy fallback origin.
 
+## Test 42: DOCX Table Image Anchor Digest
+
+Запрос:
+
+```text
+Что написано или изображено на картинке у продукта в sample-with-table 2.docx, где указано 4,1 % алкоголь, 11% плотность и цена за кегу 3500 р.?
+```
+
+Retrieval config:
+
+- `source_types=["image_digest"]`;
+- `source_paths=["/home/santera/Projects/data/raw/docx_fixtures/sample-with-table 2.docx"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources содержат `source_type=image_digest`;
+- source metadata содержит `parent_source_type=docx`;
+- source metadata содержит `anchor_type=docx_table_cell`;
+- source metadata содержит `linked_text` с `ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ` и `3500`;
+- ответ описывает картинку/изображение/этикетку;
+- `required_numeric_values=["3500"]` проходит;
+- product binding проверяется metadata flags, а не только текстом ответа.
+
+## Test 43: XLSX Row Image Anchor Digest
+
+Запрос:
+
+```text
+Что написано или изображено на картинке у продукта в hard_for_analis_2.xlsx, где указано 4,1 % алкоголь, 11% плотность и цена за кегу 3500 р.?
+```
+
+Retrieval config:
+
+- `source_types=["image_digest"]`;
+- `source_paths=["/home/santera/Projects/data/raw/excel_fixtures/hard_for_analis_2.xlsx"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources содержат `source_type=image_digest`;
+- source metadata содержит `parent_source_type=xlsx`;
+- source metadata содержит `anchor_type=xlsx_cell`;
+- source metadata содержит `anchor_row=11`;
+- source metadata содержит `anchor_cell`, например `B11` или соседний product image anchor;
+- source metadata содержит `linked_text` с `ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ` и `3500`;
+- ответ описывает картинку/изображение/этикетку;
+- `required_numeric_values=["3500"]` проходит.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

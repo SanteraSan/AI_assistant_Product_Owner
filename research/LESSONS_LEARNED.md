@@ -2459,3 +2459,57 @@ Future scaling/access notes:
 - для M5 baseline не нужен LibreOffice/headless converter;
 - текущий production-minded компромисс: `.xls` rows через `pandas/xlrd`, embedded images через lightweight binary fallback, ограничения честно фиксируются в metadata;
 - future hardening: если понадобятся координаты картинок, shapes, OLE objects или восстановление layout, тогда понадобится отдельный legacy Office conversion/parsing layer.
+
+## 2026-07-09: M5.8.1 DOCX/XLSX Image Anchor Metadata
+
+Контекст:
+
+- после M5.8 стало понятно, что legacy `.xls` умеет отдавать картинки как evidence, но не умеет связывать их с конкретными строками;
+- пользователь добавил новые fixtures: `sample-with-table 2.docx` и `hard_for_analis_2.xlsx`;
+- цель этапа: проверить более реалистичный вопрос “что написано на картинке у продукта с параметрами X и ценой Y?”.
+
+Что выяснили:
+
+- `sample-with-table 2.docx` содержит таблицу товаров, где каждая product row имеет отдельную image cell;
+- DOCX XML позволяет связать `word/media/imageN.png` с конкретной table row/cell через `word/document.xml` и relationships;
+- `hard_for_analis_2.xlsx` содержит 75 images, и `openpyxl` видит anchors;
+- для строки с `ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ`, `4,1 % алкоголь`, `11% плотность`, `3500 р` видны anchors `B11` и `E11`;
+- это существенно лучше, чем `.xls` binary fallback, потому что `.xlsx` сохраняет layout anchors в OpenXML.
+
+Что сделано:
+
+- `EmbeddedImage` получил optional `metadata`;
+- DOCX extraction добавляет `anchor_type=docx_table_cell` или `docx_paragraph`;
+- DOCX table-cell images получают `table_index`, `table_row_index`, `table_cell_index`, `table_row_text`, `linked_text`;
+- DOCX paragraph images получают `paragraph_index`, `paragraph_text`, `previous_paragraph_text`, `linked_text`;
+- XLSX images извлекаются через `openpyxl` `_images` и получают `anchor_type=xlsx_cell`, `sheet_name`, `anchor_row`, `anchor_col`, `anchor_cell`, `nearby_row_text`, `linked_text`;
+- `image_ocr` и `image_digest` content теперь содержит `Linked text`, чтобы vector retrieval мог найти картинку по тексту товарной строки;
+- добавлены scenarios `docx_table_image_anchor_digest` и `xlsx_row_image_anchor_digest`.
+
+Проверки:
+
+- focused tests: 13 passed;
+- reindex: 1423 documents, 1614 chunks;
+- final three-model smoke: run id `ffb874c7-ba06-4d3b-a437-275df3928a6b`;
+- artifact: `research/m581_office_image_anchor_latest.jsonl`;
+- scenarios: `docx_table_image_anchor_digest`, `xlsx_row_image_anchor_digest`;
+- models: `gemma4:12b`, `qwen3.5:9b`, `qwen3:14b`;
+- result: 2/2 scenarios x 3 models, `failed_flags=0`.
+
+Наблюдения:
+
+- первый вариант evaluator требовал, чтобы ответ обязательно повторял `ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ`, но часть моделей корректно отвечала про картинку без повторения полного названия;
+- product binding лучше проверять metadata flags (`linked_text`, `anchor_type`, `anchor_row`), а response markers оставить для ответа/визуального содержания;
+- `image_digest` иногда искажает текст на этикетке (`БУРНИТВО`, `БУЛЬНИТВО` вместо ожидаемого названия), поэтому visual digest полезен, но точное чтение текста на этикетках всё ещё требует OCR/vision reconciliation.
+
+Вывод:
+
+- DOCX/XLSX image anchor metadata закрывает важный product case: “картинка у строки/товара”;
+- для `.docx` и `.xlsx` теперь можно строить evidence bundle вокруг table row / anchor cell;
+- legacy `.xls` layout linking остаётся future hardening через LibreOffice/headless или специализированный BIFF/Escher parser.
+
+Future access-control note:
+
+- field-level access для таблиц возможен, но это отдельный policy/redaction layer;
+- правильная граница: parsing -> structured cell/row metadata -> authorization/redaction -> retrieval/prompt;
+- LLM не должен решать, можно ли показывать `price`; backend должен удалить или заменить restricted fields до prompt.

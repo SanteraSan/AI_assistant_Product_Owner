@@ -10,6 +10,7 @@ from zipfile import BadZipFile, ZipFile
 
 from docx import Document
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 import pandas as pd
 from PIL import Image
 import pytesseract
@@ -28,6 +29,12 @@ OFFICE_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg")
 DOCX_MEDIA_PREFIX = "word/media/"
 XLSX_MEDIA_PREFIX = "xl/media/"
 LEGACY_XLS_EMBEDDED_IMAGE_LIMIT = 50
+OFFICE_XML_NAMESPACES = {
+    "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    "rel": "http://schemas.openxmlformats.org/package/2006/relationships",
+    "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+}
 
 
 @dataclass(frozen=True)
@@ -52,6 +59,7 @@ class EmbeddedImage:
     image_index: int
     content: bytes
     parent_source_type: str
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def load_raw_documents(
@@ -417,6 +425,7 @@ def _load_office_embedded_image_ocr_documents(
                         f"File: {parent_path.name}",
                         f"Embedded image: {embedded_image.embedded_path}",
                         "Block type: image_ocr",
+                        *_embedded_image_context_lines(embedded_image.metadata),
                         "OCR text:",
                         content,
                     ]
@@ -436,6 +445,7 @@ def _load_office_embedded_image_ocr_documents(
                     "image_format": image_format,
                     "ocr_engine": "tesseract",
                     "ocr_languages": IMAGE_OCR_LANGUAGES,
+                    **embedded_image.metadata,
                 },
                 tenant_id=tenant_id,
                 bucket_id=bucket_id,
@@ -466,15 +476,22 @@ def iter_office_embedded_images(raw_data_dir: Path) -> list[EmbeddedImage]:
 def _embedded_images_from_office_file(path: Path) -> list[EmbeddedImage]:
     if path.suffix.lower() == ".xls":
         return _embedded_images_from_legacy_xls(path)
+    if path.suffix.lower() == ".xlsx":
+        return _embedded_images_from_xlsx(path)
+    if path.suffix.lower() == ".docx":
+        return _embedded_images_from_docx(path)
 
-    media_prefix = DOCX_MEDIA_PREFIX if path.suffix.lower() == ".docx" else XLSX_MEDIA_PREFIX
-    parent_source_type = path.suffix.lstrip(".").lower()
+    return []
+
+
+def _embedded_images_from_docx(path: Path) -> list[EmbeddedImage]:
     try:
         with ZipFile(path) as archive:
+            metadata_by_path = _docx_image_metadata_by_embedded_path(archive)
             media_paths = sorted(
                 name
                 for name in archive.namelist()
-                if name.startswith(media_prefix)
+                if name.startswith(DOCX_MEDIA_PREFIX)
                 and Path(name).suffix.lower() in OFFICE_IMAGE_EXTENSIONS
             )
             return [
@@ -483,7 +500,8 @@ def _embedded_images_from_office_file(path: Path) -> list[EmbeddedImage]:
                     embedded_path=media_path,
                     image_index=image_index,
                     content=archive.read(media_path),
-                    parent_source_type=parent_source_type,
+                    parent_source_type="docx",
+                    metadata=metadata_by_path.get(media_path, {}),
                 )
                 for image_index, media_path in enumerate(media_paths, start=1)
             ]
@@ -494,6 +512,28 @@ def _embedded_images_from_office_file(path: Path) -> list[EmbeddedImage]:
             stacklevel=2,
         )
         return []
+
+
+def _embedded_images_from_xlsx(path: Path) -> list[EmbeddedImage]:
+    workbook = load_workbook(path, data_only=True, read_only=False)
+    images: list[EmbeddedImage] = []
+    image_index = 0
+    for worksheet in workbook.worksheets:
+        for image in getattr(worksheet, "_images", []):
+            image_index += 1
+            content = image._data()
+            extension = _image_extension(getattr(image, "format", None), content)
+            images.append(
+                EmbeddedImage(
+                    parent_path=path,
+                    embedded_path=f"{XLSX_MEDIA_PREFIX}anchored_image{image_index}.{extension}",
+                    image_index=image_index,
+                    content=content,
+                    parent_source_type="xlsx",
+                    metadata=_xlsx_image_anchor_metadata(worksheet, image),
+                )
+            )
+    return images
 
 
 def _embedded_images_from_legacy_xls(path: Path) -> list[EmbeddedImage]:
@@ -517,6 +557,174 @@ def _embedded_images_from_legacy_xls(path: Path) -> list[EmbeddedImage]:
             )
         )
     return images
+
+
+def _docx_image_metadata_by_embedded_path(archive: ZipFile) -> dict[str, dict[str, Any]]:
+    try:
+        document_xml = ET.fromstring(archive.read("word/document.xml"))
+        relationships = _docx_relationship_targets(archive)
+    except Exception:
+        return {}
+
+    metadata_by_path: dict[str, dict[str, Any]] = {}
+    body = document_xml.find("w:body", OFFICE_XML_NAMESPACES)
+    if body is None:
+        return metadata_by_path
+
+    paragraph_index = -1
+    table_index = -1
+    previous_paragraph_text = ""
+    for child in list(body):
+        if child.tag == f"{{{OFFICE_XML_NAMESPACES['w']}}}p":
+            paragraph_index += 1
+            paragraph_text = _xml_text(child)
+            linked_text = paragraph_text or previous_paragraph_text
+            for relationship_id in _embedded_relationship_ids(child):
+                embedded_path = _docx_embedded_path(relationships.get(relationship_id, ""))
+                if embedded_path:
+                    metadata_by_path.setdefault(
+                        embedded_path,
+                        {
+                            "anchor_type": "docx_paragraph",
+                            "paragraph_index": paragraph_index,
+                            "paragraph_text": paragraph_text,
+                            "previous_paragraph_text": previous_paragraph_text,
+                            "linked_text": linked_text,
+                        },
+                    )
+            if paragraph_text:
+                previous_paragraph_text = paragraph_text
+            continue
+
+        if child.tag != f"{{{OFFICE_XML_NAMESPACES['w']}}}tbl":
+            continue
+
+        table_index += 1
+        for row_index, row in enumerate(child.findall("w:tr", OFFICE_XML_NAMESPACES)):
+            cells = row.findall("w:tc", OFFICE_XML_NAMESPACES)
+            row_values = [_xml_text(cell) for cell in cells]
+            row_text = " | ".join(value for value in row_values if value)
+            for cell_index, cell in enumerate(cells):
+                cell_text = row_values[cell_index] if cell_index < len(row_values) else ""
+                for relationship_id in _embedded_relationship_ids(cell):
+                    embedded_path = _docx_embedded_path(relationships.get(relationship_id, ""))
+                    if embedded_path:
+                        metadata_by_path.setdefault(
+                            embedded_path,
+                            {
+                                "anchor_type": "docx_table_cell",
+                                "table_index": table_index,
+                                "table_row_index": row_index,
+                                "table_cell_index": cell_index,
+                                "table_row_text": row_text,
+                                "table_cell_text": cell_text,
+                                "linked_text": row_text or cell_text,
+                            },
+                        )
+    return metadata_by_path
+
+
+def _docx_relationship_targets(archive: ZipFile) -> dict[str, str]:
+    relationships_xml = ET.fromstring(archive.read("word/_rels/document.xml.rels"))
+    return {
+        relationship.attrib["Id"]: relationship.attrib.get("Target", "")
+        for relationship in relationships_xml.findall(
+            "rel:Relationship",
+            OFFICE_XML_NAMESPACES,
+        )
+        if relationship.attrib.get("Id")
+    }
+
+
+def _embedded_relationship_ids(node: ET.Element) -> list[str]:
+    relationship_ids: list[str] = []
+    for blip in node.findall(".//a:blip", OFFICE_XML_NAMESPACES):
+        relationship_id = blip.attrib.get(f"{{{OFFICE_XML_NAMESPACES['r']}}}embed")
+        if relationship_id:
+            relationship_ids.append(relationship_id)
+    return relationship_ids
+
+
+def _docx_embedded_path(target: str) -> str:
+    if not target:
+        return ""
+    if target.startswith("word/"):
+        return target
+    return f"word/{target.lstrip('/')}"
+
+
+def _xml_text(node: ET.Element) -> str:
+    return "".join(
+        text.text or ""
+        for text in node.findall(".//w:t", OFFICE_XML_NAMESPACES)
+    ).strip()
+
+
+def _xlsx_image_anchor_metadata(worksheet: Any, image: Any) -> dict[str, Any]:
+    marker = getattr(getattr(image, "anchor", None), "_from", None)
+    if marker is None:
+        return {
+            "anchor_type": "xlsx_unknown",
+            "sheet_name": worksheet.title,
+        }
+
+    row_number = int(marker.row) + 1
+    column_number = int(marker.col) + 1
+    row_text = _worksheet_row_text_by_number(worksheet, row_number)
+    cell_value = worksheet.cell(row=row_number, column=column_number).value
+    return {
+        "anchor_type": "xlsx_cell",
+        "sheet_name": worksheet.title,
+        "anchor_row": row_number,
+        "anchor_col": column_number,
+        "anchor_cell": f"{get_column_letter(column_number)}{row_number}",
+        "anchor_cell_value": str(cell_value).strip() if cell_value is not None else "",
+        "nearby_row_text": row_text,
+        "linked_text": row_text,
+    }
+
+
+def _worksheet_row_text_by_number(worksheet: Any, row_number: int) -> str:
+    values = [
+        str(cell.value).strip()
+        for cell in worksheet[row_number]
+        if cell.value not in (None, "")
+    ]
+    return " | ".join(values)
+
+
+def _image_extension(image_format: str | None, content: bytes) -> str:
+    normalized_format = (image_format or "").lower()
+    if normalized_format in {"jpeg", "jpg"}:
+        return "jpg"
+    if normalized_format == "png":
+        return "png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    return normalized_format or "bin"
+
+
+def _embedded_image_context_lines(metadata: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    if metadata.get("anchor_type"):
+        lines.append(f"Anchor type: {metadata['anchor_type']}")
+    if metadata.get("sheet_name"):
+        lines.append(f"Sheet: {metadata['sheet_name']}")
+    if metadata.get("anchor_cell"):
+        lines.append(f"Anchor cell: {metadata['anchor_cell']}")
+    if metadata.get("table_index") is not None:
+        lines.append(
+            "Table position: "
+            f"table {int(metadata['table_index']) + 1}, "
+            f"row {int(metadata.get('table_row_index', 0)) + 1}, "
+            f"cell {int(metadata.get('table_cell_index', 0)) + 1}"
+        )
+    linked_text = str(metadata.get("linked_text") or "").strip()
+    if linked_text:
+        lines.append(f"Linked text: {linked_text}")
+    return lines
 
 
 def _iter_jpeg_blobs(data: bytes) -> Iterator[tuple[str, bytes]]:
