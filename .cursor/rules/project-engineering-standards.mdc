@@ -1,0 +1,20 @@
+---
+description: Core engineering standards for the Product Owner AI Assistant project
+alwaysApply: true
+---
+
+# Project Engineering Standards
+
+- Communicate with the user in Russian by default. Keep explanations educational and honest about trade-offs.
+- Work incrementally. Inspect existing code first and follow local architecture instead of rewriting broadly.
+- Keep FastAPI entrypoints thin. Put business logic and orchestration into dedicated services under `backend/app/services/`.
+- Treat RAG evidence strictly: retrieved sources are evidence; memory and summaries are context, not evidence.
+- Enforce access boundaries in backend filters before prompt construction. The LLM must never decide what the user can see.
+- Preserve traceability for document ingestion: `tenant_id`, `bucket_id`, `document_id`, `source_type`, `source_path`, and meaningful `document_metadata`.
+- Prefer multiple explicit evidence layers over one generic blob: text, rows, OCR, vision digest, chart evidence, and consistency evidence can coexist for the same file.
+- Add focused unit tests for meaningful logic and evaluation scenarios for user-visible RAG behavior.
+- Do not weaken failed evaluations blindly. First diagnose retrieval, chunking, metadata, prompt, evaluator, or model behavior.
+- Use stronger evaluators where needed: marker groups, numeric normalization, source metadata flags, and no-leak checks.
+- Update `backend/README.md`, `research/LESSONS_LEARNED.md`, `research/RAG_EVALUATION_CHECKLIST.md`, and relevant plans after completed milestones.
+- Commit only when the user explicitly asks. Do not commit personal/local raw files unless explicitly approved.
+- Document future hardening instead of adding heavy infrastructure prematurely.
