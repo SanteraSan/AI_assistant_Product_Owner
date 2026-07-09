@@ -809,3 +809,68 @@ PYTHONPATH=/home/santera/Projects/backend pytest -q
 - result: 3/3 `ok`, `failed_flags=0`.
 
 Осознанно отложено: CI/CD, Alembic, auth/RBAC, async Qdrant и dependency lock. К ним вернёмся перед upload/UI, OCR/load или public demo/deploy.
+
+## M5.5: DOCX Ingestion
+
+M5.5 добавляет baseline ingestion для `.docx` через `python-docx`. Legacy `.doc` сознательно не поддерживается: для baseline пользователь может конвертировать его в `.docx`, а полноценная поддержка старого формата остаётся future support.
+
+DOCX читается как набор трассируемых блоков:
+
+- обычные paragraphs становятся `RawDocument` с `source_type=docx`;
+- строки таблиц тоже становятся `RawDocument` с `source_type=docx`;
+- конкретный тип блока хранится в `document_metadata.block_type`: `paragraph` или `table_row`;
+- `tenant_id` и `bucket_id` проходят тем же путём, что PDF/Excel/Markdown.
+
+DOCX metadata:
+
+```json
+{
+  "file_name": "product_owner_brief.docx",
+  "block_type": "paragraph",
+  "block_index": 3,
+  "paragraph_index": 2
+}
+```
+
+Для таблиц дополнительно сохраняются `table_index` и `table_row_index`, а content содержит `Row values: ...`, как в Excel baseline.
+
+Добавлен sample DOCX:
+
+```text
+data/raw/docx_fixtures/product_owner_brief.docx
+```
+
+Evaluation:
+
+- scenario: `docx_ingestion`;
+- request ограничивает `source_types=["docx"]`;
+- quality flags проверяют `has_docx_source`, `docx_block_metadata_ok`, `docx_table_or_paragraph_metadata_ok`, `docx_bucket_metadata_ok`;
+- ответ должен найти risk и recommendation про enterprise onboarding handoff / Excel validation.
+
+Проверки M5.5:
+
+- unit tests: 14 passed;
+- compile: `python -m compileall app scripts tests`;
+- DOCX smoke `8c6436bb-f2ad-4a94-8707-b1505f758148`: `docx_ingestion`, sources=5, `failed_flags=0`;
+- short regression `0f68ba39-72ad-4f54-8b8a-3ff984a619dc`: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`, `failed_flags=0`.
+
+## M5.5.1: DOCX Chunking Hardening
+
+Реальный технический DOCX `Front&Back_C#.docx` показал проблему baseline: многие задания и куски кода лежат в соседних paragraphs. Если индексировать каждый paragraph полностью отдельно, retrieval может найти описание задания, но не подтянуть следующую строку с кодом или сигнатурой.
+
+Что изменено:
+
+- точные `paragraph` и `table_row` blocks сохранены;
+- paragraph content теперь включает короткий adjacent context: `Previous paragraph`, `Current paragraph`, `Next paragraph`;
+- дополнительно создаются `paragraph_window` blocks с перекрытием;
+- window metadata содержит `paragraph_start_index`, `paragraph_end_index`, `paragraph_count`, `window_index`;
+- это лёгкий шаг к section-aware chunking без полноценного layout parser.
+
+Проверки M5.5.1:
+
+- unit tests: 14 passed;
+- compile: `python -m compileall app scripts tests`;
+- reindex после `Front&Back_C#.docx`: 679 documents, 712 chunks;
+- `research/m55_frontback_docx_model_smoke_latest.jsonl`: 3 сценария x 3 модели = 9 результатов, `failed_flags=0`;
+- модели: `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b`;
+- short regression `63e91ec7-7d5c-4825-8b4a-8b404e167db4`: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`, `failed_flags=0`.

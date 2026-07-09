@@ -2037,3 +2037,100 @@ Regression:
 - reusable `OllamaClient` уменьшает overhead на создание HTTP clients;
 - поведение RAG после refactoring подтверждено коротким regression;
 - CI/CD, Alembic, auth/RBAC, async Qdrant и dependency locking остаются future hardening, а не блокируют M5.5.
+
+## 2026-07-09: M5.5 DOCX Ingestion
+
+Контекст:
+
+- после PDF, bucket isolation и Excel нужен следующий офисный формат - `.docx`;
+- baseline должен быть простым и трассируемым: читаем текстовые блоки и таблицы, не берём legacy `.doc`;
+- `bucket_id/tenant_id` propagation должен работать так же, как для PDF/Excel.
+
+Что сделано:
+
+- добавлена зависимость `python-docx`;
+- добавлен DOCX loader в `document_loader.py`;
+- paragraphs превращаются в `RawDocument` с `source_type=docx`;
+- table rows тоже превращаются в `RawDocument` с `source_type=docx`;
+- тип блока хранится в metadata: `block_type=paragraph` или `block_type=table_row`;
+- для paragraphs сохраняется `paragraph_index`;
+- для table rows сохраняются `table_index`, `table_row_index`;
+- table row content получает `Row values: ...`, чтобы LLM видела строку в человекочитаемом виде;
+- добавлен synthetic fixture `data/raw/docx_fixtures/product_owner_brief.docx`;
+- добавлен unit test `tests/test_document_loader_docx.py`;
+- добавлен evaluation scenario `docx_ingestion`.
+
+Проверки:
+
+- unit tests: 14 passed;
+- compile: `python -m compileall app scripts tests`;
+- reindex: 347 documents, 380 chunks;
+- DOCX smoke: run id `8c6436bb-f2ad-4a94-8707-b1505f758148`;
+- model: `qwen3.5:9b`;
+- scenario: `docx_ingestion`;
+- result: sources=5, `failed_flags=0`;
+- short regression: run id `0f68ba39-72ad-4f54-8b8a-3ff984a619dc`;
+- scenarios: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`;
+- result: 4/4 `ok`, `failed_flags=0`.
+
+Наблюдение:
+
+- первый DOCX smoke показал полезную edge case: риск и рекомендация были в разных paragraphs, и top-5 retrieval поднял риск, но не поднял paragraph с recommendation;
+- модель ответила честно: "в контексте нет рекомендации";
+- для smoke fixture риск и recommendation объединены в один paragraph, потому что цель M5.5 - проверить ingestion/metadata, а не устроить отдельный тест на paragraph adjacency retrieval;
+- это не считается закрытием проблемы chunking: в future hardening для DOCX стоит подумать о соседних paragraph windows или document-section chunking.
+
+Вывод:
+
+- `.docx` baseline работает end-to-end через общий ingestion -> chunking -> Qdrant -> RAG path;
+- `source_type=docx` достаточно прост для фильтрации, а `block_type` в metadata сохраняет детализацию;
+- legacy `.doc`, rich formatting, comments, headers/footers, embedded images и section-aware chunking остаются future support.
+
+## 2026-07-09: M5.5.1 DOCX Chunking Hardening
+
+Контекст:
+
+- пользователь добавил реальный технический DOCX `data/raw/docx_fixtures/Front&Back_C#.docx`;
+- документ содержит задания по frontend/backend и куски кода;
+- baseline paragraph-level DOCX ingestion нашёл важную проблему: задание и код часто лежат в соседних paragraphs;
+- пример: paragraph с заданием `ModifyUsers` поднимается retrieval, но соседняя сигнатура `async Task ModifyUsers(...)` может не попасть в prompt.
+
+Решение:
+
+- не удалять точные `paragraph` и `table_row` blocks, потому что они дают source traceability;
+- добавить adjacent context прямо в paragraph content:
+  - `Previous paragraph`;
+  - `Current paragraph`;
+  - `Next paragraph`;
+- дополнительно добавить `paragraph_window` documents с overlap;
+- metadata для window: `block_type=paragraph_window`, `paragraph_start_index`, `paragraph_end_index`, `paragraph_count`, `window_index`;
+- это лёгкий production-minded компромисс: лучше retrieval для технических DOCX без внедрения тяжёлого layout/section parser.
+
+Проверки:
+
+- unit tests: 14 passed;
+- compile: `python -m compileall app scripts tests`;
+- loader smoke по `Front&Back_C#.docx`: 331 blocks, из них 283 `paragraph` и 48 `paragraph_window`;
+- reindex: 679 documents, 712 chunks;
+- artifact: `research/m55_frontback_docx_model_smoke_latest.jsonl`;
+- scenarios: `frontback_docx_structure`, `frontback_docx_react_tasks`, `frontback_docx_async_modify_users`;
+- models: `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b`;
+- result: 9/9 без failed flags;
+- short regression: run id `63e91ec7-7d5c-4825-8b4a-8b404e167db4`;
+- regression scenarios: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`;
+- result: 4/4 `ok`, `failed_flags=0`.
+
+Наблюдения:
+
+- после hardening Qdrant всё ещё часто выбирает одиночные paragraph chunks, а не `paragraph_window`;
+- это не ошибка: одиночные paragraph chunks теперь содержат adjacent context, поэтому prompt всё равно получает соседние строки;
+- `paragraph_window` остаётся полезным fallback для вопросов, где нужен более широкий локальный контекст;
+- следующий возможный уровень - section-aware DOCX chunking: заголовок/раздел/задание + связанные code blocks.
+
+Future scaling/access notes:
+
+- роли/RBAC лучше вводить после UI/upload/bucket management, когда появятся реальные пользователи, группы и bucket membership;
+- сейчас достаточно сохранять `tenant_id/bucket_id` и фильтровать до prompt;
+- OpenRouter/external provider fallback нужно планировать в M8 Model Routing как `local_only/local_first/external_allowed`;
+- внешние модели нельзя использовать для приватных документов без явного opt-in;
+- Redis/очереди/Kafka/incremental indexing нужны позже как отдельное scaling hardening, когда появятся upload jobs и большие корпуса документов.

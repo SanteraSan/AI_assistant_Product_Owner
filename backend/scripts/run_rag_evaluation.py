@@ -435,6 +435,14 @@ SCENARIOS = [
         score_threshold=0.0,
     ),
     EvaluationScenario(
+        id="docx_ingestion",
+        name="DOCX Ingestion",
+        prompt="Что DOCX brief говорит про enterprise onboarding handoff risk и какую рекомендацию даёт?",
+        source_types=("docx",),
+        required_response_markers=("enterprise", "onboarding", "валидац"),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
         id="bucket_alpha_positive",
         name="Bucket Alpha Positive",
         prompt="Что нужно сделать для Alpha enterprise clients по notifications?",
@@ -925,6 +933,29 @@ def _build_quality_flags(
         )
         flags["excel_bucket_metadata_ok"] = any(
             (source.get("metadata") or {}).get("bucket_id") for source in excel_sources
+        )
+    elif scenario.id == "docx_ingestion":
+        docx_sources = [source for source in sources if source.get("source_type") == "docx"]
+        flags["has_docx_source"] = bool(docx_sources)
+        flags["docx_block_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "block_type"
+            )
+            for source in docx_sources
+        )
+        flags["docx_table_or_paragraph_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "paragraph_index"
+            )
+            is not None
+            or ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "table_row_index"
+            )
+            is not None
+            for source in docx_sources
+        )
+        flags["docx_bucket_metadata_ok"] = any(
+            (source.get("metadata") or {}).get("bucket_id") for source in docx_sources
         )
 
     if scenario.expected_bucket_ids:

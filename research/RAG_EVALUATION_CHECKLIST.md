@@ -586,6 +586,56 @@ Q5: А что нужно объяснить PO в первую очередь?
 - ответ находит организацию и дату из шапки документа;
 - supplement не должен срабатывать на обычные вопросы по товарам только из-за слова `прайс`.
 
+## Test 29: DOCX Ingestion
+
+Запрос:
+
+```text
+Что DOCX brief говорит про enterprise onboarding handoff risk и какую рекомендацию даёт?
+```
+
+Retrieval config:
+
+- `source_types=["docx"]`;
+- `score_threshold=0.0` для короткого synthetic DOCX smoke.
+
+Ожидания:
+
+- sources содержат `source_type=docx`;
+- source metadata содержит `document_metadata.block_type`;
+- source metadata содержит `document_metadata.paragraph_index` или `document_metadata.table_row_index`;
+- source metadata содержит `bucket_id` и `tenant_id`;
+- ответ находит risk про manual spreadsheet handoff и recommendation про Excel import validation;
+- baseline поддерживает `.docx`, но legacy `.doc` остаётся future support.
+
+## Test 30: DOCX Technical Adjacent Context
+
+Запросы:
+
+```text
+По документу Front&Back_C#.docx: из каких частей состоит тест и сколько времени даётся?
+
+По документу Front&Back_C#.docx: какие React-задания перечислены? Ответь кратко списком.
+
+По документу Front&Back_C#.docx: найди backend-задание с async Task ModifyUsers и кратко перескажи, что нужно сделать.
+```
+
+Retrieval config:
+
+- `source_types=["docx"]`;
+- `source_paths=["/home/santera/Projects/data/raw/docx_fixtures/Front&Back_C#.docx"]`;
+- `score_threshold=0.0`;
+- `top_k=8`.
+
+Ожидания:
+
+- sources содержат только выбранный DOCX;
+- source metadata содержит `document_metadata.block_type`;
+- sources дают adjacent context через `Previous paragraph` / `Next paragraph` или `block_type=paragraph_window`;
+- ответы находят структуру теста, React-задания и backend-задание `async Task ModifyUsers`;
+- проверяется на `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b`;
+- результат сохраняется в `research/m55_frontback_docx_model_smoke_latest.jsonl`.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.
