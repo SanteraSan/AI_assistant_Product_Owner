@@ -1197,3 +1197,5 @@ Compatibility note: PaddlePaddle wheels могут отставать от но�
 - сравнить PPStructureV3 output с M5.8.2 baseline;
 - решить, как нормализовать HTML/image refs в `linked_text` evidence;
 - оценить runtime, размер зависимостей и пригодность для production ingestion.
+
+Итоговое решение по scanned OCR strategy зафиксировано в `research/SCANNED_OCR_STRATEGY.md`: текущий M5 production path остаётся на lightweight baseline, PaddleOCR остаётся optional advanced path/future hardening.
