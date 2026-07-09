@@ -1164,3 +1164,36 @@ Next research spike:
 - docTR как OCR/document understanding кандидат;
 - layoutparser и table detection models для сложных layouts;
 - Donut/LayoutLM/Florence-like модели позже, когда baseline покажет реальные точки отказа.
+
+## M5.8.3: PaddleOCR PP-Structure Spike Harness
+
+M5.8.3 начинает “взрослый” OCR/layout spike без риска сломать основной backend. PaddleOCR не добавлен в обязательные зависимости: вместо этого есть optional script, который либо запускает PP-Structure, либо сохраняет compatibility finding.
+
+Script:
+
+```bash
+PYTHONPATH=. ../.venv-paddleocr/bin/python scripts/spike_paddleocr_structure.py
+```
+
+Что делает script:
+
+- проверяет наличие `paddleocr` и `paddle`;
+- запускает `PPStructureV3`/legacy `PPStructure` на `data/raw/scanned_fixtures/scanned-table-products.png`, если зависимости доступны;
+- сохраняет JSON artifact в `research/m583_paddleocr_structure_spike_latest.json`;
+- если зависимостей нет, сохраняет `status=missing_dependency` и install hint.
+
+Текущий результат:
+
+- backend venv: Python 3.14.4, без PaddleOCR hard dependency;
+- working spike venv: Python 3.11.15, `paddleocr==3.7.0`, `paddlex==3.7.2`, `paddlex[ocr]`, `paddlepaddle==3.2.2`;
+- artifact: `research/m583_paddleocr_structure_spike_latest.json`;
+- status: `completed`;
+- PPStructureV3 нашёл `table` block, 7 layout boxes и HTML таблицы с image references.
+
+Compatibility note: PaddlePaddle wheels могут отставать от новых версий Python. Если установка в текущий backend venv не пройдёт, лучше сделать отдельное spike-окружение на Python 3.10/3.11 и запускать PaddleOCR там, не смешивая тяжёлые зависимости с основным backend. Для PaddleOCR 3.7 полного `paddleocr` недостаточно для PPStructureV3: нужен `paddlex[ocr]`. `paddlepaddle==3.3.1` на CPU может падать с oneDNN/PIR ошибкой `ConvertPirAttribute2RuntimeAttribute not support`; в spike окружении рабочим оказался downgrade до `paddlepaddle==3.2.2`.
+
+Дальше:
+
+- сравнить PPStructureV3 output с M5.8.2 baseline;
+- решить, как нормализовать HTML/image refs в `linked_text` evidence;
+- оценить runtime, размер зависимостей и пригодность для production ingestion.

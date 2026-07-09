@@ -2562,3 +2562,45 @@ Future hardening:
 - определять image column не только как последнюю колонку;
 - добавить PDF page rendering для scanned PDF;
 - сравнить PaddleOCR PP-Structure, docTR, layoutparser, table detection models и Donut/LayoutLM/Florence-like подходы.
+
+## 2026-07-09: M5.8.3 PaddleOCR PP-Structure Spike Harness
+
+Контекст:
+
+- пользователь хочет посмотреть “взрослый” вариант table/layout OCR, особенно PaddleOCR, потому что встречал его на прошлом проекте;
+- после M5.8.2 baseline важно не заменить рабочий код вслепую, а сравнить PaddleOCR PP-Structure с нашим простым grid detector на одном fixture.
+
+Что сделано:
+
+- добавлен optional script `backend/scripts/spike_paddleocr_structure.py`;
+- script не добавляет PaddleOCR в обязательные зависимости backend;
+- script проверяет наличие `paddleocr` и `paddle`;
+- если зависимости доступны, запускает `PPStructureV3`/legacy `PPStructure` на `data/raw/scanned_fixtures/scanned-table-products.png`;
+- script поддерживает PaddleOCR 3.7 API через `predict()` и сохраняет compact summary новых result objects;
+- если зависимостей нет, сохраняет compatibility artifact со статусом `missing_dependency`.
+
+Проверки:
+
+- fallback check в текущем backend venv: Python 3.14.4;
+- `paddleocr` отсутствует;
+- `paddle` отсутствует;
+- script run завершился штатно, без падения backend;
+- artifact: `research/m583_paddleocr_structure_spike_latest.json`;
+- fallback status: `missing_dependency`;
+- real spike env на Python 3.11.15: `paddleocr==3.7.0`, `paddlex==3.7.2`, `paddlex[ocr]`, `paddlepaddle==3.2.2`;
+- `paddlepaddle==3.3.1` на CPU падал с известной oneDNN/PIR ошибкой `ConvertPirAttribute2RuntimeAttribute not support [pir::ArrayAttribute<pir::DoubleAttribute>]`;
+- после downgrade до `paddlepaddle==3.2.2` и установки `paddlex[ocr]` script завершился со статусом `completed`;
+- PPStructureV3 нашёл `table` block, 7 layout boxes и сформировал HTML таблицы с image references.
+
+Наблюдения:
+
+- PaddlePaddle часто имеет ограничения по Python wheel compatibility;
+- с Python 3.14 установка может оказаться проблемной, поэтому безопаснее держать PaddleOCR spike изолированным;
+- если установка в текущий `.venv` не пройдёт, стоит создать отдельное Python 3.10/3.11 окружение только для OCR/layout experiments;
+- для PaddleOCR 3.7 одного `paddleocr` недостаточно для PPStructureV3: нужен `paddlex[ocr]`.
+
+Вывод:
+
+- M5.8.3 остаётся spike harness, а не полноценной PaddleOCR integration;
+- это правильная граница: основной backend остаётся стабильным, а тяжёлые OCR/layout зависимости проверяются отдельно;
+- PPStructureV3 даёт более богатый table/layout output, чем наш baseline, но требует тяжёлого отдельного окружения и внимательной нормализации результата в `linked_text` evidence.

@@ -1,0 +1,51 @@
+{
+  "status": "completed",
+  "created_at": "2026-07-09T17:53:29.845619+00:00",
+  "python_version": "3.11.15",
+  "platform": "Linux-7.0.0-27-generic-x86_64-with-glibc2.43",
+  "image_path": "/home/santera/Projects/data/raw/scanned_fixtures/scanned-table-products.png",
+  "engine": "PaddleOCR PPStructureV3",
+  "raw_result_count": 1,
+  "items": [
+    {
+      "width": 760,
+      "height": 560,
+      "layout_box_count": 7,
+      "blocks": [
+        {
+          "block_label": "paragraph_title",
+          "block_bbox": [
+            67,
+            21,
+            301,
+            37
+          ],
+          "block_order": 1,
+          "block_content": "Scanned Product Table "
+        },
+        {
+          "block_label": "figure_title",
+          "block_bbox": [
+            67,
+            58,
+            205,
+            71
+          ],
+          "block_order": null,
+          "block_content": "Table 1: Products "
+        },
+        {
+          "block_label": "table",
+          "block_bbox": [
+            68,
+            80,
+            690,
+            468
+          ],
+          "block_order": null,
+          "block_content": "<html><body><table><tr><td>Name</td><td>Price</td><td>Params</td><td>Image</td></tr><tr><td>ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОБ.</td><td>Цена за кегу з5оо</td><td>4,1 % алкоголь, 11% плотность</td><td>Пятницкое <div style=\"text-align: center;\"><img src=\"imgs/img_in_image_box_579_117_665_193.jpg\" alt=\"Image\" /></div></td></tr><tr><td>СССР</td><td>p.</td><td>4,0 % алкоголь, 11% плотность</td><td>Жигулевск <div style=\"text-align: center;\"><img src=\"imgs/img_in_image_box_579_207_666_280.jpg\" alt=\"Image\" /></div></td></tr><tr><td>БАРХАТНОЕ ГОСТ (темное)</td><td>Цена за кегу 3700 р.</td><td>3,7 % алкоголь, 12% плотность</td><td>Бархатное этикетка <div style=\"text-align: center;\"><img src=\"imgs/img_in_image_box_579_297_665_373.jpg\" alt=\"Image\" /></div></td></tr><tr><td></td><td>р.</td><td>4,0 % алкоголь, 12% плотность</td><td>Немецкое <div style=\"text-align: center;\"><img src=\"imgs/img_in_image_box_578_386_666_460.jpg\" alt=\"Image\" /></div></td></tr></table></body></html>"
+        }
+      ]
+    }
+  ]
+}
