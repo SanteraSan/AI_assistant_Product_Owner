@@ -779,3 +779,33 @@ M5.4 smoke `fef54dac-ac00-4f49-b073-72ad40584920`: `excel_ingestion` на `qwen3
 - `gemma4:12b`: 6/6 сценариев, avg latency около 7.9s.
 
 Ограничение baseline: это row-level text ingestion, а не полноценный spreadsheet parser. Формулы, merged cells, pivot tables, rich formatting и cell-level permissions остаются future hardening.
+
+## M5.4.1: Backend Hardening
+
+M5.4.1 укрепляет backend перед DOCX/OCR этапами без большого переписывания проекта.
+
+Что добавлено:
+
+- `pytest` и первые unit tests для чистой логики;
+- `create_app()` и FastAPI `lifespan` вместо deprecated startup event;
+- reusable `OllamaClient` на одном `httpx.AsyncClient` с закрытием на shutdown;
+- helper для fallback conversation context;
+- часть RAG magic numbers/options вынесена в `Settings`;
+- retrieval chain в `RagService` вынесен в отдельный private method.
+
+Запуск unit tests:
+
+```bash
+cd /home/santera/Projects/backend
+source .venv/bin/activate
+PYTHONPATH=/home/santera/Projects/backend pytest -q
+```
+
+Проверки M5.4.1:
+
+- unit tests: 13 passed;
+- short RAG regression `7c445c79-c8f9-4cb3-93a4-38147eb25408`;
+- scenarios: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`;
+- result: 3/3 `ok`, `failed_flags=0`.
+
+Осознанно отложено: CI/CD, Alembic, auth/RBAC, async Qdrant и dependency lock. К ним вернёмся перед upload/UI, OCR/load или public demo/deploy.

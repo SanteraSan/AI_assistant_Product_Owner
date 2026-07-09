@@ -17,6 +17,11 @@ class Settings(BaseSettings):
     default_bucket_id: str = "taskflow_seed"
     rag_top_k: int = 5
     rag_score_threshold: float | None = 0.68
+    rag_candidate_multiplier: int = 3
+    rag_generation_keep_alive: str = "10m"
+    rag_generation_temperature: float = 0.1
+    rag_generation_top_p: float = 0.9
+    excel_supplement_scroll_limit: int = 1000
     conversation_summary_strategy: str = "hybrid"
     conversation_summary_model: str = "gemma4:12b"
     conversation_summary_temperature: float = 0.0

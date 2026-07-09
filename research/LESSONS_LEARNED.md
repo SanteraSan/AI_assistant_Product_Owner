@@ -1966,3 +1966,74 @@ Final Price.xls smoke:
 - exact identifiers, barcodes, invoice numbers, SKUs и header metadata нужно доставать deterministic supplement/fallback;
 - `qwen3.5:9b` остаётся лучшим кандидатом для частых Excel smoke/regression: качество совпало с `gemma4:12b`, latency ниже примерно в 2.4 раза;
 - это важный production-minded вывод: RAG для таблиц должен быть hybrid retrieval, а не только embeddings.
+
+## 2026-07-09: M5.4.1 Backend Hardening Plan
+
+Контекст:
+
+- после M5.4 backend уже содержит много RAG/ingestion логики: PDF, buckets, document filters, Excel, exact/header supplement;
+- перед M5.5 DOCX ingestion полезно укрепить backend-каркас, пока код ещё не разросся дальше;
+- цель не "переписать всё", а закрыть самые практичные engineering gaps.
+
+Что закрываем сейчас:
+
+- пункт 1 из review: добавить обычные software tests через `pytest`;
+- пункт 5: переиспользовать один `httpx.AsyncClient` в `OllamaClient`, а не создавать клиент на каждый запрос;
+- пункт 3 частично: добавить `create_app()` / `lifespan` и централизовать lifecycle сервисов;
+- пункт 8 частично: аккуратно декомпозировать `RagService.answer`, не меняя RAG-поведение;
+- пункт 9 частично: вынести default/error conversation context в helper/factory, чтобы error path не расходился с happy path;
+- пункт 11 частично: вынести самые важные magic numbers/options в `Settings`.
+
+Что сознательно откладываем:
+
+- пункт 2 CI/CD: не делаем сейчас, потому что проект локальный и не деплоится; вернёмся перед public demo/deploy;
+- пункт 4 async Qdrant: вернёмся после OCR/Vision или при появлении performance/load задач;
+- пункт 6 Alembic: вернёмся перед upload/UI, когда PostgreSQL станет source of truth для documents/buckets/access;
+- пункт 7 auth/RBAC/security: вернёмся перед upload/UI и public demo;
+- пункт 10 dependency lock/version pinning: вернёмся перед public demo/deploy.
+
+Ожидаемый результат M5.4.1:
+
+- есть быстрые unit tests для чистой логики;
+- есть локальная команда запуска tests;
+- lifecycle FastAPI стал ближе к production pattern;
+- Ollama HTTP client переиспользуется и корректно закрывается;
+- RAG behavior подтверждён коротким regression после refactoring.
+
+## 2026-07-09: M5.4.1 Backend Hardening Implementation
+
+Что сделано:
+
+- добавлен `pytest`;
+- добавлены первые unit tests: `FeatureExtractor`, `QueryRouter`, RAG helper functions, `OllamaClient`, `create_app()` и fallback conversation context;
+- `OllamaClient` переведён на reusable `httpx.AsyncClient`;
+- добавлен `OllamaClient.aclose()` для lifecycle shutdown;
+- FastAPI перешёл с deprecated `@app.on_event("startup")` на `lifespan`;
+- добавлен `create_app()`;
+- DB engine закрывается на shutdown через `db_engine.dispose()`;
+- fallback conversation context вынесен в `_conversation_context_error()`;
+- `RagService.answer()` стал тоньше: retrieval chain вынесен в `_retrieve_sources()`;
+- magic numbers/options вынесены в `Settings`: `rag_candidate_multiplier`, `rag_generation_keep_alive`, `rag_generation_temperature`, `rag_generation_top_p`, `excel_supplement_scroll_limit`.
+
+Unit tests:
+
+- command: `PYTHONPATH=/home/santera/Projects/backend pytest -q`;
+- result: 13 passed;
+- runtime: около 0.5s;
+- тесты не требуют Docker, Ollama или Qdrant.
+
+Regression:
+
+- run id: `7c445c79-c8f9-4cb3-93a4-38147eb25408`;
+- model: `qwen3.5:9b`;
+- scenarios: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`;
+- result: 3/3 `ok`;
+- `failed_flags=0` по всем сценариям.
+
+Вывод:
+
+- M5.4.1 закрыл главный engineering gap: появились быстрые unit tests для backend-логики;
+- lifecycle стал ближе к production FastAPI pattern;
+- reusable `OllamaClient` уменьшает overhead на создание HTTP clients;
+- поведение RAG после refactoring подтверждено коротким regression;
+- CI/CD, Alembic, auth/RBAC, async Qdrant и dependency locking остаются future hardening, а не блокируют M5.5.

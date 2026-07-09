@@ -20,6 +20,11 @@ class RagService:
         default_model: str,
         default_top_k: int,
         default_score_threshold: float | None,
+        candidate_multiplier: int,
+        generation_keep_alive: str,
+        generation_temperature: float,
+        generation_top_p: float,
+        excel_supplement_scroll_limit: int,
     ) -> None:
         self._ollama_client = ollama_client
         self._qdrant_store = qdrant_store
@@ -29,6 +34,11 @@ class RagService:
         self._default_model = default_model
         self._default_top_k = default_top_k
         self._default_score_threshold = default_score_threshold
+        self._candidate_multiplier = candidate_multiplier
+        self._generation_keep_alive = generation_keep_alive
+        self._generation_temperature = generation_temperature
+        self._generation_top_p = generation_top_p
+        self._excel_supplement_scroll_limit = excel_supplement_scroll_limit
 
     async def answer(
         self,
@@ -54,7 +64,7 @@ class RagService:
         selected_score_threshold = (
             score_threshold if score_threshold is not None else self._default_score_threshold
         )
-        candidate_k = selected_top_k * 3
+        candidate_k = selected_top_k * self._candidate_multiplier
         selected_tenant_id = tenant_id.strip() if tenant_id else None
         selected_bucket_ids = _normalize_values(bucket_ids or [])
         selected_features = _normalize_features(features or [])
@@ -79,40 +89,19 @@ class RagService:
             self._embedding_model,
             selected_retrieval_query,
         )
-        sources = self._qdrant_store.search(
+        sources, required_source_types, excel_supplement_count = self._retrieve_sources(
             query_vector=query_vector,
-            limit=candidate_k,
-            tenant_id=selected_tenant_id,
-            bucket_ids=selected_bucket_ids,
-            features=selected_features,
-            source_types=selected_source_types,
-            document_ids=selected_document_ids,
-            source_paths=selected_source_paths,
-        )
-        sources = _filter_sources_by_score(sources, selected_score_threshold)
-        excel_supplement_sources = self._supplement_excel_sources(
             message=selected_retrieval_query,
-            selected_tenant_id=selected_tenant_id,
-            selected_bucket_ids=selected_bucket_ids,
-            selected_source_types=selected_source_types,
-            selected_document_ids=selected_document_ids,
-            selected_source_paths=selected_source_paths,
-            limit=selected_top_k,
-        )
-        sources = _merge_sources(excel_supplement_sources, sources)
-        required_source_types = _normalize_values(
-            routing_decision.hints.get("required_source_types") or []
-        )
-        sources = self._supplement_required_source_types(
-            sources=sources,
-            query_vector=query_vector,
+            candidate_k=candidate_k,
+            selected_top_k=selected_top_k,
+            selected_score_threshold=selected_score_threshold,
             selected_tenant_id=selected_tenant_id,
             selected_bucket_ids=selected_bucket_ids,
             selected_features=selected_features,
+            selected_source_types=selected_source_types,
             selected_document_ids=selected_document_ids,
             selected_source_paths=selected_source_paths,
-            required_source_types=required_source_types,
-            limit=selected_top_k,
+            routing_hints=routing_decision.hints,
         )
         diversity = {
             "max_sources_per_title": max_sources_per_title if max_sources_per_title is not None else 1,
@@ -141,8 +130,11 @@ class RagService:
         result = await self._ollama_client.generate(
             model=selected_model,
             prompt=prompt,
-            keep_alive="10m",
-            options={"temperature": 0.1, "top_p": 0.9},
+            keep_alive=self._generation_keep_alive,
+            options={
+                "temperature": self._generation_temperature,
+                "top_p": self._generation_top_p,
+            },
             think=False,
         )
 
@@ -167,13 +159,66 @@ class RagService:
                 "bucket_ids": selected_bucket_ids,
                 "document_ids": selected_document_ids,
                 "source_paths": selected_source_paths,
-                "excel_supplement_count": len(excel_supplement_sources),
+                "excel_supplement_count": excel_supplement_count,
                 "final_top_k": len(sources),
             },
             query_hints=routing_decision.hints,
             context_policy=context_policy,
             prompt_tokens_estimate=_estimate_tokens(prompt),
         )
+
+    def _retrieve_sources(
+        self,
+        *,
+        query_vector: list[float],
+        message: str,
+        candidate_k: int,
+        selected_top_k: int,
+        selected_score_threshold: float | None,
+        selected_tenant_id: str | None,
+        selected_bucket_ids: list[str],
+        selected_features: list[str],
+        selected_source_types: list[str],
+        selected_document_ids: list[str],
+        selected_source_paths: list[str],
+        routing_hints: dict[str, object],
+    ) -> tuple[list[SourceChunk], list[str], int]:
+        sources = self._qdrant_store.search(
+            query_vector=query_vector,
+            limit=candidate_k,
+            tenant_id=selected_tenant_id,
+            bucket_ids=selected_bucket_ids,
+            features=selected_features,
+            source_types=selected_source_types,
+            document_ids=selected_document_ids,
+            source_paths=selected_source_paths,
+        )
+        sources = _filter_sources_by_score(sources, selected_score_threshold)
+        excel_supplement_sources = self._supplement_excel_sources(
+            message=message,
+            selected_tenant_id=selected_tenant_id,
+            selected_bucket_ids=selected_bucket_ids,
+            selected_source_types=selected_source_types,
+            selected_document_ids=selected_document_ids,
+            selected_source_paths=selected_source_paths,
+            limit=selected_top_k,
+        )
+        sources = _merge_sources(excel_supplement_sources, sources)
+        required_source_types = _normalize_values(
+            routing_hints.get("required_source_types") or []
+        )
+        sources = self._supplement_required_source_types(
+            sources=sources,
+            query_vector=query_vector,
+            selected_tenant_id=selected_tenant_id,
+            selected_bucket_ids=selected_bucket_ids,
+            selected_features=selected_features,
+            selected_document_ids=selected_document_ids,
+            selected_source_paths=selected_source_paths,
+            required_source_types=required_source_types,
+            limit=selected_top_k,
+        )
+        return sources, required_source_types, len(excel_supplement_sources)
 
     def _supplement_required_source_types(
         self,
@@ -225,7 +270,7 @@ class RagService:
             return []
 
         candidates = self._qdrant_store.scroll(
-            limit=1000,
+            limit=self._excel_supplement_scroll_limit,
             tenant_id=selected_tenant_id,
             bucket_ids=selected_bucket_ids,
             source_types=["excel_row"],

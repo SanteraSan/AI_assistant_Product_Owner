@@ -10,3 +10,4 @@ pypdf
 pyyaml
 sqlalchemy
 asyncpg
+pytest

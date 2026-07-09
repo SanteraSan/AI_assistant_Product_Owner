@@ -1,4 +1,6 @@
 import logging
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 from time import perf_counter
 
 import httpx
@@ -26,7 +28,6 @@ from app.services.rag_service import RagService
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
-app = FastAPI(title=settings.app_name)
 db_engine = create_engine(settings.postgres_dsn)
 db_session_factory = create_session_factory(db_engine)
 ollama_client = OllamaClient(
@@ -48,6 +49,11 @@ rag_service = RagService(
     default_model=settings.default_rag_model,
     default_top_k=settings.rag_top_k,
     default_score_threshold=settings.rag_score_threshold,
+    candidate_multiplier=settings.rag_candidate_multiplier,
+    generation_keep_alive=settings.rag_generation_keep_alive,
+    generation_temperature=settings.rag_generation_temperature,
+    generation_top_p=settings.rag_generation_top_p,
+    excel_supplement_scroll_limit=settings.excel_supplement_scroll_limit,
 )
 rag_log_service = RagLogService(session_factory=db_session_factory)
 chat_history_service = ChatHistoryService(session_factory=db_session_factory)
@@ -69,12 +75,24 @@ conversation_summary_service = ConversationSummaryService(
 )
 
 
-@app.on_event("startup")
-async def startup() -> None:
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         await init_db(db_engine)
     except Exception:
         logger.exception("PostgreSQL initialization failed")
+    try:
+        yield
+    finally:
+        await ollama_client.aclose()
+        await db_engine.dispose()
+
+
+def create_app() -> FastAPI:
+    return FastAPI(title=settings.app_name, lifespan=lifespan)
+
+
+app = create_app()
 
 
 @app.get("/health")
@@ -236,33 +254,37 @@ async def _build_conversation_context(
         return context_decision
     except Exception:
         logger.exception("Conversation context build failed")
-        return {
-            "used": False,
-            "mode": "error",
-            "follow_up_detected": False,
-            "topic_switch_detected": False,
-            "history_messages_used": 0,
-            "retrieval_query": message,
-            "carried_features": [],
-            "current_features": feature_extractor.extract(message),
-            "decision_reason": "error",
-            "summary_available": False,
-            "summary_used": False,
-            "summary_updated": False,
-            "summary_message_count": 0,
-            "summary_features": [],
-            "summary_mode": "error",
-            "summary_reason": "conversation_context_build_failed",
-            "summary_strategy": settings.conversation_summary_strategy,
-            "summary_model": settings.conversation_summary_model,
-            "summary_structured": {},
-            "summary_fallback_used": False,
-            "summary_validation_error": "conversation_context_build_failed",
-            "summary_validation_warnings": [],
-            "prompt_memory": conversation_memory_service.empty_prompt_memory(
-                reason="conversation_context_build_failed"
-            ),
-        }
+        return _conversation_context_error(message=message)
+
+
+def _conversation_context_error(*, message: str) -> dict[str, object]:
+    return {
+        "used": False,
+        "mode": "error",
+        "follow_up_detected": False,
+        "topic_switch_detected": False,
+        "history_messages_used": 0,
+        "retrieval_query": message,
+        "carried_features": [],
+        "current_features": feature_extractor.extract(message),
+        "decision_reason": "error",
+        "summary_available": False,
+        "summary_used": False,
+        "summary_updated": False,
+        "summary_message_count": 0,
+        "summary_features": [],
+        "summary_mode": "error",
+        "summary_reason": "conversation_context_build_failed",
+        "summary_strategy": settings.conversation_summary_strategy,
+        "summary_model": settings.conversation_summary_model,
+        "summary_structured": {},
+        "summary_fallback_used": False,
+        "summary_validation_error": "conversation_context_build_failed",
+        "summary_validation_warnings": [],
+        "prompt_memory": conversation_memory_service.empty_prompt_memory(
+            reason="conversation_context_build_failed"
+        ),
+    }
 
 
 async def _try_save_chat_exchange(
