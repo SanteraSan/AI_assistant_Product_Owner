@@ -2339,3 +2339,38 @@ Future scaling/access notes:
 - M5.7 закрыл важную production-minded границу: Office-файл может содержать несколько типов evidence одновременно;
 - для графиков в Excel нельзя полагаться только на картинки: часть диаграмм живёт как native chart/XML и должна индексироваться отдельно;
 - следующий крупный шаг по M5 - расширить сценарии до большого M5 regression набора и отдельно решить, насколько глубоко поддерживать legacy `.xls` embedded media.
+
+## 2026-07-09: M5.7.5 DOCX Text vs Visual Evidence Mismatch
+
+Контекст:
+
+- `sample-with-images.docx` намеренно содержит mismatch: текст документа описывает `gradient image`, но embedded image фактически является графиком прибыли;
+- это полезный portfolio-case: система должна не просто отвечать по картинке, а уметь сравнить разные evidence layers внутри одного файла.
+
+Что сделано:
+
+- добавлен scenario `docx_text_image_mismatch`;
+- scenario использует `source_types=["docx", "image_digest", "image_ocr"]` и конкретный `source_path`;
+- `RagService` усилен: если запрос находится в document scope и явно просит несколько `source_types`, backend поднимает недостающие source types в первые `top_k`;
+- fixed subtle retrieval issue: раньше visual evidence был в candidate list, но оказывался за пределами final `top_k`.
+
+Проверки:
+
+- focused tests: 13 passed;
+- compile: `python -m compileall app scripts tests`;
+- initial smoke показал retrieval gap: sources были только `docx`, модель честно отвечала, что картинки нет в context;
+- после top-k required source type fix sources стали включать `image_ocr`, `image_digest` и `docx`;
+- three-model smoke: run id `9bde5707-a50c-4dc7-b250-4b50e739b103`;
+- artifact: `research/m575_docx_text_image_mismatch_latest.jsonl`;
+- result: `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b` прошли scenario без failed flags.
+
+Наблюдения:
+
+- Qwen-модели сначала слишком осторожно говорили, что без пикселей нельзя проверить изображение;
+- scenario prompt был уточнён: `image_digest/image_ocr` являются extracted evidence по фактической embedded image;
+- после этого модели корректно зафиксировали mismatch: текст говорит про gradient, visual evidence говорит про график прибыли.
+
+Вывод:
+
+- M5.7.5 подтверждает, что разные representations одного файла могут использоваться совместно;
+- следующий hardening-кандидат: создавать отдельный `office_media_consistency` evidence на ingestion этапе, чтобы mismatch был вычислен заранее, а не только во время RAG-answer.

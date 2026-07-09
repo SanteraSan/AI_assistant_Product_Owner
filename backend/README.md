@@ -1019,3 +1019,20 @@ M5.7 metadata:
 - artifact: `research/m57_complex_office_three_model_latest.jsonl`.
 
 Quality note: `sample-with-images.docx` намеренно содержит рассинхрон - текст документа описывает gradient image, а embedded image фактически является графиком прибыли. Ingestion корректно разделяет эти evidence layers: `docx` text остаётся текстом документа, а `image_digest` / `image_ocr` описывают фактическое содержимое картинки.
+
+## M5.7.5: Text vs Visual Evidence Mismatch
+
+M5.7.5 добавляет первый scenario на сравнение разных evidence layers внутри одного Office-документа. Если запрос явно ограничен конкретным `source_path` и просит несколько `source_types`, retrieval supplement поднимает недостающие source types в первые `top_k`, чтобы модель получила и текст документа, и visual evidence.
+
+Проверяемый кейс:
+
+- `docx` paragraphs в `sample-with-images.docx` описывают gradient image;
+- `image_ocr` и `image_digest` по embedded image показывают график прибыли;
+- ответ должен сказать, что описание и фактическая картинка не совпадают.
+
+Проверки M5.7.5:
+
+- focused tests: 13 passed;
+- `docx_text_image_mismatch` three-model smoke `9bde5707-a50c-4dc7-b250-4b50e739b103`;
+- `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b` прошли scenario без failed flags;
+- artifact: `research/m575_docx_text_image_mismatch_latest.jsonl`.

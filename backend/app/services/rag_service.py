@@ -219,8 +219,11 @@ class RagService:
         )
         sources = _merge_sources(excel_supplement_sources, sources)
         sources = _rerank_docx_sources(sources, message)
-        required_source_types = _normalize_values(
-            routing_hints.get("required_source_types") or []
+        required_source_types = _required_source_types_for_supplement(
+            routing_hints=routing_hints,
+            selected_source_types=selected_source_types,
+            selected_document_ids=selected_document_ids,
+            selected_source_paths=selected_source_paths,
         )
         sources = self._supplement_required_source_types(
             sources=sources,
@@ -255,7 +258,7 @@ class RagService:
     ) -> list[SourceChunk]:
         supplemented_sources = sources
         for required_source_type in required_source_types:
-            if _contains_source_type(supplemented_sources, required_source_type):
+            if _contains_source_type(supplemented_sources[:limit], required_source_type):
                 continue
             supplemental_sources = self._qdrant_store.search(
                 query_vector=query_vector,
@@ -552,6 +555,33 @@ def _contains_source_type(sources: list[SourceChunk], source_type: str) -> bool:
         (source.source_type or "").strip().lower() == normalized_source_type
         for source in sources
     )
+
+
+def _required_source_types_for_supplement(
+    *,
+    routing_hints: dict[str, object],
+    selected_source_types: list[str],
+    selected_document_ids: list[str],
+    selected_source_paths: list[str],
+) -> list[str]:
+    required_source_types = _normalize_values(
+        routing_hints.get("required_source_types") or []
+    )
+    has_document_scope = bool(selected_document_ids or selected_source_paths)
+    if has_document_scope and len(selected_source_types) > 1:
+        required_source_types = _merge_values(required_source_types, selected_source_types)
+    return required_source_types
+
+
+def _merge_values(left: list[str], right: list[str]) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for value in [*left, *right]:
+        if value in seen:
+            continue
+        seen.add(value)
+        values.append(value)
+    return values
 
 
 def _extract_exact_numeric_terms(text: str) -> list[str]:

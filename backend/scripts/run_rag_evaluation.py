@@ -488,6 +488,26 @@ SCENARIOS = [
         score_threshold=0.0,
     ),
     EvaluationScenario(
+        id="docx_text_image_mismatch",
+        name="DOCX Text And Image Mismatch",
+        prompt=(
+            "Используй docx text как описание документа, а image_digest/image_ocr как "
+            "фактическое extracted evidence по встроенной картинке. Совпадает ли "
+            "описание gradient image в DOCX sample-with-images с фактическим "
+            "содержимым встроенной картинки?"
+        ),
+        source_types=("docx", "image_digest", "image_ocr"),
+        source_paths=(
+            "/home/santera/Projects/data/raw/docx_fixtures/sample-with-images.docx",
+        ),
+        required_marker_groups=(
+            ("расхожд", "не совпад", "противореч", "mismatch"),
+            ("градиент", "gradient"),
+            ("график", "прибыл", "profit"),
+        ),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
         id="excel_embedded_image_digest",
         name="Excel Embedded Image Digest",
         prompt="Что изображено на встроенной картинке в Excel diagramms?",
@@ -1120,6 +1140,23 @@ def _build_quality_flags(
             ((source.get("metadata") or {}).get("document_metadata") or {}).get(
                 "embedded_path"
             )
+            for source in image_sources
+        )
+    elif scenario.id == "docx_text_image_mismatch":
+        docx_sources = [source for source in sources if source.get("source_type") == "docx"]
+        image_sources = [
+            source
+            for source in sources
+            if source.get("source_type") in {"image_digest", "image_ocr"}
+        ]
+        flags["has_docx_source"] = bool(docx_sources)
+        flags["has_visual_evidence_source"] = bool(image_sources)
+        flags["has_both_text_and_visual_evidence"] = bool(docx_sources and image_sources)
+        flags["visual_parent_metadata_ok"] = any(
+            ((source.get("metadata") or {}).get("document_metadata") or {}).get(
+                "parent_source_type"
+            )
+            == "docx"
             for source in image_sources
         )
     elif scenario.id == "excel_embedded_image_digest":

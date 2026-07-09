@@ -804,6 +804,29 @@ Retrieval config:
 - ответ упоминает журнал/снижение/вес;
 - `required_numeric_values=["176"]` проходит для первых значений веса.
 
+## Test 38: DOCX Text And Image Mismatch
+
+Запрос:
+
+```text
+Используй docx text как описание документа, а image_digest/image_ocr как фактическое extracted evidence по встроенной картинке. Совпадает ли описание gradient image в DOCX sample-with-images с фактическим содержимым встроенной картинки?
+```
+
+Retrieval config:
+
+- `source_types=["docx", "image_digest", "image_ocr"]`;
+- `source_paths=["/home/santera/Projects/data/raw/docx_fixtures/sample-with-images.docx"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources содержат `docx`;
+- sources содержат visual evidence: `image_digest` или `image_ocr`;
+- source metadata у visual evidence содержит `parent_source_type=docx`;
+- ответ говорит, что есть mismatch / расхождение / несоответствие;
+- ответ упоминает, что текст говорит про gradient, а фактическая embedded image показывает график прибыли;
+- retrieval supplement должен поднимать явно запрошенные source types в первые `top_k` внутри document scope.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

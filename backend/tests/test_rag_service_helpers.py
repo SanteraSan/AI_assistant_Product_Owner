@@ -8,6 +8,7 @@ from app.services.rag_service import (
     _filter_sources_by_score,
     _looks_like_document_header_question,
     _remove_numeric_metric_lines,
+    _required_source_types_for_supplement,
 )
 
 
@@ -61,6 +62,17 @@ def test_source_diversity_limits_duplicate_titles() -> None:
     )
 
     assert [source.id for source in kept] == ["1", "3"]
+
+
+def test_required_source_types_include_explicit_document_scope_types() -> None:
+    required = _required_source_types_for_supplement(
+        routing_hints={},
+        selected_source_types=["docx", "image_digest", "image_ocr"],
+        selected_document_ids=[],
+        selected_source_paths=["/tmp/sample.docx"],
+    )
+
+    assert required == ["docx", "image_digest", "image_ocr"]
 
 
 def test_remove_numeric_metric_lines_keeps_qualitative_context() -> None:
