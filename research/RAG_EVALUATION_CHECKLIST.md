@@ -636,6 +636,34 @@ Retrieval config:
 - проверяется на `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b`;
 - результат сохраняется в `research/m55_frontback_docx_model_smoke_latest.jsonl`.
 
+## Test 31: DOCX Hybrid Retrieval And Reranking
+
+Запросы:
+
+```text
+По документу Front&Back_C#.docx: из каких частей состоит тест и сколько времени даётся?
+
+По документу Front&Back_C#.docx: какие React-задания перечислены? Ответь кратко списком.
+
+По документу Front&Back_C#.docx: найди backend-задание с async Task ModifyUsers и кратко перескажи, что нужно сделать.
+```
+
+Retrieval config:
+
+- `source_types=["docx"]`;
+- `source_paths=["/home/santera/Projects/data/raw/docx_fixtures/Front&Back_C#.docx"]`;
+- `score_threshold=0.0`;
+- `top_k=8`.
+
+Ожидания:
+
+- `retrieval.docx_supplement_count > 0`;
+- sources содержат only selected DOCX;
+- среди sources есть exact/neighbor evidence для `ModifyUsers` и `async Task`;
+- source metadata содержит `document_metadata.block_type`;
+- ответы проходят required markers для каждого scenario;
+- artifact: `research/m552_frontback_docx_hybrid_latest.jsonl`.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.

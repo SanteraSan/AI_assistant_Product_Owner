@@ -54,6 +54,7 @@ rag_service = RagService(
     generation_temperature=settings.rag_generation_temperature,
     generation_top_p=settings.rag_generation_top_p,
     excel_supplement_scroll_limit=settings.excel_supplement_scroll_limit,
+    docx_supplement_scroll_limit=settings.docx_supplement_scroll_limit,
 )
 rag_log_service = RagLogService(session_factory=db_session_factory)
 chat_history_service = ChatHistoryService(session_factory=db_session_factory)

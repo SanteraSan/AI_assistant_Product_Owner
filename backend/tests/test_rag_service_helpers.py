@@ -1,7 +1,10 @@
 from app.models.chat import SourceChunk
 from app.services.rag_service import (
     _apply_source_diversity,
+    _docx_neighbor_sources,
+    _docx_rerank_score,
     _extract_exact_numeric_terms,
+    _extract_docx_exact_terms,
     _filter_sources_by_score,
     _looks_like_document_header_question,
     _remove_numeric_metric_lines,
@@ -15,6 +18,8 @@ def _source(
     title: str = "Source",
     source_type: str = "markdown",
     source_path: str = "/tmp/source.md",
+    content: str | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> SourceChunk:
     return SourceChunk(
         id=id,
@@ -23,7 +28,8 @@ def _source(
         source_type=source_type,
         source_path=source_path,
         feature=[],
-        content=f"content {id}",
+        content=content or f"content {id}",
+        metadata=metadata or {},
     )
 
 
@@ -88,3 +94,75 @@ def test_document_header_question_detection_is_not_triggered_by_price_word_only(
     assert not _looks_like_document_header_question(
         "Какие позиции Жатецкий Гусь видны в прайсе?"
     )
+
+
+def test_extract_docx_exact_terms_keeps_code_tokens_without_docx_noise() -> None:
+    terms = _extract_docx_exact_terms(
+        "По Front&Back_C#.docx найди async Task ModifyUsers и React задания."
+    )
+
+    assert "async" in terms
+    assert "task" in terms
+    assert "modifyusers" in terms
+    assert "react" in terms
+    assert "docx" not in terms
+
+
+def test_docx_neighbor_sources_finds_adjacent_paragraphs_and_windows() -> None:
+    seed = _source(
+        "p10",
+        source_type="docx",
+        metadata={"document_metadata": {"block_type": "paragraph", "paragraph_index": 10}},
+    )
+    previous = _source(
+        "p9",
+        source_type="docx",
+        metadata={"document_metadata": {"block_type": "paragraph", "paragraph_index": 9}},
+    )
+    far = _source(
+        "p20",
+        source_type="docx",
+        metadata={"document_metadata": {"block_type": "paragraph", "paragraph_index": 20}},
+    )
+    window = _source(
+        "w",
+        source_type="docx",
+        metadata={
+            "document_metadata": {
+                "block_type": "paragraph_window",
+                "paragraph_start_index": 8,
+                "paragraph_end_index": 12,
+            }
+        },
+    )
+
+    neighbors = _docx_neighbor_sources(
+        seed_sources=[seed],
+        candidates=[far, window, previous],
+        radius=2,
+    )
+
+    assert [source.id for source in neighbors] == ["w", "p9"]
+
+
+def test_docx_rerank_score_boosts_exact_code_matches() -> None:
+    terms = ["modifyusers", "async"]
+    weak = _source(
+        "weak",
+        score=0.80,
+        source_type="docx",
+        content="File: Front&Back_C#.docx\nCurrent paragraph: unrelated task",
+        metadata={"document_metadata": {"block_type": "paragraph", "paragraph_index": 1}},
+    )
+    exact = _source(
+        "exact",
+        score=0.75,
+        source_type="docx",
+        content=(
+            "File: Front&Back_C#.docx\n"
+            "Current paragraph: async Task ModifyUsers(int userId)"
+        ),
+        metadata={"document_metadata": {"block_type": "paragraph", "paragraph_index": 2}},
+    )
+
+    assert _docx_rerank_score(exact, terms) > _docx_rerank_score(weak, terms)

@@ -874,3 +874,27 @@ Evaluation:
 - `research/m55_frontback_docx_model_smoke_latest.jsonl`: 3 сценария x 3 модели = 9 результатов, `failed_flags=0`;
 - модели: `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b`;
 - short regression `63e91ec7-7d5c-4825-8b4a-8b404e167db4`: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`, `failed_flags=0`.
+
+## M5.5.2: DOCX Hybrid Retrieval / Reranking
+
+M5.5.2 усиливает DOCX retrieval после baseline adjacent context. Теперь backend не только полагается на top-k vector search, но и deterministic путём добавляет локальный DOCX-контекст внутри уже разрешённого scope.
+
+Что добавлено:
+
+- `docx_supplement_scroll_limit` в `Settings`;
+- `RagService` scroll-ит только `source_type=docx` внутри выбранных `tenant_id`, `bucket_ids`, `document_ids`, `source_paths`;
+- exact/lexical supplement для code-like terms: `ModifyUsers`, `React`, `async`, `Task`, числовые маркеры;
+- neighbor expansion по `paragraph_index` с радиусом 2;
+- поддержка `paragraph_window` как широкого локального контекста;
+- lightweight reranking: базовый vector score + exact match boost + небольшой `paragraph_window` boost;
+- debug field `retrieval.docx_supplement_count`.
+
+Важно: supplement не отправляет модель искать доступы. Access boundary остаётся прежним: backend сначала ограничивает scope, затем собирает локальный evidence bundle.
+
+Проверки M5.5.2:
+
+- unit tests: 17 passed;
+- compile: `python -m compileall app scripts tests`;
+- `research/m552_frontback_docx_hybrid_latest.jsonl`: 3 сценария x 3 модели = 9 результатов, `failed_flags=0`;
+- `docx_supplement_count`: 12-14 на `Front&Back_C#.docx`;
+- short regression `fc2604a2-230f-485a-9444-eb63d52e4dac`: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`, `failed_flags=0`.

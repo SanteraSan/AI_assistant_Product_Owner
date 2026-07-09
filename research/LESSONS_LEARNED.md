@@ -2134,3 +2134,55 @@ Future scaling/access notes:
 - OpenRouter/external provider fallback нужно планировать в M8 Model Routing как `local_only/local_first/external_allowed`;
 - внешние модели нельзя использовать для приватных документов без явного opt-in;
 - Redis/очереди/Kafka/incremental indexing нужны позже как отдельное scaling hardening, когда появятся upload jobs и большие корпуса документов.
+
+## 2026-07-09: M5.5.2 DOCX Hybrid Retrieval / Reranking
+
+Контекст:
+
+- M5.5.1 улучшил DOCX chunking через adjacent context и `paragraph_window`;
+- это помогло качеству ответов, но архитектурно всё ещё было baseline-решением: соседний контекст склеивался до embedding;
+- пользователь справедливо отметил, что позже нужно прийти к более взрослому retrieval: несколько представлений, supplement, neighbor expansion, reranking.
+
+Что сделано:
+
+- добавлен `docx_supplement_scroll_limit` в `Settings`;
+- `RagService` теперь делает DOCX supplement внутри разрешённого scope:
+  - `tenant_id`;
+  - `bucket_ids`;
+  - `document_ids`;
+  - `source_paths`;
+- supplement срабатывает только для `source_type=docx` и ограниченного document scope;
+- добавлен exact/lexical supplement для code-like terms: `ModifyUsers`, `React`, `async`, `Task`, числовые маркеры;
+- `File:` line исключается из exact matching, чтобы имя файла `Front&Back_C#.docx` не матчило каждый chunk;
+- добавлен neighbor expansion по `paragraph_index` с радиусом 2;
+- `paragraph_window` используется как широкий локальный контекст;
+- добавлен lightweight reranking:
+  - base vector score;
+  - exact match boost;
+  - небольшой `paragraph_window` boost;
+- в response debug появился `retrieval.docx_supplement_count`;
+- добавлены unit tests для DOCX exact terms, neighbor expansion и rerank score.
+
+Проверки:
+
+- unit tests: 17 passed;
+- compile: `python -m compileall app scripts tests`;
+- точечный smoke `async Task ModifyUsers`:
+  - `docx_supplement_count=12`;
+  - первые sources: `paragraph_window`, paragraph 257, paragraph 258;
+  - ответ нашёл и задание, и сигнатуру `async Task ModifyUsers(...)`;
+- artifact: `research/m552_frontback_docx_hybrid_latest.jsonl`;
+- scenarios: `frontback_docx_structure`, `frontback_docx_react_tasks`, `frontback_docx_async_modify_users`;
+- models: `qwen3.5:9b`, `gemma4:12b`, `qwen3:14b`;
+- result: 9/9 без failed flags;
+- `docx_supplement_count`: 12-14;
+- short regression: run id `fc2604a2-230f-485a-9444-eb63d52e4dac`;
+- regression scenarios: `general_po_summary`, `excel_ingestion`, `bucket_no_leak_negative`, `docx_ingestion`;
+- result: 4/4 `ok`, `failed_flags=0`.
+
+Вывод:
+
+- M5.5.2 стал первым полноценным DOCX hybrid retrieval step;
+- теперь backend не просто отдаёт raw top-k Qdrant, а собирает локальный evidence bundle;
+- это ближе к production RAG: vector search находит candidates, deterministic supplement добавляет точные/соседние chunks, reranking упорядочивает результат;
+- следующий возможный шаг - section-aware DOCX parsing и отдельное распознавание `code_block`.
