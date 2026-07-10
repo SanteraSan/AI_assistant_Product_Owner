@@ -2910,3 +2910,48 @@ Follow-up compact regression:
 
 - Alembic/config/health/request-id/Redis/Ollama hardening не сломали ключевой API RAG path;
 - можно переходить к M7 Text-to-SQL baseline.
+
+## 2026-07-10: M7 Text-to-SQL Baseline
+
+Контекст:
+
+- перед LoRA fine-tuning нужен честный prompt-only baseline;
+- baseline должен измерять не красоту ответа, а SQL validity, execution success, schema adherence, safety и latency;
+- Text-to-SQL должен работать только через read-only SQL validator.
+
+Что сделано:
+
+- добавлен `app/services/sql_validator.py`;
+- validator извлекает SQL из plain/fenced response;
+- validator разрешает один `SELECT` / `WITH ... SELECT` statement;
+- validator запрещает destructive keywords: `insert`, `update`, `delete`, `drop`, `alter`, `create`, `truncate` и другие;
+- validator проверяет allowed tables и игнорирует CTE aliases как внутренние имена;
+- добавлен baseline runner `scripts/run_text_to_sql_baseline.py`;
+- schema context строится из SQLAlchemy metadata;
+- runner может выполнять valid SQL в read-only PostgreSQL transaction;
+- добавлен report `research/TEXT_TO_SQL_BASELINE_2026_07_10.md`;
+- artifact: `research/text_to_sql_baseline_latest.json`.
+
+Baseline run:
+
+- models: `qwen3.5:9b`, `gemma4:12b`, `qwen2.5-coder:7b`;
+- scenarios: `5`;
+- total results: `15`;
+- all models: `5/5` valid SQL;
+- all models: `5/5` execution success;
+- `qwen3.5:9b`: required tables `4/5`, required terms `4/5`, avg latency `863 ms`;
+- `gemma4:12b`: required tables `5/5`, required terms `5/5`, avg latency `8534 ms`;
+- `qwen2.5-coder:7b`: required tables `5/5`, required terms `5/5`, avg latency `5368 ms`.
+
+Наблюдение:
+
+- `qwen3.5:9b` оказался очень быстрым и сгенерировал executable SQL во всех сценариях;
+- главный miss у `qwen3.5:9b`: для `rag_source_type_counts` модель выбрала `rag_request_logs.source_types`, а expected evidence table была `rag_source_logs.source_type`;
+- `qwen2.5-coder:7b` показал лучший баланс SQL-specific quality и latency среди perfect-quality candidates;
+- `gemma4:12b` тоже дал perfect baseline quality, но был заметно медленнее.
+
+Вывод:
+
+- для следующего M7 этапа сохраняем матрицу `qwen3.5:9b`, `gemma4:12b`, `qwen2.5-coder:7b`;
+- LoRA/QLoRA нужно сравнивать с этим baseline, а не считать улучшение заранее;
+- следующий шаг: подготовить versioned Text-to-SQL dataset с train/validation/test split.

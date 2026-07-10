@@ -16,4 +16,5 @@ asyncpg
 alembic
 redis
 hiredis
+sqlglot
 pytest

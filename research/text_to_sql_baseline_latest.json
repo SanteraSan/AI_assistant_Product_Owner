@@ -1,0 +1,352 @@
+{
+  "models": [
+    "qwen3.5:9b",
+    "gemma4:12b",
+    "qwen2.5-coder:7b"
+  ],
+  "execute": true,
+  "scenarios": [
+    {
+      "id": "evaluation_results_by_model",
+      "question": "Покажи количество evaluation results по model для последнего evaluation run.",
+      "required_tables": [
+        "evaluation_runs",
+        "evaluation_results"
+      ],
+      "required_terms": [
+        "count",
+        "group by"
+      ]
+    },
+    {
+      "id": "slowest_evaluation_scenarios",
+      "question": "Найди 5 самых медленных evaluation scenarios по средней latency_ms за все runs.",
+      "required_tables": [
+        "evaluation_results"
+      ],
+      "required_terms": [
+        "avg",
+        "order by",
+        "limit"
+      ]
+    },
+    {
+      "id": "recent_chat_messages",
+      "question": "Покажи последние 10 chat messages с session_id, role, model и created_at.",
+      "required_tables": [
+        "chat_messages"
+      ],
+      "required_terms": [
+        "order by",
+        "limit"
+      ]
+    },
+    {
+      "id": "rag_source_type_counts",
+      "question": "Посчитай, какие source_type чаще всего попадали в RAG source logs.",
+      "required_tables": [
+        "rag_source_logs"
+      ],
+      "required_terms": [
+        "count",
+        "group by"
+      ]
+    },
+    {
+      "id": "conversation_summary_count",
+      "question": "Посчитай количество conversation summaries по features.",
+      "required_tables": [
+        "conversation_summaries"
+      ],
+      "required_terms": [
+        "count"
+      ]
+    }
+  ],
+  "summary": {
+    "gemma4:12b": {
+      "results": 5,
+      "valid_sql": 5,
+      "execution_success": 5,
+      "required_tables_present": 5,
+      "required_terms_present": 5,
+      "avg_latency_ms": 8534
+    },
+    "qwen2.5-coder:7b": {
+      "results": 5,
+      "valid_sql": 5,
+      "execution_success": 5,
+      "required_tables_present": 5,
+      "required_terms_present": 5,
+      "avg_latency_ms": 5368
+    },
+    "qwen3.5:9b": {
+      "results": 5,
+      "valid_sql": 5,
+      "execution_success": 5,
+      "required_tables_present": 4,
+      "required_terms_present": 4,
+      "avg_latency_ms": 863
+    }
+  },
+  "results": [
+    {
+      "scenario_id": "evaluation_results_by_model",
+      "model": "qwen3.5:9b",
+      "latency_ms": 850,
+      "response": "WITH last_run AS (SELECT id FROM evaluation_runs ORDER BY started_at DESC LIMIT 1), counts AS (SELECT er.model, COUNT(*) as cnt FROM evaluation_results er CROSS JOIN last_run lr WHERE er.run_id = lr.id GROUP BY er.model) SELECT * FROM counts;",
+      "extracted_sql": "WITH last_run AS (SELECT id FROM evaluation_runs ORDER BY started_at DESC LIMIT 1), counts AS (SELECT er.model, COUNT(*) as cnt FROM evaluation_results er CROSS JOIN last_run lr WHERE er.run_id = lr.id GROUP BY er.model) SELECT * FROM counts",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_results",
+        "evaluation_runs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 1
+    },
+    {
+      "scenario_id": "evaluation_results_by_model",
+      "model": "gemma4:12b",
+      "latency_ms": 4592,
+      "response": "SELECT count(*), model FROM evaluation_results WHERE run_id = (SELECT id FROM evaluation_runs ORDER BY created_at DESC LIMIT 1) GROUP BY model;",
+      "extracted_sql": "SELECT count(*), model FROM evaluation_results WHERE run_id = (SELECT id FROM evaluation_runs ORDER BY created_at DESC LIMIT 1) GROUP BY model",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_results",
+        "evaluation_runs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 1
+    },
+    {
+      "scenario_id": "evaluation_results_by_model",
+      "model": "qwen2.5-coder:7b",
+      "latency_ms": 6346,
+      "response": "```sql\nSELECT model, COUNT(*) AS result_count\nFROM evaluation_results\nWHERE run_id = (\n    SELECT id\n    FROM evaluation_runs\n    ORDER BY completed_at DESC\n    LIMIT 1\n)\nGROUP BY model;\n```",
+      "extracted_sql": "SELECT model, COUNT(*) AS result_count\nFROM evaluation_results\nWHERE run_id = (\n    SELECT id\n    FROM evaluation_runs\n    ORDER BY completed_at DESC\n    LIMIT 1\n)\nGROUP BY model",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_results",
+        "evaluation_runs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 1
+    },
+    {
+      "scenario_id": "slowest_evaluation_scenarios",
+      "model": "qwen3.5:9b",
+      "latency_ms": 1325,
+      "response": "WITH scenario_latencies AS (\n    SELECT \n        er.scenario_id,\n        AVG(er.latency_ms) as avg_latency_ms\n    FROM evaluation_results er\n    GROUP BY er.scenario_id\n),\nranked_scenarios AS (\n    SELECT *,\n        ROW_NUMBER() OVER (ORDER BY avg_latency_ms DESC) as rank_num\n    FROM scenario_latencies\n)\nSELECT \n    rs.scenario_id,\n    ROUND(rs.avg_latency_ms::numeric, 2) as avg_latency_ms\nFROM ranked_scenarios rs\nWHERE rs.rank_num <= 5;",
+      "extracted_sql": "WITH scenario_latencies AS (\n    SELECT \n        er.scenario_id,\n        AVG(er.latency_ms) as avg_latency_ms\n    FROM evaluation_results er\n    GROUP BY er.scenario_id\n),\nranked_scenarios AS (\n    SELECT *,\n        ROW_NUMBER() OVER (ORDER BY avg_latency_ms DESC) as rank_num\n    FROM scenario_latencies\n)\nSELECT \n    rs.scenario_id,\n    ROUND(rs.avg_latency_ms::numeric, 2) as avg_latency_ms\nFROM ranked_scenarios rs\nWHERE rs.rank_num <= 5",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_results"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 5
+    },
+    {
+      "scenario_id": "slowest_evaluation_scenarios",
+      "model": "gemma4:12b",
+      "latency_ms": 9704,
+      "response": "SELECT scenario_name, AVG(latency_ms) AS avg_latency\nFROM evaluation_results\nGROUP BY scenario_name\nORDER BY avg_latency DESC\nLIMIT 5;",
+      "extracted_sql": "SELECT scenario_name, AVG(latency_ms) AS avg_latency\nFROM evaluation_results\nGROUP BY scenario_name\nORDER BY avg_latency DESC\nLIMIT 5",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_results"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 5
+    },
+    {
+      "scenario_id": "slowest_evaluation_scenarios",
+      "model": "qwen2.5-coder:7b",
+      "latency_ms": 6565,
+      "response": "```sql\nWITH avg_latency AS (\n    SELECT scenario_id, AVG(latency_ms) AS avg_latency\n    FROM evaluation_results\n    GROUP BY scenario_id\n)\nSELECT er.scenario_id, er.scenario_name, ar.avg_latency\nFROM evaluation_results er\nJOIN avg_latency ar ON er.scenario_id = ar.scenario_id\nORDER BY ar.avg_latency DESC\nLIMIT 5;\n```",
+      "extracted_sql": "WITH avg_latency AS (\n    SELECT scenario_id, AVG(latency_ms) AS avg_latency\n    FROM evaluation_results\n    GROUP BY scenario_id\n)\nSELECT er.scenario_id, er.scenario_name, ar.avg_latency\nFROM evaluation_results er\nJOIN avg_latency ar ON er.scenario_id = ar.scenario_id\nORDER BY ar.avg_latency DESC\nLIMIT 5",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_results"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 5
+    },
+    {
+      "scenario_id": "recent_chat_messages",
+      "model": "qwen3.5:9b",
+      "latency_ms": 561,
+      "response": "SELECT id AS message_id, session_id, role, model, created_at FROM chat_messages ORDER BY created_at DESC LIMIT 10;",
+      "extracted_sql": "SELECT id AS message_id, session_id, role, model, created_at FROM chat_messages ORDER BY created_at DESC LIMIT 10",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "chat_messages"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 10
+    },
+    {
+      "scenario_id": "recent_chat_messages",
+      "model": "gemma4:12b",
+      "latency_ms": 9610,
+      "response": "SELECT session_id, role, model, created_at FROM chat_messages ORDER BY created_at DESC LIMIT 10;",
+      "extracted_sql": "SELECT session_id, role, model, created_at FROM chat_messages ORDER BY created_at DESC LIMIT 10",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "chat_messages"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 10
+    },
+    {
+      "scenario_id": "recent_chat_messages",
+      "model": "qwen2.5-coder:7b",
+      "latency_ms": 1471,
+      "response": "```sql\nSELECT session_id, role, model, created_at \nFROM chat_messages \nORDER BY created_at DESC \nLIMIT 10;\n```",
+      "extracted_sql": "SELECT session_id, role, model, created_at \nFROM chat_messages \nORDER BY created_at DESC \nLIMIT 10",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "chat_messages"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 10
+    },
+    {
+      "scenario_id": "rag_source_type_counts",
+      "model": "qwen3.5:9b",
+      "latency_ms": 576,
+      "response": "SELECT source_types->0 AS source_type, COUNT(*) AS count FROM rag_request_logs GROUP BY 1 ORDER BY 2 DESC LIMIT 5;",
+      "extracted_sql": "SELECT source_types->0 AS source_type, COUNT(*) AS count FROM rag_request_logs GROUP BY 1 ORDER BY 2 DESC LIMIT 5",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_request_logs"
+      ],
+      "required_tables_present": false,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 5
+    },
+    {
+      "scenario_id": "rag_source_type_counts",
+      "model": "gemma4:12b",
+      "latency_ms": 9564,
+      "response": "SELECT source_type, COUNT(*) as count FROM rag_source_logs GROUP BY source_type ORDER BY count DESC;",
+      "extracted_sql": "SELECT source_type, COUNT(*) as count FROM rag_source_logs GROUP BY source_type ORDER BY count DESC",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_source_logs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 13
+    },
+    {
+      "scenario_id": "rag_source_type_counts",
+      "model": "qwen2.5-coder:7b",
+      "latency_ms": 6205,
+      "response": "```sql\nSELECT source_type, COUNT(*) AS count\nFROM rag_source_logs\nGROUP BY source_type\nORDER BY count DESC;\n```",
+      "extracted_sql": "SELECT source_type, COUNT(*) AS count\nFROM rag_source_logs\nGROUP BY source_type\nORDER BY count DESC",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_source_logs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 13
+    },
+    {
+      "scenario_id": "conversation_summary_count",
+      "model": "qwen3.5:9b",
+      "latency_ms": 1004,
+      "response": "WITH summary_counts AS (\n    SELECT \n        id as summary_id,\n        session_id,\n        message_count_at_update,\n        features,\n        COUNT(*) OVER () as total_summaries\n    FROM conversation_summaries\n)\nSELECT \n    summary_id,\n    session_id,\n    message_count_at_update,\n    features,\n    total_summaries\nFROM summary_counts;",
+      "extracted_sql": "WITH summary_counts AS (\n    SELECT \n        id as summary_id,\n        session_id,\n        message_count_at_update,\n        features,\n        COUNT(*) OVER () as total_summaries\n    FROM conversation_summaries\n)\nSELECT \n    summary_id,\n    session_id,\n    message_count_at_update,\n    features,\n    total_summaries\nFROM summary_counts",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "conversation_summaries"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 334
+    },
+    {
+      "scenario_id": "conversation_summary_count",
+      "model": "gemma4:12b",
+      "latency_ms": 9198,
+      "response": "SELECT features, COUNT(*) FROM conversation_summaries GROUP BY features;",
+      "extracted_sql": "SELECT features, COUNT(*) FROM conversation_summaries GROUP BY features",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "conversation_summaries"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 4
+    },
+    {
+      "scenario_id": "conversation_summary_count",
+      "model": "qwen2.5-coder:7b",
+      "latency_ms": 6252,
+      "response": "```sql\nSELECT features->>'feature_name' AS feature_name, COUNT(*) AS summary_count\nFROM conversation_summaries\nGROUP BY features->>'feature_name';\n```",
+      "extracted_sql": "SELECT features->>'feature_name' AS feature_name, COUNT(*) AS summary_count\nFROM conversation_summaries\nGROUP BY features->>'feature_name'",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "conversation_summaries"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": true,
+      "execution_success": true,
+      "execution_error": null,
+      "row_count": 1
+    }
+  ]
+}
