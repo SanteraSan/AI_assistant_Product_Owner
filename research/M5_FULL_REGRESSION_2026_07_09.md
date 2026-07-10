@@ -78,3 +78,92 @@ Result:
 
 - The four known failures from the full regression are fixed in targeted regression.
 - Before moving to `M5.9`, a final full M5 run can be repeated to confirm there are no secondary regressions.
+
+## Final Staged Regression 2026-07-10
+
+After the follow-up fixes, the final regression was split into two diagnostic steps:
+
+1. Document-only regression across all candidate models.
+2. Full project regression without a full Cartesian product.
+
+### Document-Only Regression
+
+- Run id: `5023f3ef-e5c5-4298-a7c9-4b8ece6fe349`
+- Name: `m5_document_only_three_models`
+- Scenarios: `16`
+- Models: `gemma4:12b`, `qwen3.5:9b`, `qwen3:14b`
+- Total results: `48`
+- Status: `completed`
+- Technical errors: `0`
+- Quality-flag failures: `0`
+
+Model summary:
+
+- `gemma4:12b`: `16/16`, avg latency `12798 ms`, min `8048 ms`, max `16356 ms`
+- `qwen3.5:9b`: `16/16`, avg latency `10872 ms`, min `5810 ms`, max `13227 ms`
+- `qwen3:14b`: `16/16`, avg latency `11026 ms`, min `4883 ms`, max `22085 ms`
+
+Decision:
+
+- All three models passed the document-only regression.
+- `qwen3.5:9b` was selected for the document slice because it had the best average latency at equal quality.
+
+### Full Project Regression
+
+The full project regression used the optimized matrix:
+
+- core chat/context/access on all three models;
+- summary/memory on `qwen3.5:9b`;
+- documents on the selected document model, `qwen3.5:9b`.
+
+Runs:
+
+- Core chat/context/access run id: `d3ac1bb1-89a9-4519-b028-3cebe521e04e`
+- Summary/memory run id: `58e4bf90-55cd-484c-9863-6ce473c2d534`
+- Documents run id: `2ecdcd0b-f505-4327-98cd-ee65fd0194a1`
+
+Result shape:
+
+- Core chat/context/access: `18 scenarios x 3 models = 54 results`
+- Summary/memory: `15 scenarios x 1 model = 15 results`
+- Documents: `16 scenarios x 1 model = 16 results`
+- Total: `85 results`
+
+Final result:
+
+- Status: `completed`
+- Technical errors: `0`
+- Quality-flag failures: `0`
+- Overall: `85/85`
+
+Latency summary:
+
+- Core `gemma4:12b`: avg `9318 ms`
+- Core `qwen3.5:9b`: avg `7910 ms`
+- Core `qwen3:14b`: avg `7325 ms`
+- Summary/memory `qwen3.5:9b`: avg `5005 ms`
+- Documents `qwen3.5:9b`: avg `3469 ms`
+
+### Final Decision
+
+M5 can be treated as stable at the current project level.
+
+Validated areas:
+
+- PDF text ingestion;
+- Excel row ingestion;
+- DOCX ingestion;
+- image OCR;
+- image vision digest;
+- embedded DOCX/XLSX images;
+- Excel native charts;
+- legacy `.xls` text and image fallback;
+- DOCX/XLSX image anchor metadata;
+- scanned table image anchor baseline;
+- text-vs-image mismatch;
+- `office_media_consistency` evidence.
+
+Next step:
+
+- Move to `M5.9 Voice UI Bridge`.
+- Keep the long multi-turn user journey as a separate future e2e regression layer.

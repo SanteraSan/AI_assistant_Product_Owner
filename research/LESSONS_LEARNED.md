@@ -2660,3 +2660,48 @@ Future hardening:
 - такой подход сохраняет диагностируемость и не раздувает прогон до шумной матрицы “всё на всём”;
 - document-only regression должен выбрать модель для документов;
 - full project regression после этого проверит весь продуктовый цикл более экономно: 85 results вместо 147 для полного Cartesian product.
+
+## 2026-07-10: Final M5 Document And Full Project Regression
+
+Контекст:
+
+- после follow-up фиксов был запущен отдельный document-only regression по трём моделям;
+- затем был запущен full project regression без полного Cartesian product;
+- цель: подтвердить стабильность M5 перед переходом к `M5.9 Voice UI Bridge`.
+
+Document-only regression:
+
+- run id: `5023f3ef-e5c5-4298-a7c9-4b8ece6fe349`;
+- сценарии: `16`;
+- модели: `gemma4:12b`, `qwen3.5:9b`, `qwen3:14b`;
+- total results: `48`;
+- technical errors: `0`;
+- marker failures: `0`;
+- `gemma4:12b`: `16/16`, avg latency `12798 ms`;
+- `qwen3.5:9b`: `16/16`, avg latency `10872 ms`;
+- `qwen3:14b`: `16/16`, avg latency `11026 ms`.
+
+Выбор document model:
+
+- все три модели прошли document-only regression без quality failures;
+- `qwen3.5:9b` выбран для document slice, потому что показал лучшую среднюю latency при равном качестве;
+- `qwen3:14b` оказался близко по средней latency, но имел более высокий max latency (`22085 ms`).
+
+Full project regression:
+
+- core chat/context/access run id: `d3ac1bb1-89a9-4519-b028-3cebe521e04e`;
+- summary/memory run id: `58e4bf90-55cd-484c-9863-6ce473c2d534`;
+- documents run id: `2ecdcd0b-f505-4327-98cd-ee65fd0194a1`;
+- total results: `85`;
+- technical errors: `0`;
+- marker failures: `0`;
+- core chat/context/access: `54/54`;
+- summary/memory on `qwen3.5:9b`: `15/15`;
+- documents on `qwen3.5:9b`: `16/16`.
+
+Вывод:
+
+- M5 ingestion/retrieval слой стабилизирован на текущем уровне;
+- подтверждены PDF, Excel, DOCX, image OCR, vision digest, embedded Office images, Excel charts, legacy `.xls`, anchored DOCX/XLSX images, scanned table baseline и `office_media_consistency`;
+- `qwen3.5:9b` остаётся лучшим универсальным кандидатом для следующего этапа, потому что прошёл documents, summary/memory и core сценарии;
+- можно переходить к обсуждению `M5.9 Voice UI Bridge`, оставив long multi-turn user journey отдельным будущим e2e regression layer.
