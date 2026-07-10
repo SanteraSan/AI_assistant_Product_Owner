@@ -99,6 +99,13 @@ Committed artifacts should be:
 
 QLoRA training is viable on the local GPU.
 
+Follow-up correction from evaluation:
+
+- default right truncation could remove the actual question from long schema prompts;
+- training and evaluation scripts now set `tokenizer.truncation_side = "left"`;
+- corrected smoke adapter was trained at `models/text_to_sql_lora/qwen2_5_coder_7b_v1_smoke_left`;
+- corrected smoke metrics remained stable: train loss `1.5519`, runtime `12.8678s`.
+
 For the next evaluation stage:
 
 - keep `max_length=512` or use a larger value only after memory checks;

@@ -1,0 +1,260 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from time import perf_counter
+from typing import Any
+
+import torch
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+BACKEND_ROOT = PROJECT_ROOT / "backend"
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+from app.services.sql_validator import extract_sql_from_response, validate_read_only_sql  # noqa: E402
+
+
+DEFAULT_DATA_PATH = PROJECT_ROOT / "data/text_to_sql/v1/test.jsonl"
+DEFAULT_ADAPTER_DIR = PROJECT_ROOT / "models/text_to_sql_lora/qwen2_5_coder_7b_v1_smoke"
+DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "research/text_to_sql_lora_eval_latest.json"
+
+
+@dataclass(frozen=True)
+class LoraEvalResult:
+    example_id: str
+    latency_ms: int
+    instruction: str
+    expected_sql: str
+    response: str
+    extracted_sql: str
+    validation_valid: bool
+    validation_error: str | None
+    tables: list[str]
+    required_tables_present: bool
+    normalized_exact_match: bool
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Evaluate a local Text-to-SQL LoRA adapter.")
+    parser.add_argument("--model-name", default="Qwen/Qwen2.5-Coder-7B-Instruct")
+    parser.add_argument("--adapter-dir", default=str(DEFAULT_ADAPTER_DIR))
+    parser.add_argument("--data-path", default=str(DEFAULT_DATA_PATH))
+    parser.add_argument("--output", default=str(DEFAULT_OUTPUT_PATH))
+    parser.add_argument("--max-length", type=int, default=512)
+    parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--base-only", action="store_true")
+    parser.add_argument("--no-4bit", action="store_true")
+    return parser.parse_args()
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    with path.open("r", encoding="utf-8") as file:
+        return [json.loads(line) for line in file if line.strip()]
+
+
+def build_prompt(example: dict[str, Any]) -> str:
+    return f"""<|im_start|>system
+Ты генерируешь безопасный PostgreSQL SQL для аналитики.
+Верни только один read-only SELECT или WITH ... SELECT statement без markdown и объяснений.<|im_end|>
+<|im_start|>user
+{example["input"]}
+
+Вопрос:
+{example["instruction"]}<|im_end|>
+<|im_start|>assistant
+"""
+
+
+def load_model(
+    *,
+    model_name: str,
+    adapter_dir: Path,
+    use_4bit: bool,
+    base_only: bool,
+):
+    quantization_config = None
+    if use_4bit:
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+        )
+
+    base_model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        quantization_config=quantization_config,
+        device_map="auto",
+        torch_dtype=torch.bfloat16,
+        trust_remote_code=True,
+    )
+    model = base_model if base_only else PeftModel.from_pretrained(base_model, str(adapter_dir))
+    model.eval()
+    return model
+
+
+def load_tokenizer(model_name: str, adapter_dir: Path):
+    tokenizer = AutoTokenizer.from_pretrained(
+        str(adapter_dir) if (adapter_dir / "tokenizer_config.json").exists() else model_name,
+        trust_remote_code=True,
+        use_fast=True,
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.truncation_side = "left"
+    return tokenizer
+
+
+def generate_sql(
+    *,
+    model,
+    tokenizer,
+    prompt: str,
+    max_length: int,
+    max_new_tokens: int,
+) -> tuple[str, int]:
+    inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+        truncation=True,
+        max_length=max_length,
+    ).to(model.device)
+    started_at = perf_counter()
+    with torch.inference_mode():
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+        )
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    latency_ms = int((perf_counter() - started_at) * 1000)
+    generated_ids = output_ids[0][inputs["input_ids"].shape[-1] :]
+    return tokenizer.decode(generated_ids, skip_special_tokens=True).strip(), latency_ms
+
+
+def normalize(sql: str, allowed_tables: set[str]) -> str | None:
+    validation = validate_read_only_sql(sql, allowed_tables=allowed_tables)
+    return validation.normalized_sql if validation.valid else None
+
+
+def evaluate_example(
+    *,
+    example: dict[str, Any],
+    response: str,
+    latency_ms: int,
+    allowed_tables: set[str],
+) -> LoraEvalResult:
+    extracted_sql = extract_sql_from_response(response)
+    validation = validate_read_only_sql(extracted_sql, allowed_tables=allowed_tables)
+    required_tables = set(example.get("metadata", {}).get("required_tables", []))
+    expected_normalized = normalize(example["output"], allowed_tables)
+    generated_normalized = validation.normalized_sql if validation.valid else None
+
+    return LoraEvalResult(
+        example_id=example["id"],
+        latency_ms=latency_ms,
+        instruction=example["instruction"],
+        expected_sql=example["output"],
+        response=response,
+        extracted_sql=extracted_sql,
+        validation_valid=validation.valid,
+        validation_error=validation.error,
+        tables=validation.tables,
+        required_tables_present=required_tables.issubset(set(validation.tables)),
+        normalized_exact_match=(
+            generated_normalized is not None
+            and expected_normalized is not None
+            and generated_normalized.lower() == expected_normalized.lower()
+        ),
+    )
+
+
+def summarize(results: list[LoraEvalResult]) -> dict[str, Any]:
+    total = len(results)
+    return {
+        "total": total,
+        "valid_sql": sum(result.validation_valid for result in results),
+        "required_tables_present": sum(result.required_tables_present for result in results),
+        "normalized_exact_match": sum(result.normalized_exact_match for result in results),
+        "avg_latency_ms": round(sum(result.latency_ms for result in results) / total)
+        if total
+        else 0,
+    }
+
+
+def main() -> None:
+    args = parse_args()
+    adapter_dir = Path(args.adapter_dir)
+    examples = read_jsonl(Path(args.data_path))
+    allowed_tables = {
+        "chat_messages",
+        "chat_sessions",
+        "conversation_summaries",
+        "evaluation_results",
+        "evaluation_runs",
+        "rag_request_logs",
+        "rag_source_logs",
+    }
+
+    tokenizer = load_tokenizer(args.model_name, adapter_dir)
+    model = load_model(
+        model_name=args.model_name,
+        adapter_dir=adapter_dir,
+        use_4bit=not args.no_4bit,
+        base_only=args.base_only,
+    )
+
+    results: list[LoraEvalResult] = []
+    for example in examples:
+        response, latency_ms = generate_sql(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=build_prompt(example),
+            max_length=args.max_length,
+            max_new_tokens=args.max_new_tokens,
+        )
+        result = evaluate_example(
+            example=example,
+            response=response,
+            latency_ms=latency_ms,
+            allowed_tables=allowed_tables,
+        )
+        results.append(result)
+        print(
+            "ok "
+            f"example={result.example_id} "
+            f"valid={result.validation_valid} "
+            f"tables={result.required_tables_present} "
+            f"exact={result.normalized_exact_match} "
+            f"latency_ms={result.latency_ms}"
+        )
+
+    payload = {
+        "model_name": args.model_name,
+        "adapter_dir": None if args.base_only else str(adapter_dir),
+        "base_only": args.base_only,
+        "data_path": str(args.data_path),
+        "summary": summarize(results),
+        "results": [asdict(result) for result in results],
+    }
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    print(json.dumps(payload["summary"], ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

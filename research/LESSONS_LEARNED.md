@@ -3031,3 +3031,47 @@ Training attempts:
 - локальное QLoRA обучение 7B модели жизнеспособно на текущей машине;
 - evaluation лучше отделить от training на первых 7B экспериментах, чтобы не ловить OOM;
 - следующий шаг: LoRA evaluation на test split против baseline моделей.
+
+## 2026-07-10: M7 LoRA Evaluation
+
+Контекст:
+
+- после успешного LoRA training smoke нужно проверить adapter на held-out test split dataset V1;
+- оценка должна использовать тот же SQL validator, что и baseline: read-only SQL, allowed tables, normalized SQL.
+
+Что сделано:
+
+- добавлен `scripts/evaluate_text_to_sql_lora.py`;
+- script поддерживает local PEFT adapter и `--base-only`;
+- результаты сохраняются в JSON для последующего сравнения;
+- выполнены corrected base-only и LoRA adapter runs.
+
+Важная находка:
+
+- первый eval показал плохое качество не только из-за короткого обучения, но и из-за prompt truncation;
+- `max_length=512` с default right truncation мог отрезать вопрос и assistant marker;
+- исправлено в train/eval scripts: `tokenizer.truncation_side = "left"`;
+- после этого model видит вопрос и генерирует SQL по нужному instruction.
+
+Результаты corrected base-only run:
+
+- examples: `9`;
+- valid SQL: `8/9`;
+- required tables present: `9/9`;
+- normalized exact match: `0/9`;
+- average latency: `758ms`.
+
+Результаты corrected 5-step LoRA smoke adapter:
+
+- examples: `9`;
+- valid SQL: `9/9`;
+- required tables present: `9/9`;
+- normalized exact match: `0/9`;
+- average latency: `1140ms`.
+
+Вывод:
+
+- training/evaluation pipeline для LoRA рабочий;
+- 5-step adapter не является финальной моделью, но уже проходит safety/required-table checks на test split;
+- exact-match слишком строгий как единственная метрика, но полезен как regression gate;
+- следующий качественный шаг: longer corrected training run, semantic checks и dataset V2 с большим количеством paraphrases, joins и JSONB examples.

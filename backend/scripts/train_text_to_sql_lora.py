@@ -166,6 +166,7 @@ def main() -> None:
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.truncation_side = "left"
 
     train_dataset = tokenize_dataset(
         rows=train_rows,
