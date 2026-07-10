@@ -1,4 +1,7 @@
 from functools import lru_cache
+from typing import Any
+
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +35,88 @@ class Settings(BaseSettings):
     conversation_memory_enabled: bool = True
     conversation_memory_token_budget: int = 350
     conversation_memory_recent_messages: int = 4
+    max_chat_message_chars: int = 8000
+    max_rag_top_k: int = 20
+    max_filter_values: int = 50
+    max_filter_value_chars: int = 512
+
+    @field_validator("rag_score_threshold", mode="before")
+    @classmethod
+    def _empty_score_threshold(cls, value: Any) -> Any:
+        if value == "":
+            return None
+        return value
+
+    @field_validator(
+        "request_timeout_seconds",
+        "rag_top_k",
+        "rag_candidate_multiplier",
+        "excel_supplement_scroll_limit",
+        "docx_supplement_scroll_limit",
+        "conversation_memory_token_budget",
+        "conversation_memory_recent_messages",
+        "max_chat_message_chars",
+        "max_rag_top_k",
+        "max_filter_values",
+        "max_filter_value_chars",
+    )
+    @classmethod
+    def _positive_number(cls, value: int | float) -> int | float:
+        if value <= 0:
+            raise ValueError("must be greater than zero")
+        return value
+
+    @field_validator(
+        "ollama_base_url",
+        "qdrant_url",
+    )
+    @classmethod
+    def _http_url(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized.startswith(("http://", "https://")):
+            raise ValueError("must start with http:// or https://")
+        return normalized.rstrip("/")
+
+    @field_validator(
+        "default_model",
+        "default_rag_model",
+        "embedding_model",
+        "qdrant_collection",
+        "postgres_dsn",
+        "default_tenant_id",
+        "default_bucket_id",
+    )
+    @classmethod
+    def _non_empty_string(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("must not be empty")
+        return normalized
+
+    @field_validator("rag_score_threshold")
+    @classmethod
+    def _score_threshold_range(cls, value: float | None) -> float | None:
+        if value is None:
+            return None
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("must be between 0.0 and 1.0")
+        return value
+
+    @field_validator(
+        "rag_generation_temperature",
+        "rag_generation_top_p",
+    )
+    @classmethod
+    def _generation_option_range(cls, value: float) -> float:
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("must be between 0.0 and 1.0")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_cross_field_limits(self) -> "Settings":
+        if self.rag_top_k > self.max_rag_top_k:
+            raise ValueError("rag_top_k must not exceed max_rag_top_k")
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

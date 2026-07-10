@@ -336,6 +336,26 @@ alembic current
 curl http://localhost:8000/health | jq '{postgres_available,qdrant_collection_exists,ollama_available}'
 ```
 
+Начиная с backend hardening этапа доступны отдельные health endpoints:
+
+```bash
+curl http://localhost:8000/health/live
+curl http://localhost:8000/health/ready | jq
+```
+
+- `/health/live` проверяет, что FastAPI process отвечает.
+- `/health/ready` проверяет готовность зависимостей: PostgreSQL, Qdrant collection и Ollama.
+- `/health` оставлен совместимым и дополнительно показывает readiness status, модели и request limits.
+
+Request limits задаются через `.env`:
+
+```bash
+MAX_CHAT_MESSAGE_CHARS=8000
+MAX_RAG_TOP_K=20
+MAX_FILTER_VALUES=50
+MAX_FILTER_VALUE_CHARS=512
+```
+
 Посмотреть последние RAG-запросы:
 
 ```bash

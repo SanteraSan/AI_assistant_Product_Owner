@@ -2800,3 +2800,34 @@ Full project regression:
 - новая пустая БД теперь воспроизводимо поднимается через migration path;
 - `create_all` оставлен только как local fallback и может быть отключён через `DATABASE_AUTO_CREATE_TABLES=false`;
 - следующий hardening шаг: DB constraints/indexes через отдельную Alembic migration.
+
+## 2026-07-10: Backend Hardening H3 Config, Readiness And Request Limits
+
+Контекст:
+
+- перед Redis/Ollama load protection backend должен иметь явные лимиты и понятную readiness диагностику;
+- старый `/health` смешивал liveness и readiness;
+- request validation частично была в Pydantic models, но не была связана с runtime config.
+
+Что сделано:
+
+- добавлены validators в `Settings`: URL, non-empty string, positive numeric values, ranges для score/generation options;
+- сохранено поведение `RAG_SCORE_THRESHOLD=""` как отключение score threshold;
+- добавлены request limit settings: `MAX_CHAT_MESSAGE_CHARS`, `MAX_RAG_TOP_K`, `MAX_FILTER_VALUES`, `MAX_FILTER_VALUE_CHARS`;
+- `/chat` и `/rag/chat` теперь проверяют runtime limits до expensive path;
+- добавлены `/health/live` и `/health/ready`;
+- `/health` оставлен совместимым и дополнен readiness status, models и limits snapshot;
+- README и `.env.example` обновлены.
+
+Проверки:
+
+- focused config/health/limit tests: `10 passed`;
+- full backend tests: `52 passed`;
+- warnings: existing Qdrant compatibility warning и Starlette TestClient deprecation warning;
+- lints по изменённым Python-файлам: ошибок нет.
+
+Вывод:
+
+- backend получил первый слой управляемого отказа до тяжёлых LLM/RAG операций;
+- readiness теперь показывает dependency health отдельно от process liveness;
+- следующий шаг можно делать как DB constraints/indexes или request tracing/error handling, а Redis/Ollama protection лучше оставить после unified errors и structured logging.

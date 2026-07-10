@@ -101,21 +101,38 @@ app = create_app()
 
 @app.get("/health")
 async def health() -> dict[str, object]:
+    readiness = await _readiness_snapshot()
     return {
         "status": "ok",
-        "ollama_available": await ollama_client.health(),
+        "readiness_status": readiness["status"],
+        "ollama_available": readiness["dependencies"]["ollama_available"],
         "default_model": settings.default_model,
         "default_rag_model": settings.default_rag_model,
         "embedding_model": settings.embedding_model,
         "qdrant_collection": settings.qdrant_collection,
-        "qdrant_collection_exists": _qdrant_collection_exists(),
-        "postgres_available": await database_available(db_engine),
+        "qdrant_collection_exists": readiness["dependencies"]["qdrant_collection_exists"],
+        "postgres_available": readiness["dependencies"]["postgres_available"],
         "database_auto_create_tables": settings.database_auto_create_tables,
+        "limits": _limits_snapshot(),
     }
+
+
+@app.get("/health/live")
+async def health_live() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+async def health_ready() -> dict[str, object]:
+    snapshot = await _readiness_snapshot()
+    if snapshot["status"] != "ready":
+        raise HTTPException(status_code=503, detail=snapshot)
+    return snapshot
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
+    _enforce_chat_request_limits(request)
     model = request.model or settings.default_model
     started_at = perf_counter()
 
@@ -157,6 +174,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 @app.post("/rag/chat", response_model=RagChatResponse)
 async def rag_chat(request: RagChatRequest) -> RagChatResponse:
+    _enforce_rag_request_limits(request)
     if not _qdrant_collection_exists():
         raise HTTPException(
             status_code=503,
@@ -232,6 +250,81 @@ def _qdrant_collection_exists() -> bool:
         return qdrant_store.collection_exists()
     except Exception:
         return False
+
+
+async def _readiness_snapshot() -> dict[str, object]:
+    dependencies = {
+        "postgres_available": await database_available(db_engine),
+        "qdrant_collection_exists": _qdrant_collection_exists(),
+        "ollama_available": await ollama_client.health(),
+    }
+    ready = all(dependencies.values())
+    return {
+        "status": "ready" if ready else "degraded",
+        "dependencies": dependencies,
+        "models": {
+            "default_model": settings.default_model,
+            "default_rag_model": settings.default_rag_model,
+            "embedding_model": settings.embedding_model,
+            "image_vision_model": settings.image_vision_model,
+        },
+        "limits": _limits_snapshot(),
+    }
+
+
+def _limits_snapshot() -> dict[str, int]:
+    return {
+        "max_chat_message_chars": settings.max_chat_message_chars,
+        "max_rag_top_k": settings.max_rag_top_k,
+        "max_filter_values": settings.max_filter_values,
+        "max_filter_value_chars": settings.max_filter_value_chars,
+    }
+
+
+def _enforce_chat_request_limits(request: ChatRequest) -> None:
+    if len(request.message) > settings.max_chat_message_chars:
+        raise HTTPException(
+            status_code=413,
+            detail=f"message exceeds {settings.max_chat_message_chars} characters",
+        )
+
+
+def _enforce_rag_request_limits(request: RagChatRequest) -> None:
+    _enforce_chat_request_limits(request)
+    if request.top_k is not None and request.top_k > settings.max_rag_top_k:
+        raise HTTPException(
+            status_code=422,
+            detail=f"top_k must not exceed {settings.max_rag_top_k}",
+        )
+
+    for field_name in (
+        "bucket_ids",
+        "features",
+        "source_types",
+        "document_ids",
+        "source_paths",
+    ):
+        values = getattr(request, field_name)
+        _enforce_filter_values_limit(field_name=field_name, values=values)
+
+
+def _enforce_filter_values_limit(*, field_name: str, values: list[str]) -> None:
+    if len(values) > settings.max_filter_values:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{field_name} must not contain more than {settings.max_filter_values} values",
+        )
+    oversized_values = [
+        value for value in values if len(value) > settings.max_filter_value_chars
+    ]
+    if oversized_values:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{field_name} values must not exceed "
+                f"{settings.max_filter_value_chars} characters"
+            ),
+        )
 
 
 async def _build_conversation_context(
