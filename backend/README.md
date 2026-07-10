@@ -309,13 +309,24 @@ curl -s -X POST http://localhost:8000/rag/chat \
 
 PostgreSQL используется как системная память для backend observability: пока без multi-turn memory, но уже с сохранением истории RAG-запросов.
 
-При старте backend автоматически создает минимальные таблицы, если PostgreSQL доступен:
+Основной путь создания и изменения таблиц теперь проходит через Alembic migrations:
 
 - `rag_request_logs` - сообщение пользователя, ответ модели, latency, выбранная модель, retrieval/router/context policy параметры;
 - `rag_source_logs` - sources, которые попали в ответ, включая score, title, source type, source path, metadata и короткий excerpt content.
 - `chat_sessions` - логические диалоги пользователя;
 - `chat_messages` - user/assistant сообщения внутри session.
 - `conversation_summaries` - компактный rule-based summary длинных sessions для M4.3.
+
+Применить миграции:
+
+```bash
+cd /home/santera/Projects/backend
+source .venv/bin/activate
+alembic upgrade head
+alembic current
+```
+
+Для local demo сохранён fallback `DATABASE_AUTO_CREATE_TABLES=true`: при старте backend может создать таблицы через SQLAlchemy metadata, если миграции ещё не запускались. После перехода на migration discipline лучше выставить `DATABASE_AUTO_CREATE_TABLES=false` и поднимать/обновлять схему только через Alembic.
 
 Логирование `/chat` и `/rag/chat` работает best-effort: если PostgreSQL временно недоступен, ответ все равно вернется, а ошибка попадет в backend logs. Полная история не подмешивается в prompt напрямую; conversation context слои M4 используют ее только для управляемого построения `retrieval_query`.
 

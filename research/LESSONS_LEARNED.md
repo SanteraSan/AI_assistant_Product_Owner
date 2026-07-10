@@ -2767,3 +2767,36 @@ Full project regression:
 - первым implementation шагом должен быть Alembic, потому что все дальнейшие DB changes лучше делать через migration discipline;
 - Redis/Ollama load protection остаётся обязательным hardening stage, но его безопаснее делать после config, errors, limits и readiness checks;
 - перед M7 Text-to-SQL нужен compact backend regression, чтобы подтвердить, что hardening не ослабил уже стабилизированный M5 behavior.
+
+## 2026-07-10: Backend Hardening H1 Alembic Migrations
+
+Контекст:
+
+- до hardening backend создавал таблицы через `Base.metadata.create_all()` на startup;
+- для дальнейших DB changes нужен явный migration history;
+- при этом local demo не должен сломаться сразу после добавления Alembic.
+
+Что сделано:
+
+- добавлен Alembic scaffold в `backend/alembic`;
+- добавлен initial migration `20260710_0001_initial_schema`;
+- migration покрывает текущие таблицы: chat sessions/messages, conversation summaries, RAG logs, source logs, evaluation runs/results;
+- добавлен `DATABASE_AUTO_CREATE_TABLES` fallback flag;
+- startup теперь вызывает `init_db(..., auto_create=settings.database_auto_create_tables)`;
+- `/health` показывает `database_auto_create_tables`;
+- добавлен `pytest.ini`, чтобы tests запускались из корня без ручного `PYTHONPATH`;
+- README и `.env.example` обновлены командами Alembic и fallback policy.
+
+Проверки:
+
+- Alembic smoke на временной PostgreSQL database: `alembic upgrade head` -> `20260710_0001 (head)`;
+- Alembic consistency check после upgrade: `No new upgrade operations detected`;
+- focused tests: `3 passed`;
+- full backend tests: `44 passed`, `1` existing Qdrant compatibility warning;
+- lints по изменённым Python-файлам: ошибок нет.
+
+Вывод:
+
+- новая пустая БД теперь воспроизводимо поднимается через migration path;
+- `create_all` оставлен только как local fallback и может быть отключён через `DATABASE_AUTO_CREATE_TABLES=false`;
+- следующий hardening шаг: DB constraints/indexes через отдельную Alembic migration.

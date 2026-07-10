@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "documents"
     postgres_dsn: str = "postgresql+asyncpg://po_user:po_password@localhost:5432/po_assistant"
+    database_auto_create_tables: bool = True
     raw_data_dir: str = "../data/raw"
     default_tenant_id: str = "local_demo"
     default_bucket_id: str = "taskflow_seed"

@@ -28,7 +28,9 @@ def create_session_factory(
     )
 
 
-async def init_db(engine: AsyncEngine) -> None:
+async def init_db(engine: AsyncEngine, *, auto_create: bool = True) -> None:
+    if not auto_create:
+        return
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
 

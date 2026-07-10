@@ -13,4 +13,5 @@ pytesseract
 pyyaml
 sqlalchemy
 asyncpg
+alembic
 pytest

@@ -79,7 +79,10 @@ conversation_summary_service = ConversationSummaryService(
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
-        await init_db(db_engine)
+        await init_db(
+            db_engine,
+            auto_create=settings.database_auto_create_tables,
+        )
     except Exception:
         logger.exception("PostgreSQL initialization failed")
     try:
@@ -107,6 +110,7 @@ async def health() -> dict[str, object]:
         "qdrant_collection": settings.qdrant_collection,
         "qdrant_collection_exists": _qdrant_collection_exists(),
         "postgres_available": await database_available(db_engine),
+        "database_auto_create_tables": settings.database_auto_create_tables,
     }
 
 
