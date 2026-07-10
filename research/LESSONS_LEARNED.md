@@ -3122,3 +3122,51 @@ Evaluation result:
 - 100-step adapter strongly learns V1 patterns;
 - quality result must be treated carefully because V1 is small and test examples are not yet a hard unseen-intent benchmark;
 - next dataset should use intent-level split and harder semantic checks before calling model quality strong.
+
+## 2026-07-10: M7 LoRA V2-V4 Iterations
+
+Контекст:
+
+- V1 показал, что LoRA pipeline работает, но example-level split был слишком лёгким;
+- цель V2+ — проверить не только memorization, но и unseen intent families.
+
+V2 dataset:
+
+- examples: `165`;
+- intents: `33`;
+- train/validation/test examples: `105/30/30`;
+- split policy: `intent_level_split`;
+- base model on V2 test: valid SQL `29/30`, required tables `29/30`, required terms `0/30`, exact match `0/30`.
+
+V2 LoRA:
+
+- steps: `300`;
+- train loss: `0.0591`;
+- training VRAM peak: `11504 MB`;
+- test result: valid SQL `30/30`, required tables `30/30`, required terms `16/30`, exact match `15/30`;
+- weak intents: latest evaluation errors, average RAG source score by title, summaries by day.
+
+V3 LoRA:
+
+- added support train intents for latest-error filters, avg score with count/null filters, and `DATE_TRUNC`;
+- steps: `350`;
+- train loss: `0.0529`;
+- training VRAM peak: `11491 MB`;
+- test result: valid SQL `30/30`, required tables `30/30`, required terms `25/30`, exact match `25/30`;
+- fixed score-by-title and summaries-by-day intents.
+
+V4 LoRA:
+
+- added support intent for full latest-error projection with `LIMIT 20`;
+- steps: `350`;
+- train loss: `0.0532`;
+- training VRAM peak: `11490 MB`;
+- test result stayed `25/30` exact match;
+- remaining failure changed from missing filter/limit to projection mismatch: model outputs `id` instead of `model`.
+
+Вывод:
+
+- LoRA improves the project-specific Text-to-SQL behavior significantly on intent-level V2/V3/V4 tests;
+- current best held-out score is `30/30` valid SQL, `30/30` required tables, `25/30` exact match;
+- further blind training is not the right next move;
+- next improvement should be V5 dataset/evaluator: projection contrast examples, projection coverage metrics, less brittle `IS NOT NULL` required-term check, and optional adapter continuation training.

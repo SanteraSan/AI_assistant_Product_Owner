@@ -33,6 +33,7 @@ DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "research/text_to_sql_lora_eval_latest.json
 @dataclass(frozen=True)
 class LoraEvalResult:
     example_id: str
+    intent_id: str | None
     latency_ms: int
     instruction: str
     expected_sql: str
@@ -170,6 +171,7 @@ def evaluate_example(
 
     return LoraEvalResult(
         example_id=example["id"],
+        intent_id=example.get("metadata", {}).get("intent_id"),
         latency_ms=latency_ms,
         instruction=example["instruction"],
         expected_sql=example["output"],
@@ -202,6 +204,16 @@ def summarize(results: list[LoraEvalResult]) -> dict[str, Any]:
         if total
         else 0,
     }
+
+
+def summarize_by_intent(results: list[LoraEvalResult]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for intent_id in sorted({result.intent_id or "unknown" for result in results}):
+        intent_results = [
+            result for result in results if (result.intent_id or "unknown") == intent_id
+        ]
+        summary[intent_id] = summarize(intent_results)
+    return summary
 
 
 def main() -> None:
@@ -270,6 +282,7 @@ def main() -> None:
         "base_only": args.base_only,
         "data_path": str(args.data_path),
         "summary": summarize(results),
+        "summary_by_intent": summarize_by_intent(results),
         "memory_log": str(memory_log_path),
         "memory_peak": summarize_peak(memory_samples),
         "results": [asdict(result) for result in results],

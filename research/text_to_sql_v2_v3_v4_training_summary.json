@@ -1,0 +1,46 @@
+{
+  "runs": [
+    {
+      "dataset_version": "text_to_sql_v2",
+      "adapter_dir": "models/text_to_sql_lora/qwen2_5_coder_7b_v2_steps300",
+      "max_steps": 300,
+      "max_length": 768,
+      "lora_r": 8,
+      "lora_alpha": 16,
+      "train_examples": 105,
+      "validation_examples": 30,
+      "train_runtime": 708.4841,
+      "train_loss": 0.05906641114503145,
+      "epoch": 11.114285714285714,
+      "training_peak_nvidia_smi_memory_used_mb": 11504
+    },
+    {
+      "dataset_version": "text_to_sql_v3",
+      "adapter_dir": "models/text_to_sql_lora/qwen2_5_coder_7b_v3_steps350",
+      "max_steps": 350,
+      "max_length": 768,
+      "lora_r": 8,
+      "lora_alpha": 16,
+      "train_examples": 140,
+      "validation_examples": 30,
+      "train_runtime": 850.5256,
+      "train_loss": 0.05286765115867768,
+      "epoch": 10.0,
+      "training_peak_nvidia_smi_memory_used_mb": 11491
+    },
+    {
+      "dataset_version": "text_to_sql_v4",
+      "adapter_dir": "models/text_to_sql_lora/qwen2_5_coder_7b_v4_steps350",
+      "max_steps": 350,
+      "max_length": 768,
+      "lora_r": 8,
+      "lora_alpha": 16,
+      "train_examples": 145,
+      "validation_examples": 30,
+      "train_runtime": 834.5134,
+      "train_loss": 0.05324849076968219,
+      "epoch": 9.46896551724138,
+      "training_peak_nvidia_smi_memory_used_mb": 11490
+    }
+  ]
+}
