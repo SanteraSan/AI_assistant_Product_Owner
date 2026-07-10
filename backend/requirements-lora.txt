@@ -1,0 +1,22 @@
+# LoRA/QLoRA training environment.
+# Keep this separate from backend runtime dependencies: these packages are heavy
+# and are only needed for local fine-tuning experiments.
+
+--pre
+--index-url https://download.pytorch.org/whl/nightly/cu128
+--extra-index-url https://pypi.org/simple
+
+torch
+transformers
+datasets
+peft
+trl
+accelerate
+bitsandbytes
+kernels
+sentencepiece
+safetensors
+evaluate
+scikit-learn
+pandas
+numpy

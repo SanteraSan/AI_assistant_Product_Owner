@@ -2992,3 +2992,42 @@ Dataset shape:
 
 - dataset V1 достаточно хорош для первого LoRA training spike;
 - V1 не нужно считать финальным датасетом: после первой оценки LoRA стоит расширить V2 более сложными joins, safety-negative examples и большим числом paraphrases.
+
+## 2026-07-10: M7 LoRA Training Spike
+
+Контекст:
+
+- после Text-to-SQL baseline и dataset V1 нужно проверить, что локальное QLoRA обучение реально запускается на текущем железе;
+- base model для spike: `Qwen/Qwen2.5-Coder-7B-Instruct`;
+- цель stage: доказать training path, а не получить финальную production LoRA.
+
+Compatibility:
+
+- исходный `torch 2.5.1+cu121` видел RTX 5070 Ti, но не поддерживал compute capability `sm_120`;
+- после перехода на nightly `torch 2.12.0.dev20260408+cu128` CUDA op прошёл: `cuda_op_ok [2.0]`;
+- `torchvision`/`torchaudio` для LoRA не нужны;
+- установлен `kernels>=0.11.1` для bitsandbytes support;
+- bitsandbytes 4-bit GPU smoke прошёл.
+
+Что сделано:
+
+- добавлен `scripts/train_text_to_sql_lora.py`;
+- script поддерживает 4-bit QLoRA, LoRA params, max steps, max length и `--no-eval`;
+- добавлен report `research/TEXT_TO_SQL_LORA_TRAINING_SPIKE_2026_07_10.md`;
+- `models/` добавлен в `.gitignore`, чтобы не коммитить большие adapter/checkpoint artifacts.
+
+Training attempts:
+
+- первый 7B QLoRA run загрузил модель, создал adapter и прошёл 2 training steps, но упал на eval с CUDA OOM;
+- успешный smoke run: `max_steps=5`, `max_length=512`, `lora_r=8`, `lora_alpha=16`, `--no-eval`;
+- trainable params: `20,185,088`;
+- train runtime: `11.0894s`;
+- train loss: `1.5536`;
+- observed loss снизился по шагам: `1.735 -> 1.382`;
+- adapter сохранён локально в `models/text_to_sql_lora/qwen2_5_coder_7b_v1_smoke`.
+
+Вывод:
+
+- локальное QLoRA обучение 7B модели жизнеспособно на текущей машине;
+- evaluation лучше отделить от training на первых 7B экспериментах, чтобы не ловить OOM;
+- следующий шаг: LoRA evaluation на test split против baseline моделей.
