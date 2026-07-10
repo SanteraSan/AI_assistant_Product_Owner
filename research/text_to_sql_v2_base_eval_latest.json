@@ -1,0 +1,502 @@
+{
+  "model_name": "Qwen/Qwen2.5-Coder-7B-Instruct",
+  "adapter_dir": null,
+  "base_only": true,
+  "data_path": "/home/santera/Projects/data/text_to_sql/v2/test.jsonl",
+  "summary": {
+    "total": 30,
+    "valid_sql": 29,
+    "required_tables_present": 29,
+    "required_terms_present": 0,
+    "normalized_exact_match": 0,
+    "avg_latency_ms": 485
+  },
+  "memory_log": "/home/santera/Projects/research/text_to_sql_v2_base_eval_latest.memory.json",
+  "memory_peak": {
+    "torch_allocated_mb": 5322,
+    "torch_reserved_mb": 5564,
+    "torch_max_allocated_mb": 5535,
+    "torch_max_reserved_mb": 5564,
+    "nvidia_smi_memory_used_mb": 6528
+  },
+  "results": [
+    {
+      "example_id": "t2sql_v2_028_1",
+      "latency_ms": 610,
+      "instruction": "Посчитай evaluation runs по status.",
+      "expected_sql": "SELECT status, COUNT(*) AS run_count FROM evaluation_runs GROUP BY status ORDER BY run_count DESC",
+      "response": "```sql\nSELECT status, COUNT(*) AS run_count\nFROM evaluation_runs\nGROUP BY status;\n```",
+      "extracted_sql": "SELECT status, COUNT(*) AS run_count\nFROM evaluation_runs\nGROUP BY status",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_runs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_028_2",
+      "latency_ms": 377,
+      "instruction": "Сформируй PostgreSQL SELECT: Посчитай evaluation runs по status.",
+      "expected_sql": "SELECT status, COUNT(*) AS run_count FROM evaluation_runs GROUP BY status ORDER BY run_count DESC",
+      "response": "```sql\nSELECT status, COUNT(*) AS run_count FROM evaluation_runs GROUP BY status;\n```",
+      "extracted_sql": "SELECT status, COUNT(*) AS run_count FROM evaluation_runs GROUP BY status",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_runs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_028_3",
+      "latency_ms": 402,
+      "instruction": "Нужен read-only SQL для аналитики: Посчитай evaluation runs по status.",
+      "expected_sql": "SELECT status, COUNT(*) AS run_count FROM evaluation_runs GROUP BY status ORDER BY run_count DESC",
+      "response": "```sql\nSELECT status, COUNT(*) AS run_count\nFROM evaluation_runs\nGROUP BY status;\n```",
+      "extracted_sql": "SELECT status, COUNT(*) AS run_count\nFROM evaluation_runs\nGROUP BY status",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_runs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_028_4",
+      "latency_ms": 377,
+      "instruction": "Напиши безопасный SQL только на чтение: Посчитай evaluation runs по status.",
+      "expected_sql": "SELECT status, COUNT(*) AS run_count FROM evaluation_runs GROUP BY status ORDER BY run_count DESC",
+      "response": "```sql\nSELECT status, COUNT(*) AS run_count FROM evaluation_runs GROUP BY status;\n```",
+      "extracted_sql": "SELECT status, COUNT(*) AS run_count FROM evaluation_runs GROUP BY status",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_runs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_028_5",
+      "latency_ms": 377,
+      "instruction": "Сделай запрос для отчета: Посчитай evaluation runs по status.",
+      "expected_sql": "SELECT status, COUNT(*) AS run_count FROM evaluation_runs GROUP BY status ORDER BY run_count DESC",
+      "response": "```sql\nSELECT status, COUNT(*) AS run_count FROM evaluation_runs GROUP BY status;\n```",
+      "extracted_sql": "SELECT status, COUNT(*) AS run_count FROM evaluation_runs GROUP BY status",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_runs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_029_1",
+      "latency_ms": 401,
+      "instruction": "Посчитай chat messages по provider.",
+      "expected_sql": "SELECT provider, COUNT(*) AS message_count FROM chat_messages GROUP BY provider ORDER BY message_count DESC",
+      "response": "```sql\nSELECT provider, COUNT(*) AS message_count\nFROM chat_messages\nGROUP BY provider;\n```",
+      "extracted_sql": "SELECT provider, COUNT(*) AS message_count\nFROM chat_messages\nGROUP BY provider",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "chat_messages"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_029_2",
+      "latency_ms": 400,
+      "instruction": "Сформируй PostgreSQL SELECT: Посчитай chat messages по provider.",
+      "expected_sql": "SELECT provider, COUNT(*) AS message_count FROM chat_messages GROUP BY provider ORDER BY message_count DESC",
+      "response": "```sql\nSELECT provider, COUNT(*) AS message_count\nFROM chat_messages\nGROUP BY provider;\n```",
+      "extracted_sql": "SELECT provider, COUNT(*) AS message_count\nFROM chat_messages\nGROUP BY provider",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "chat_messages"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_029_3",
+      "latency_ms": 402,
+      "instruction": "Нужен read-only SQL для аналитики: Посчитай chat messages по provider.",
+      "expected_sql": "SELECT provider, COUNT(*) AS message_count FROM chat_messages GROUP BY provider ORDER BY message_count DESC",
+      "response": "```sql\nSELECT provider, COUNT(*) AS message_count\nFROM chat_messages\nGROUP BY provider;\n```",
+      "extracted_sql": "SELECT provider, COUNT(*) AS message_count\nFROM chat_messages\nGROUP BY provider",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "chat_messages"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_029_4",
+      "latency_ms": 403,
+      "instruction": "Напиши безопасный SQL только на чтение: Посчитай chat messages по provider.",
+      "expected_sql": "SELECT provider, COUNT(*) AS message_count FROM chat_messages GROUP BY provider ORDER BY message_count DESC",
+      "response": "```sql\nSELECT provider, COUNT(*) AS message_count\nFROM chat_messages\nGROUP BY provider;\n```",
+      "extracted_sql": "SELECT provider, COUNT(*) AS message_count\nFROM chat_messages\nGROUP BY provider",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "chat_messages"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_029_5",
+      "latency_ms": 402,
+      "instruction": "Сделай запрос для отчета: Посчитай chat messages по provider.",
+      "expected_sql": "SELECT provider, COUNT(*) AS message_count FROM chat_messages GROUP BY provider ORDER BY message_count DESC",
+      "response": "```sql\nSELECT provider, COUNT(*) AS message_count\nFROM chat_messages\nGROUP BY provider;\n```",
+      "extracted_sql": "SELECT provider, COUNT(*) AS message_count\nFROM chat_messages\nGROUP BY provider",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "chat_messages"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_030_1",
+      "latency_ms": 534,
+      "instruction": "Разверни source_types из RAG request logs и посчитай requests по source_type.",
+      "expected_sql": "SELECT source_type, COUNT(*) AS request_count FROM rag_request_logs r CROSS JOIN LATERAL jsonb_array_elements_text(r.source_types) AS source_type GROUP BY source_type ORDER BY request_count DESC",
+      "response": "```sql\nSELECT \n    source_type, \n    COUNT(*) AS request_count\nFROM \n    rag_request_logs\nGROUP BY \n    source_type;\n```",
+      "extracted_sql": "SELECT \n    source_type, \n    COUNT(*) AS request_count\nFROM \n    rag_request_logs\nGROUP BY \n    source_type",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_request_logs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_030_2",
+      "latency_ms": 785,
+      "instruction": "Сформируй PostgreSQL SELECT: Разверни source_types из RAG request logs и посчитай requests по source_type.",
+      "expected_sql": "SELECT source_type, COUNT(*) AS request_count FROM rag_request_logs r CROSS JOIN LATERAL jsonb_array_elements_text(r.source_types) AS source_type GROUP BY source_type ORDER BY request_count DESC",
+      "response": "```sql\nSELECT \n    source_type, \n    COUNT(*) AS request_count\nFROM \n    rag_request_logs\nUNION ALL\nSELECT \n    'all' AS source_type, \n    COUNT(*) AS request_count\nFROM \n    rag_request_logs;\n```",
+      "extracted_sql": "SELECT \n    source_type, \n    COUNT(*) AS request_count\nFROM \n    rag_request_logs\nUNION ALL\nSELECT \n    'all' AS source_type, \n    COUNT(*) AS request_count\nFROM \n    rag_request_logs",
+      "validation_valid": false,
+      "validation_error": "not_select",
+      "tables": [],
+      "required_tables_present": false,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_030_3",
+      "latency_ms": 513,
+      "instruction": "Нужен read-only SQL для аналитики: Разверни source_types из RAG request logs и посчитай requests по source_type.",
+      "expected_sql": "SELECT source_type, COUNT(*) AS request_count FROM rag_request_logs r CROSS JOIN LATERAL jsonb_array_elements_text(r.source_types) AS source_type GROUP BY source_type ORDER BY request_count DESC",
+      "response": "```sql\nSELECT \n    source_types,\n    COUNT(*) AS request_count\nFROM \n    rag_request_logs\nGROUP BY \n    source_types;\n```",
+      "extracted_sql": "SELECT \n    source_types,\n    COUNT(*) AS request_count\nFROM \n    rag_request_logs\nGROUP BY \n    source_types",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_request_logs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_030_4",
+      "latency_ms": 513,
+      "instruction": "Напиши безопасный SQL только на чтение: Разверни source_types из RAG request logs и посчитай requests по source_type.",
+      "expected_sql": "SELECT source_type, COUNT(*) AS request_count FROM rag_request_logs r CROSS JOIN LATERAL jsonb_array_elements_text(r.source_types) AS source_type GROUP BY source_type ORDER BY request_count DESC",
+      "response": "```sql\nSELECT \n    source_type,\n    COUNT(*) AS request_count\nFROM \n    rag_request_logs\nGROUP BY \n    source_type;\n```",
+      "extracted_sql": "SELECT \n    source_type,\n    COUNT(*) AS request_count\nFROM \n    rag_request_logs\nGROUP BY \n    source_type",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_request_logs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_030_5",
+      "latency_ms": 434,
+      "instruction": "Сделай запрос для отчета: Разверни source_types из RAG request logs и посчитай requests по source_type.",
+      "expected_sql": "SELECT source_type, COUNT(*) AS request_count FROM rag_request_logs r CROSS JOIN LATERAL jsonb_array_elements_text(r.source_types) AS source_type GROUP BY source_type ORDER BY request_count DESC",
+      "response": "```sql\nSELECT source_types, COUNT(*) AS request_count\nFROM rag_request_logs\nGROUP BY source_types;\n```",
+      "extracted_sql": "SELECT source_types, COUNT(*) AS request_count\nFROM rag_request_logs\nGROUP BY source_types",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_request_logs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_031_1",
+      "latency_ms": 424,
+      "instruction": "Покажи последние evaluation results с error.",
+      "expected_sql": "SELECT run_id, scenario_id, scenario_name, model, error, created_at FROM evaluation_results WHERE error IS NOT NULL ORDER BY created_at DESC LIMIT 20",
+      "response": "```sql\nSELECT *\nFROM evaluation_results\nWHERE error IS NOT NULL\nORDER BY created_at DESC;\n```",
+      "extracted_sql": "SELECT *\nFROM evaluation_results\nWHERE error IS NOT NULL\nORDER BY created_at DESC",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_results"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_031_2",
+      "latency_ms": 424,
+      "instruction": "Сформируй PostgreSQL SELECT: Покажи последние evaluation results с error.",
+      "expected_sql": "SELECT run_id, scenario_id, scenario_name, model, error, created_at FROM evaluation_results WHERE error IS NOT NULL ORDER BY created_at DESC LIMIT 20",
+      "response": "```sql\nSELECT *\nFROM evaluation_results\nWHERE error IS NOT NULL\nORDER BY created_at DESC;\n```",
+      "extracted_sql": "SELECT *\nFROM evaluation_results\nWHERE error IS NOT NULL\nORDER BY created_at DESC",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_results"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_031_3",
+      "latency_ms": 414,
+      "instruction": "Нужен read-only SQL для аналитики: Покажи последние evaluation results с error.",
+      "expected_sql": "SELECT run_id, scenario_id, scenario_name, model, error, created_at FROM evaluation_results WHERE error IS NOT NULL ORDER BY created_at DESC LIMIT 20",
+      "response": "```sql\nSELECT *\nFROM evaluation_results\nWHERE error IS NOT NULL\nORDER BY created_at DESC;\n```",
+      "extracted_sql": "SELECT *\nFROM evaluation_results\nWHERE error IS NOT NULL\nORDER BY created_at DESC",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_results"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_031_4",
+      "latency_ms": 418,
+      "instruction": "Напиши безопасный SQL только на чтение: Покажи последние evaluation results с error.",
+      "expected_sql": "SELECT run_id, scenario_id, scenario_name, model, error, created_at FROM evaluation_results WHERE error IS NOT NULL ORDER BY created_at DESC LIMIT 20",
+      "response": "```sql\nSELECT *\nFROM evaluation_results\nWHERE error IS NOT NULL\nORDER BY created_at DESC;\n```",
+      "extracted_sql": "SELECT *\nFROM evaluation_results\nWHERE error IS NOT NULL\nORDER BY created_at DESC",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_results"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_031_5",
+      "latency_ms": 416,
+      "instruction": "Сделай запрос для отчета: Покажи последние evaluation results с error.",
+      "expected_sql": "SELECT run_id, scenario_id, scenario_name, model, error, created_at FROM evaluation_results WHERE error IS NOT NULL ORDER BY created_at DESC LIMIT 20",
+      "response": "```sql\nSELECT *\nFROM evaluation_results\nWHERE error IS NOT NULL\nORDER BY created_at DESC;\n```",
+      "extracted_sql": "SELECT *\nFROM evaluation_results\nWHERE error IS NOT NULL\nORDER BY created_at DESC",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_results"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_032_1",
+      "latency_ms": 425,
+      "instruction": "Найди средний score по title для RAG sources.",
+      "expected_sql": "SELECT title, ROUND(AVG(score)::numeric, 4) AS avg_score, COUNT(*) AS source_count FROM rag_source_logs WHERE title IS NOT NULL AND score IS NOT NULL GROUP BY title ORDER BY avg_score DESC LIMIT 20",
+      "response": "```sql\nSELECT title, AVG(score) AS average_score\nFROM rag_source_logs\nGROUP BY title;\n```",
+      "extracted_sql": "SELECT title, AVG(score) AS average_score\nFROM rag_source_logs\nGROUP BY title",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_source_logs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_032_2",
+      "latency_ms": 426,
+      "instruction": "Сформируй PostgreSQL SELECT: Найди средний score по title для RAG sources.",
+      "expected_sql": "SELECT title, ROUND(AVG(score)::numeric, 4) AS avg_score, COUNT(*) AS source_count FROM rag_source_logs WHERE title IS NOT NULL AND score IS NOT NULL GROUP BY title ORDER BY avg_score DESC LIMIT 20",
+      "response": "```sql\nSELECT title, AVG(score) AS average_score\nFROM rag_source_logs\nGROUP BY title;\n```",
+      "extracted_sql": "SELECT title, AVG(score) AS average_score\nFROM rag_source_logs\nGROUP BY title",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_source_logs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_032_3",
+      "latency_ms": 427,
+      "instruction": "Нужен read-only SQL для аналитики: Найди средний score по title для RAG sources.",
+      "expected_sql": "SELECT title, ROUND(AVG(score)::numeric, 4) AS avg_score, COUNT(*) AS source_count FROM rag_source_logs WHERE title IS NOT NULL AND score IS NOT NULL GROUP BY title ORDER BY avg_score DESC LIMIT 20",
+      "response": "```sql\nSELECT title, AVG(score) AS average_score\nFROM rag_source_logs\nGROUP BY title;\n```",
+      "extracted_sql": "SELECT title, AVG(score) AS average_score\nFROM rag_source_logs\nGROUP BY title",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_source_logs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_032_4",
+      "latency_ms": 428,
+      "instruction": "Напиши безопасный SQL только на чтение: Найди средний score по title для RAG sources.",
+      "expected_sql": "SELECT title, ROUND(AVG(score)::numeric, 4) AS avg_score, COUNT(*) AS source_count FROM rag_source_logs WHERE title IS NOT NULL AND score IS NOT NULL GROUP BY title ORDER BY avg_score DESC LIMIT 20",
+      "response": "```sql\nSELECT AVG(score) AS average_score, title\nFROM rag_source_logs\nGROUP BY title;\n```",
+      "extracted_sql": "SELECT AVG(score) AS average_score, title\nFROM rag_source_logs\nGROUP BY title",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_source_logs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_032_5",
+      "latency_ms": 427,
+      "instruction": "Сделай запрос для отчета: Найди средний score по title для RAG sources.",
+      "expected_sql": "SELECT title, ROUND(AVG(score)::numeric, 4) AS avg_score, COUNT(*) AS source_count FROM rag_source_logs WHERE title IS NOT NULL AND score IS NOT NULL GROUP BY title ORDER BY avg_score DESC LIMIT 20",
+      "response": "```sql\nSELECT title, AVG(score) AS average_score\nFROM rag_source_logs\nGROUP BY title;\n```",
+      "extracted_sql": "SELECT title, AVG(score) AS average_score\nFROM rag_source_logs\nGROUP BY title",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_source_logs"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_033_1",
+      "latency_ms": 682,
+      "instruction": "Посчитай conversation summaries по дням создания.",
+      "expected_sql": "SELECT DATE_TRUNC('day', created_at) AS created_day, COUNT(*) AS summary_count FROM conversation_summaries GROUP BY created_day ORDER BY created_day DESC",
+      "response": "```sql\nSELECT \n    DATE(created_at) AS creation_date,\n    COUNT(*) AS summary_count\nFROM \n    conversation_summaries\nGROUP BY \n    DATE(created_at)\nORDER BY \n    creation_date;\n```",
+      "extracted_sql": "SELECT \n    DATE(created_at) AS creation_date,\n    COUNT(*) AS summary_count\nFROM \n    conversation_summaries\nGROUP BY \n    DATE(created_at)\nORDER BY \n    creation_date",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "conversation_summaries"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_033_2",
+      "latency_ms": 683,
+      "instruction": "Сформируй PostgreSQL SELECT: Посчитай conversation summaries по дням создания.",
+      "expected_sql": "SELECT DATE_TRUNC('day', created_at) AS created_day, COUNT(*) AS summary_count FROM conversation_summaries GROUP BY created_day ORDER BY created_day DESC",
+      "response": "```sql\nSELECT \n    DATE(created_at) AS creation_date,\n    COUNT(*) AS summary_count\nFROM \n    conversation_summaries\nGROUP BY \n    DATE(created_at)\nORDER BY \n    creation_date;\n```",
+      "extracted_sql": "SELECT \n    DATE(created_at) AS creation_date,\n    COUNT(*) AS summary_count\nFROM \n    conversation_summaries\nGROUP BY \n    DATE(created_at)\nORDER BY \n    creation_date",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "conversation_summaries"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_033_3",
+      "latency_ms": 680,
+      "instruction": "Нужен read-only SQL для аналитики: Посчитай conversation summaries по дням создания.",
+      "expected_sql": "SELECT DATE_TRUNC('day', created_at) AS created_day, COUNT(*) AS summary_count FROM conversation_summaries GROUP BY created_day ORDER BY created_day DESC",
+      "response": "```sql\nSELECT \n    DATE(created_at) AS creation_date,\n    COUNT(*) AS summary_count\nFROM \n    conversation_summaries\nGROUP BY \n    DATE(created_at)\nORDER BY \n    creation_date;\n```",
+      "extracted_sql": "SELECT \n    DATE(created_at) AS creation_date,\n    COUNT(*) AS summary_count\nFROM \n    conversation_summaries\nGROUP BY \n    DATE(created_at)\nORDER BY \n    creation_date",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "conversation_summaries"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_033_4",
+      "latency_ms": 680,
+      "instruction": "Напиши безопасный SQL только на чтение: Посчитай conversation summaries по дням создания.",
+      "expected_sql": "SELECT DATE_TRUNC('day', created_at) AS created_day, COUNT(*) AS summary_count FROM conversation_summaries GROUP BY created_day ORDER BY created_day DESC",
+      "response": "```sql\nSELECT \n    DATE(created_at) AS creation_date,\n    COUNT(*) AS summary_count\nFROM \n    conversation_summaries\nGROUP BY \n    DATE(created_at)\nORDER BY \n    creation_date;\n```",
+      "extracted_sql": "SELECT \n    DATE(created_at) AS creation_date,\n    COUNT(*) AS summary_count\nFROM \n    conversation_summaries\nGROUP BY \n    DATE(created_at)\nORDER BY \n    creation_date",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "conversation_summaries"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    },
+    {
+      "example_id": "t2sql_v2_033_5",
+      "latency_ms": 678,
+      "instruction": "Сделай запрос для отчета: Посчитай conversation summaries по дням создания.",
+      "expected_sql": "SELECT DATE_TRUNC('day', created_at) AS created_day, COUNT(*) AS summary_count FROM conversation_summaries GROUP BY created_day ORDER BY created_day DESC",
+      "response": "```sql\nSELECT \n    DATE(created_at) AS creation_date,\n    COUNT(*) AS summary_count\nFROM \n    conversation_summaries\nGROUP BY \n    DATE(created_at)\nORDER BY \n    creation_date;\n```",
+      "extracted_sql": "SELECT \n    DATE(created_at) AS creation_date,\n    COUNT(*) AS summary_count\nFROM \n    conversation_summaries\nGROUP BY \n    DATE(created_at)\nORDER BY \n    creation_date",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "conversation_summaries"
+      ],
+      "required_tables_present": true,
+      "required_terms_present": false,
+      "normalized_exact_match": false
+    }
+  ]
+}

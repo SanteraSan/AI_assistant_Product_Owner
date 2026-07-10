@@ -15,6 +15,7 @@ accelerate
 bitsandbytes
 kernels
 sqlglot
+sqlalchemy
 sentencepiece
 safetensors
 evaluate

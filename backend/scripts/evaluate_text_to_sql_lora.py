@@ -42,6 +42,7 @@ class LoraEvalResult:
     validation_error: str | None
     tables: list[str]
     required_tables_present: bool
+    required_terms_present: bool
     normalized_exact_match: bool
 
 
@@ -162,8 +163,10 @@ def evaluate_example(
     extracted_sql = extract_sql_from_response(response)
     validation = validate_read_only_sql(extracted_sql, allowed_tables=allowed_tables)
     required_tables = set(example.get("metadata", {}).get("required_tables", []))
+    required_terms = tuple(example.get("metadata", {}).get("required_terms", []))
     expected_normalized = normalize(example["output"], allowed_tables)
     generated_normalized = validation.normalized_sql if validation.valid else None
+    normalized_sql_for_checks = (generated_normalized or extracted_sql).lower()
 
     return LoraEvalResult(
         example_id=example["id"],
@@ -176,6 +179,9 @@ def evaluate_example(
         validation_error=validation.error,
         tables=validation.tables,
         required_tables_present=required_tables.issubset(set(validation.tables)),
+        required_terms_present=all(
+            term.lower() in normalized_sql_for_checks for term in required_terms
+        ),
         normalized_exact_match=(
             generated_normalized is not None
             and expected_normalized is not None
@@ -190,6 +196,7 @@ def summarize(results: list[LoraEvalResult]) -> dict[str, Any]:
         "total": total,
         "valid_sql": sum(result.validation_valid for result in results),
         "required_tables_present": sum(result.required_tables_present for result in results),
+        "required_terms_present": sum(result.required_terms_present for result in results),
         "normalized_exact_match": sum(result.normalized_exact_match for result in results),
         "avg_latency_ms": round(sum(result.latency_ms for result in results) / total)
         if total
@@ -252,6 +259,7 @@ def main() -> None:
             f"example={result.example_id} "
             f"valid={result.validation_valid} "
             f"tables={result.required_tables_present} "
+            f"terms={result.required_terms_present} "
             f"exact={result.normalized_exact_match} "
             f"latency_ms={result.latency_ms}"
         )
