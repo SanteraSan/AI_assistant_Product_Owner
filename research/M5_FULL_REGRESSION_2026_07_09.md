@@ -54,3 +54,27 @@ First, debug the two broad failures:
 - `excel_ingestion` because all models fail it and the scenario may be stale after the fixture set changed.
 
 The two `qwen3.5:9b`-only failures can be handled after that as evaluator/prompt hardening unless deeper inspection shows missing evidence.
+
+## Follow-Up Fix 2026-07-09
+
+Run id: `9dafb2f1-dd15-4c0c-ae98-bef31758c202`
+
+Targeted regression:
+
+- Scenarios: `excel_ingestion`, `docx_text_image_mismatch`, `office_media_consistency_mismatch`, `xlsx_row_image_anchor_digest`
+- Models: `gemma4:12b`, `qwen3.5:9b`, `qwen3:14b`
+- Total results: `12`
+- Technical errors: `0`
+- Quality-flag failures: `0`
+
+Fixes:
+
+- `xlsx_row_image_anchor_digest`: added lexical supplement for XLSX anchored `image_digest` sources so exact row evidence such as `4,1`, `11%`, and `3500` can lift the correct embedded images above pure vector similarity. Verified that `anchored_image5` and `anchored_image7` from row `11` are retrieved first.
+- `excel_ingestion`: scoped the scenario to `product_owner_metrics.xlsx`, which is the actual fixture containing `enterprise onboarding`, `Excel import validation`, and the recommendation.
+- `excel_ingestion`: changed the strict `validation` marker to a marker group that also accepts Russian wording such as `валидац` and `провер`.
+- `office_media_consistency_mismatch`: compacted ingestion-time consistency evidence so `Consistency status` and `Consistency reason` stay in the first and only chunk. This prevents retrieval from selecting a middle chunk without the precomputed mismatch summary.
+
+Result:
+
+- The four known failures from the full regression are fixed in targeted regression.
+- Before moving to `M5.9`, a final full M5 run can be repeated to confirm there are no secondary regressions.

@@ -218,6 +218,16 @@ class RagService:
             limit=selected_top_k,
         )
         sources = _merge_sources(excel_supplement_sources, sources)
+        excel_visual_supplement_sources = self._supplement_excel_visual_sources(
+            message=message,
+            selected_tenant_id=selected_tenant_id,
+            selected_bucket_ids=selected_bucket_ids,
+            selected_source_types=selected_source_types,
+            selected_document_ids=selected_document_ids,
+            selected_source_paths=selected_source_paths,
+            limit=selected_top_k,
+        )
+        sources = _merge_sources(excel_visual_supplement_sources, sources)
         sources = _rerank_docx_sources(sources, message)
         required_source_types = _required_source_types_for_supplement(
             routing_hints=routing_hints,
@@ -239,7 +249,7 @@ class RagService:
         return (
             sources,
             required_source_types,
-            len(excel_supplement_sources),
+            len(excel_supplement_sources) + len(excel_visual_supplement_sources),
             len(docx_supplement_sources),
         )
 
@@ -327,6 +337,51 @@ class RagService:
             header_matches = sorted(header_matches, key=_excel_row_number)
 
         return _merge_sources(exact_matches[:limit], header_matches[:limit])
+
+    def _supplement_excel_visual_sources(
+        self,
+        *,
+        message: str,
+        selected_tenant_id: str | None,
+        selected_bucket_ids: list[str],
+        selected_source_types: list[str],
+        selected_document_ids: list[str],
+        selected_source_paths: list[str],
+        limit: int,
+    ) -> list[SourceChunk]:
+        if selected_source_types and "image_digest" not in selected_source_types:
+            return []
+        if not selected_document_ids and not selected_source_paths:
+            return []
+
+        candidates = self._qdrant_store.scroll(
+            limit=self._excel_supplement_scroll_limit,
+            tenant_id=selected_tenant_id,
+            bucket_ids=selected_bucket_ids,
+            source_types=["image_digest"],
+            document_ids=selected_document_ids,
+            source_paths=selected_source_paths,
+        )
+        if not candidates:
+            return []
+
+        exact_terms = _extract_excel_exact_terms(message)
+        exact_matches = [
+            source
+            for source in candidates
+            if _is_xlsx_anchor_image_source(source)
+            and exact_terms
+            and _excel_exact_match_count(source, exact_terms) > 0
+        ]
+        exact_matches = sorted(
+            exact_matches,
+            key=lambda source: (
+                -_excel_exact_match_count(source, exact_terms),
+                _excel_anchor_row_number(source),
+                _excel_embedded_image_index(source),
+            ),
+        )
+        return exact_matches[:limit]
 
     def _supplement_docx_sources(
         self,
@@ -595,7 +650,10 @@ def _extract_exact_numeric_terms(text: str) -> list[str]:
 
 
 def _extract_excel_exact_terms(text: str) -> list[str]:
-    raw_terms = re.findall(r"[A-Za-zА-Яа-яЁё_#][A-Za-zА-Яа-яЁё0-9_#.-]{2,}|\b\d{6,}\b", text)
+    raw_terms = re.findall(
+        r"[A-Za-zА-Яа-яЁё_#][A-Za-zА-Яа-яЁё0-9_#.-]{2,}|\b\d+(?:[,.]\d+)?\b",
+        text,
+    )
     skipped_terms = {
         "xls",
         "xlsx",
@@ -616,6 +674,15 @@ def _extract_excel_exact_terms(text: str) -> list[str]:
         "какую",
         "что",
         "про",
+        "написано",
+        "изображено",
+        "картинке",
+        "картинка",
+        "продукта",
+        "продукт",
+        "указано",
+        "алкоголь",
+        "плотность",
     }
     terms: list[str] = []
     seen: set[str] = set()
@@ -623,7 +690,10 @@ def _extract_excel_exact_terms(text: str) -> list[str]:
         normalized = term.strip(".,:;()[]{}").lower()
         if not normalized or normalized in skipped_terms:
             continue
-        if len(normalized) < 4 and not normalized.isdigit():
+        is_numeric = _is_excel_numeric_term(normalized)
+        if is_numeric and len(re.sub(r"\D", "", normalized)) < 2:
+            continue
+        if not is_numeric and len(normalized) < 4:
             continue
         if normalized in seen:
             continue
@@ -632,9 +702,23 @@ def _extract_excel_exact_terms(text: str) -> list[str]:
     return terms
 
 
+def _is_excel_numeric_term(term: str) -> bool:
+    return re.fullmatch(r"\d+(?:[,.]\d+)?", term) is not None
+
+
 def _excel_exact_match_count(source: SourceChunk, terms: list[str]) -> int:
     body = source.content.lower()
-    return sum(1 for term in terms if term in body)
+    return sum(1 for term in terms if _excel_term_in_body(term, body))
+
+
+def _excel_term_in_body(term: str, body: str) -> bool:
+    if term in body:
+        return True
+    if "," in term:
+        return term.replace(",", ".") in body
+    if "." in term:
+        return term.replace(".", ",") in body
+    return False
 
 
 def _looks_like_document_header_question(text: str) -> bool:
@@ -655,6 +739,31 @@ def _excel_row_number(source: SourceChunk) -> int:
     document_metadata = source.metadata.get("document_metadata") or {}
     try:
         return int(document_metadata.get("excel_row_number") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _is_xlsx_anchor_image_source(source: SourceChunk) -> bool:
+    document_metadata = source.metadata.get("document_metadata") or {}
+    return (
+        source.source_type == "image_digest"
+        and document_metadata.get("parent_source_type") == "xlsx"
+        and document_metadata.get("anchor_type") == "xlsx_cell"
+    )
+
+
+def _excel_anchor_row_number(source: SourceChunk) -> int:
+    document_metadata = source.metadata.get("document_metadata") or {}
+    try:
+        return int(document_metadata.get("anchor_row") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _excel_embedded_image_index(source: SourceChunk) -> int:
+    document_metadata = source.metadata.get("document_metadata") or {}
+    try:
+        return int(document_metadata.get("embedded_image_index") or 0)
     except (TypeError, ValueError):
         return 0
 

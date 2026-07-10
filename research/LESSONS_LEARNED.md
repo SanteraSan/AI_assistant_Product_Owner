@@ -2604,3 +2604,35 @@ Future hardening:
 - M5.8.3 остаётся spike harness, а не полноценной PaddleOCR integration;
 - это правильная граница: основной backend остаётся стабильным, а тяжёлые OCR/layout зависимости проверяются отдельно;
 - PPStructureV3 даёт более богатый table/layout output, чем наш baseline, но требует тяжёлого отдельного окружения и внимательной нормализации результата в `linked_text` evidence.
+
+## 2026-07-09: M5 Full Regression Follow-Up Fixes
+
+Контекст:
+
+- после большого M5 regression на 49 сценариях и трёх моделях осталось 8 quality-flag failures из 147 результатов;
+- технических ошибок не было, но 4 сценария требовали разбора: `excel_ingestion`, `xlsx_row_image_anchor_digest`, `docx_text_image_mismatch`, `office_media_consistency_mismatch`;
+- цель follow-up: отделить реальные retrieval/ingestion проблемы от устаревших evaluator expectations.
+
+Что сделано:
+
+- `xlsx_row_image_anchor_digest`: добавлен lexical supplement для XLSX anchored `image_digest` sources;
+- supplement использует exact terms из вопроса (`4,1`, `11`, `3500`) и поднимает картинки, чей `linked_text` содержит больше совпадений;
+- подтверждено, что для `hard_for_analis_2.xlsx` первыми возвращаются `anchored_image5` и `anchored_image7` с `anchor_row=11`;
+- `excel_ingestion`: scenario привязан к правильному fixture `product_owner_metrics.xlsx`, где есть `enterprise onboarding` и рекомендация про `Excel import validation`;
+- `excel_ingestion`: literal marker `validation` заменён на marker group `validation / валидац / провер`;
+- `office_media_consistency`: evidence сделан compact, чтобы `Consistency status` и `Consistency reason` оставались в первом и единственном chunk;
+- добавлены focused tests для XLSX visual exact matching и compact consistency evidence.
+
+Проверки:
+
+- focused tests: `19 passed`;
+- reindex после compact consistency evidence: `1440 documents`, `1503 chunks`;
+- targeted regression run id: `9dafb2f1-dd15-4c0c-ae98-bef31758c202`;
+- targeted regression: 4 scenarios x 3 models = 12 results;
+- result: technical errors `0`, quality-flag failures `0`.
+
+Вывод:
+
+- реальные M5 failures после большого прогона закрыты targeted regression;
+- перед переходом к `M5.9 Voice UI Bridge` стоит повторить полный M5 regression, чтобы подтвердить отсутствие вторичных регрессий;
+- важный retrieval урок: для anchored visual evidence нельзя полагаться только на vector similarity, если пользователь задаёт точные числовые/табличные признаки.

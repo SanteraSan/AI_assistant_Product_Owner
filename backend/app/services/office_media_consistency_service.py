@@ -51,11 +51,13 @@ def build_office_media_consistency_documents(
                 f"Consistency status: {status}",
                 f"Consistency reason: {reason}",
                 "Document text evidence:",
-                _compact_excerpt(document_text, max_chars=900),
+                _compact_excerpt(document_text, max_chars=380),
                 "Embedded image digest evidence:",
-                visual_document.content,
+                _compact_excerpt(visual_document.content, max_chars=520),
                 "Embedded image OCR evidence:",
-                ocr_document.content if ocr_document else "not available",
+                _compact_excerpt(ocr_document.content, max_chars=320)
+                if ocr_document
+                else "not available",
             ]
         )
         consistency_documents.append(

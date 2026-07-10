@@ -113,6 +113,19 @@ def test_extract_excel_exact_terms_keeps_product_names_without_question_noise() 
     assert "цену" not in terms
 
 
+def test_extract_excel_exact_terms_keeps_short_product_numbers() -> None:
+    terms = _extract_excel_exact_terms(
+        "Что на картинке, где указано 4,1 % алкоголь, 11% плотность и 3500 р.?"
+    )
+
+    assert "4,1" in terms
+    assert "11" in terms
+    assert "3500" in terms
+    assert "картинке" not in terms
+    assert "алкоголь" not in terms
+    assert "плотность" not in terms
+
+
 def test_excel_exact_match_count_boosts_product_row() -> None:
     terms = ["пятницкое", "нефильтрованное", "алкоголь"]
     generic = _source(
@@ -127,6 +140,22 @@ def test_excel_exact_match_count_boosts_product_row() -> None:
     )
 
     assert _excel_exact_match_count(product, terms) > _excel_exact_match_count(generic, terms)
+
+
+def test_excel_exact_match_count_boosts_xlsx_anchor_image_row() -> None:
+    terms = _extract_excel_exact_terms("4,1 % алкоголь, 11% плотность, 3500 р.")
+    weak = _source(
+        "weak",
+        source_type="image_digest",
+        content="Linked text: 4,0 % алкоголь, 11% плотность. Цена за кегу 3250 р.",
+    )
+    target = _source(
+        "target",
+        source_type="image_digest",
+        content="Linked text: ПЯТНИЦКОЕ 4,1 % алкоголь, 11% плотность. Цена за кегу 3500 р.",
+    )
+
+    assert _excel_exact_match_count(target, terms) > _excel_exact_match_count(weak, terms)
 
 
 def test_document_header_question_detection_is_not_triggered_by_price_word_only() -> None:

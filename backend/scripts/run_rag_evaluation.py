@@ -434,7 +434,11 @@ SCENARIOS = [
         name="Excel Ingestion",
         prompt="Что Excel говорит про enterprise onboarding blockers и какую рекомендацию даёт?",
         source_types=("excel_row",),
-        required_response_markers=("enterprise", "excel", "validation"),
+        source_paths=(
+            "/home/santera/Projects/data/raw/excel_fixtures/product_owner_metrics.xlsx",
+        ),
+        required_response_markers=("enterprise", "excel"),
+        required_marker_groups=(("validation", "валидац", "провер"),),
         score_threshold=0.0,
     ),
     EvaluationScenario(
