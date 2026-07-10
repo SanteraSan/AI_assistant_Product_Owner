@@ -1,0 +1,159 @@
+{
+  "model_name": "Qwen/Qwen2.5-Coder-7B-Instruct",
+  "adapter_dir": "/home/santera/Projects/models/text_to_sql_lora/qwen2_5_coder_7b_v1_steps100",
+  "base_only": false,
+  "data_path": "/home/santera/Projects/data/text_to_sql/v1/test.jsonl",
+  "summary": {
+    "total": 9,
+    "valid_sql": 9,
+    "required_tables_present": 9,
+    "normalized_exact_match": 9,
+    "avg_latency_ms": 896
+  },
+  "memory_log": "/home/santera/Projects/research/text_to_sql_lora_steps100_eval_latest.memory.json",
+  "memory_peak": {
+    "torch_allocated_mb": 5399,
+    "torch_reserved_mb": 5698,
+    "torch_max_allocated_mb": 5611,
+    "torch_max_reserved_mb": 5698,
+    "nvidia_smi_memory_used_mb": 6650
+  },
+  "results": [
+    {
+      "example_id": "t2sql_v1_002_2",
+      "latency_ms": 1163,
+      "instruction": "Сформируй PostgreSQL SELECT: Покажи scenarios с количеством technical errors за все evaluation runs.",
+      "expected_sql": "SELECT scenario_id, scenario_name, COUNT(*) FILTER (WHERE error IS NOT NULL) AS technical_errors FROM evaluation_results GROUP BY scenario_id, scenario_name ORDER BY technical_errors DESC, scenario_id",
+      "response": "SELECT scenario_id, scenario_name, COUNT(*) FILTER (WHERE error IS NOT NULL) AS technical_errors FROM evaluation_results GROUP BY scenario_id, scenario_name ORDER BY technical_errors DESC, scenario_id",
+      "extracted_sql": "SELECT scenario_id, scenario_name, COUNT(*) FILTER (WHERE error IS NOT NULL) AS technical_errors FROM evaluation_results GROUP BY scenario_id, scenario_name ORDER BY technical_errors DESC, scenario_id",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_results"
+      ],
+      "required_tables_present": true,
+      "normalized_exact_match": true
+    },
+    {
+      "example_id": "t2sql_v1_004_1",
+      "latency_ms": 718,
+      "instruction": "Покажи последние 10 evaluation runs со статусом и количеством scenarios.",
+      "expected_sql": "SELECT id, name, status, scenario_count, started_at, completed_at FROM evaluation_runs ORDER BY started_at DESC LIMIT 10",
+      "response": "SELECT id, name, status, scenario_count, started_at, completed_at FROM evaluation_runs ORDER BY started_at DESC LIMIT 10",
+      "extracted_sql": "SELECT id, name, status, scenario_count, started_at, completed_at FROM evaluation_runs ORDER BY started_at DESC LIMIT 10",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_runs"
+      ],
+      "required_tables_present": true,
+      "normalized_exact_match": true
+    },
+    {
+      "example_id": "t2sql_v1_005_3",
+      "latency_ms": 1068,
+      "instruction": "Нужен read-only SQL для аналитики: Посчитай marker failures по model из evaluation_results.",
+      "expected_sql": "SELECT model, COUNT(*) FILTER (WHERE NOT COALESCE((quality_flags->>'response_has_required_markers')::boolean, TRUE)) AS marker_failures FROM evaluation_results GROUP BY model ORDER BY marker_failures DESC",
+      "response": "SELECT model, COUNT(*) FILTER (WHERE NOT COALESCE((quality_flags->>'response_has_required_markers')::boolean, TRUE)) AS marker_failures FROM evaluation_results GROUP BY model ORDER BY marker_failures DESC",
+      "extracted_sql": "SELECT model, COUNT(*) FILTER (WHERE NOT COALESCE((quality_flags->>'response_has_required_markers')::boolean, TRUE)) AS marker_failures FROM evaluation_results GROUP BY model ORDER BY marker_failures DESC",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "evaluation_results"
+      ],
+      "required_tables_present": true,
+      "normalized_exact_match": true
+    },
+    {
+      "example_id": "t2sql_v1_007_2",
+      "latency_ms": 560,
+      "instruction": "Сформируй PostgreSQL SELECT: Посчитай chat messages по role.",
+      "expected_sql": "SELECT role, COUNT(*) AS message_count FROM chat_messages GROUP BY role ORDER BY message_count DESC",
+      "response": "SELECT role, COUNT(*) AS message_count FROM chat_messages GROUP BY role ORDER BY message_count DESC",
+      "extracted_sql": "SELECT role, COUNT(*) AS message_count FROM chat_messages GROUP BY role ORDER BY message_count DESC",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "chat_messages"
+      ],
+      "required_tables_present": true,
+      "normalized_exact_match": true
+    },
+    {
+      "example_id": "t2sql_v1_009_1",
+      "latency_ms": 918,
+      "instruction": "Разверни features из conversation summaries и посчитай частоту каждой feature.",
+      "expected_sql": "SELECT feature, COUNT(*) AS summary_count FROM conversation_summaries cs CROSS JOIN LATERAL jsonb_array_elements_text(cs.features) AS feature GROUP BY feature ORDER BY summary_count DESC",
+      "response": "SELECT feature, COUNT(*) AS summary_count FROM conversation_summaries cs CROSS JOIN LATERAL jsonb_array_elements_text(cs.features) AS feature GROUP BY feature ORDER BY summary_count DESC",
+      "extracted_sql": "SELECT feature, COUNT(*) AS summary_count FROM conversation_summaries cs CROSS JOIN LATERAL jsonb_array_elements_text(cs.features) AS feature GROUP BY feature ORDER BY summary_count DESC",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "conversation_summaries"
+      ],
+      "required_tables_present": true,
+      "normalized_exact_match": true
+    },
+    {
+      "example_id": "t2sql_v1_010_3",
+      "latency_ms": 655,
+      "instruction": "Нужен read-only SQL для аналитики: Найди summaries, которые давно не обновлялись.",
+      "expected_sql": "SELECT session_id, message_count_at_update, updated_at FROM conversation_summaries ORDER BY updated_at ASC LIMIT 20",
+      "response": "SELECT session_id, message_count_at_update, updated_at FROM conversation_summaries ORDER BY updated_at ASC LIMIT 20",
+      "extracted_sql": "SELECT session_id, message_count_at_update, updated_at FROM conversation_summaries ORDER BY updated_at ASC LIMIT 20",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "conversation_summaries"
+      ],
+      "required_tables_present": true,
+      "normalized_exact_match": true
+    },
+    {
+      "example_id": "t2sql_v1_012_2",
+      "latency_ms": 892,
+      "instruction": "Сформируй PostgreSQL SELECT: Разверни features из RAG request logs и посчитай количество requests по feature.",
+      "expected_sql": "SELECT feature, COUNT(*) AS request_count FROM rag_request_logs r CROSS JOIN LATERAL jsonb_array_elements_text(r.features) AS feature GROUP BY feature ORDER BY request_count DESC",
+      "response": "SELECT feature, COUNT(*) AS request_count FROM rag_request_logs r CROSS JOIN LATERAL jsonb_array_elements_text(r.features) AS feature GROUP BY feature ORDER BY request_count DESC",
+      "extracted_sql": "SELECT feature, COUNT(*) AS request_count FROM rag_request_logs r CROSS JOIN LATERAL jsonb_array_elements_text(r.features) AS feature GROUP BY feature ORDER BY request_count DESC",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_request_logs"
+      ],
+      "required_tables_present": true,
+      "normalized_exact_match": true
+    },
+    {
+      "example_id": "t2sql_v1_014_1",
+      "latency_ms": 1331,
+      "instruction": "Покажи последние RAG requests вместе с количеством source logs.",
+      "expected_sql": "SELECT r.id, r.created_at, r.model, COUNT(s.id) AS source_count FROM rag_request_logs r LEFT JOIN rag_source_logs s ON s.request_log_id = r.id GROUP BY r.id, r.created_at, r.model ORDER BY r.created_at DESC LIMIT 20",
+      "response": "SELECT r.id, r.created_at, r.model, COUNT(s.id) AS source_count FROM rag_request_logs r LEFT JOIN rag_source_logs s ON s.request_log_id = r.id GROUP BY r.id, r.created_at, r.model ORDER BY r.created_at DESC LIMIT 20",
+      "extracted_sql": "SELECT r.id, r.created_at, r.model, COUNT(s.id) AS source_count FROM rag_request_logs r LEFT JOIN rag_source_logs s ON s.request_log_id = r.id GROUP BY r.id, r.created_at, r.model ORDER BY r.created_at DESC LIMIT 20",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_request_logs",
+        "rag_source_logs"
+      ],
+      "required_tables_present": true,
+      "normalized_exact_match": true
+    },
+    {
+      "example_id": "t2sql_v1_015_3",
+      "latency_ms": 756,
+      "instruction": "Нужен read-only SQL для аналитики: Покажи самые частые titles среди RAG sources.",
+      "expected_sql": "SELECT title, COUNT(*) AS usage_count FROM rag_source_logs WHERE title IS NOT NULL GROUP BY title ORDER BY usage_count DESC LIMIT 10",
+      "response": "SELECT title, COUNT(*) AS usage_count FROM rag_source_logs WHERE title IS NOT NULL GROUP BY title ORDER BY usage_count DESC LIMIT 10",
+      "extracted_sql": "SELECT title, COUNT(*) AS usage_count FROM rag_source_logs WHERE title IS NOT NULL GROUP BY title ORDER BY usage_count DESC LIMIT 10",
+      "validation_valid": true,
+      "validation_error": null,
+      "tables": [
+        "rag_source_logs"
+      ],
+      "required_tables_present": true,
+      "normalized_exact_match": true
+    }
+  ]
+}

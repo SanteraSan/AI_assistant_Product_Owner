@@ -1,0 +1,24 @@
+{
+  "model_name": "Qwen/Qwen2.5-Coder-7B-Instruct",
+  "adapter_dir": "models/text_to_sql_lora/qwen2_5_coder_7b_v1_steps100",
+  "max_steps": 100,
+  "max_length": 768,
+  "lora_r": 8,
+  "lora_alpha": 16,
+  "train_examples": 30,
+  "validation_examples": 9,
+  "train_metrics": {
+    "train_runtime": 228.8522,
+    "train_samples_per_second": 1.748,
+    "train_steps_per_second": 0.437,
+    "train_loss": 0.15471258264034987,
+    "epoch": 12.533333333333333
+  },
+  "memory_peak": {
+    "torch_allocated_mb": 7665,
+    "torch_reserved_mb": 10174,
+    "torch_max_allocated_mb": 10052,
+    "torch_max_reserved_mb": 10174,
+    "nvidia_smi_memory_used_mb": 11138
+  }
+}

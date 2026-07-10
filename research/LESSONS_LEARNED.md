@@ -3075,3 +3075,50 @@ Training attempts:
 - 5-step adapter не является финальной моделью, но уже проходит safety/required-table checks на test split;
 - exact-match слишком строгий как единственная метрика, но полезен как regression gate;
 - следующий качественный шаг: longer corrected training run, semantic checks и dataset V2 с большим количеством paraphrases, joins и JSONB examples.
+
+## 2026-07-10: M7 LoRA 100-Step Run And VRAM Telemetry
+
+Контекст:
+
+- после smoke adapter нужно проверить, может ли LoRA реально выучить V1 Text-to-SQL patterns;
+- отдельно нужно понять фактическое потребление VRAM, потому что model file size в Ollama не равен training memory.
+
+Что сделано:
+
+- добавлен `scripts/lora_memory.py`;
+- training script теперь пишет `memory_profile.json` и `memory_peak` в `training_summary.json`;
+- evaluation script теперь пишет sidecar `*.memory.json` и `memory_peak` в eval output;
+- выполнен corrected 100-step QLoRA run на `Qwen/Qwen2.5-Coder-7B-Instruct`;
+- добавлен report `research/TEXT_TO_SQL_LORA_STEPS100_2026_07_10.md`;
+- добавлен compact summary `research/text_to_sql_lora_steps100_training_summary.json`.
+
+Почему OOM был реалистичным:
+
+- Ollama artifact `4.7 GB` отражает quantized inference weight file;
+- training дополнительно держит activations, gradients, optimizer state, CUDA workspace и PyTorch reserved memory;
+- в нашем 100-step run base model после load занимала около `10.5 GB` по `nvidia-smi`;
+- training peak был около `11.1 GB`;
+- eval peak был около `6.65 GB`.
+
+Training result:
+
+- steps: `100`;
+- max_length: `768`;
+- lora_r/lora_alpha: `8/16`;
+- train runtime: `228.8522s`;
+- train loss: `0.1547`;
+- epoch: `12.5333`;
+- training peak by `nvidia-smi`: `11138 MB`.
+
+Evaluation result:
+
+- base model with `max_length=768`: valid SQL `9/9`, required tables `9/9`, exact match `0/9`, avg latency `758ms`;
+- 100-step LoRA adapter: valid SQL `9/9`, required tables `9/9`, exact match `9/9`, avg latency `896ms`;
+- adapter eval peak by `nvidia-smi`: `6650 MB`.
+
+Вывод:
+
+- LoRA pipeline now works end-to-end: train, save adapter, load adapter, evaluate, measure VRAM;
+- 100-step adapter strongly learns V1 patterns;
+- quality result must be treated carefully because V1 is small and test examples are not yet a hard unseen-intent benchmark;
+- next dataset should use intent-level split and harder semantic checks before calling model quality strong.

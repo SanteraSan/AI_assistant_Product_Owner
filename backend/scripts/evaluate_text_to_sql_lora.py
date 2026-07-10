@@ -15,10 +15,14 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = PROJECT_ROOT / "backend"
+SCRIPT_DIR = Path(__file__).resolve().parent
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
 from app.services.sql_validator import extract_sql_from_response, validate_read_only_sql  # noqa: E402
+from lora_memory import capture_vram, summarize_peak, write_memory_log  # noqa: E402
 
 
 DEFAULT_DATA_PATH = PROJECT_ROOT / "data/text_to_sql/v1/test.jsonl"
@@ -49,6 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT_PATH))
     parser.add_argument("--max-length", type=int, default=512)
     parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--memory-log", default=None)
     parser.add_argument("--base-only", action="store_true")
     parser.add_argument("--no-4bit", action="store_true")
     return parser.parse_args()
@@ -195,6 +200,14 @@ def summarize(results: list[LoraEvalResult]) -> dict[str, Any]:
 def main() -> None:
     args = parse_args()
     adapter_dir = Path(args.adapter_dir)
+    output_path = Path(args.output)
+    memory_log_path = (
+        Path(args.memory_log)
+        if args.memory_log
+        else output_path.with_suffix(".memory.json")
+    )
+    memory_samples: list[dict[str, Any]] = [capture_vram("start")]
+    write_memory_log(memory_log_path, memory_samples)
     examples = read_jsonl(Path(args.data_path))
     allowed_tables = {
         "chat_messages",
@@ -213,6 +226,8 @@ def main() -> None:
         use_4bit=not args.no_4bit,
         base_only=args.base_only,
     )
+    memory_samples.append(capture_vram("after_model_load"))
+    write_memory_log(memory_log_path, memory_samples)
 
     results: list[LoraEvalResult] = []
     for example in examples:
@@ -230,6 +245,8 @@ def main() -> None:
             allowed_tables=allowed_tables,
         )
         results.append(result)
+        memory_samples.append(capture_vram(f"after_example_{result.example_id}"))
+        write_memory_log(memory_log_path, memory_samples)
         print(
             "ok "
             f"example={result.example_id} "
@@ -245,9 +262,10 @@ def main() -> None:
         "base_only": args.base_only,
         "data_path": str(args.data_path),
         "summary": summarize(results),
+        "memory_log": str(memory_log_path),
+        "memory_peak": summarize_peak(memory_samples),
         "results": [asdict(result) for result in results],
     }
-    output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),

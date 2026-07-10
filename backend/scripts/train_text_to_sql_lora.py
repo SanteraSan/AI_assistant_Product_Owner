@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -13,11 +14,18 @@ from transformers import (
     AutoTokenizer,
     BitsAndBytesConfig,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
 )
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from lora_memory import capture_vram, summarize_peak, write_memory_log  # noqa: E402
+
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data/text_to_sql/v1"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "models/text_to_sql_lora/qwen2_5_coder_7b_v1"
 
@@ -39,6 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
+    parser.add_argument("--memory-log", default=None)
     parser.add_argument("--no-eval", action="store_true")
     parser.add_argument("--no-4bit", action="store_true")
     return parser.parse_args()
@@ -151,10 +160,25 @@ def load_model(
     return get_peft_model(model, lora_config)
 
 
+class MemoryLoggingCallback(TrainerCallback):
+    def __init__(self, samples: list[dict[str, Any]], memory_log_path: Path) -> None:
+        self.samples = samples
+        self.memory_log_path = memory_log_path
+
+    def on_step_end(self, args, state, control, **kwargs):  # noqa: ANN001
+        self.samples.append(capture_vram(f"train_step_{state.global_step}"))
+        write_memory_log(self.memory_log_path, self.samples)
+
+
 def main() -> None:
     args = parse_args()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    memory_log_path = (
+        Path(args.memory_log) if args.memory_log else output_dir / "memory_profile.json"
+    )
+    memory_samples: list[dict[str, Any]] = [capture_vram("start")]
+    write_memory_log(memory_log_path, memory_samples)
 
     train_rows = read_jsonl(Path(args.data_dir) / "train.jsonl")
     validation_rows = read_jsonl(Path(args.data_dir) / "validation.jsonl")
@@ -187,6 +211,8 @@ def main() -> None:
         lora_dropout=args.lora_dropout,
     )
     model.print_trainable_parameters()
+    memory_samples.append(capture_vram("after_model_load"))
+    write_memory_log(memory_log_path, memory_samples)
 
     training_args = TrainingArguments(
         output_dir=str(output_dir),
@@ -210,10 +236,14 @@ def main() -> None:
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         data_collator=data_collator(tokenizer),
+        callbacks=[MemoryLoggingCallback(memory_samples, memory_log_path)],
     )
     train_result = trainer.train()
+    memory_samples.append(capture_vram("after_train"))
     trainer.save_model(str(output_dir))
     tokenizer.save_pretrained(str(output_dir))
+    memory_samples.append(capture_vram("after_save"))
+    write_memory_log(memory_log_path, memory_samples)
 
     metrics = {
         "model_name": args.model_name,
@@ -221,6 +251,8 @@ def main() -> None:
         "train_examples": len(train_rows),
         "validation_examples": len(validation_rows),
         "train_metrics": train_result.metrics,
+        "memory_log": str(memory_log_path),
+        "memory_peak": summarize_peak(memory_samples),
     }
     (output_dir / "training_summary.json").write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2),
