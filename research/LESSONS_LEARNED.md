@@ -2896,3 +2896,17 @@ Full project regression:
 - backend получил первый рабочий слой load protection для expensive LLM endpoints;
 - rate limiting уже Redis-backed, а Ollama concurrency guard пока process-local, что достаточно для single-process local backend;
 - future hardening для production scale: distributed semaphore/queue, worker pool, metrics endpoint и более точные per-user/per-tenant policies.
+
+Follow-up compact regression:
+
+- run id: `d1d86492-d010-48bb-9ba6-f1e527780083`;
+- scenarios: `metric_intent`, `no_answer_groundedness`, `follow_up_continuation`, `bucket_no_leak_negative`, `pdf_text_ingestion`, `xlsx_row_image_anchor_digest`;
+- model: `qwen3.5:9b`;
+- result: `6/6`;
+- technical errors: `0`;
+- marker failures: `0`.
+
+Вывод regression:
+
+- Alembic/config/health/request-id/Redis/Ollama hardening не сломали ключевой API RAG path;
+- можно переходить к M7 Text-to-SQL baseline.
