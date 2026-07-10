@@ -10,6 +10,7 @@ from typing import Any
 
 import torch
 from peft import PeftModel
+from sqlglot import exp, parse_one
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 
@@ -44,6 +45,9 @@ class LoraEvalResult:
     tables: list[str]
     required_tables_present: bool
     required_terms_present: bool
+    expected_projection: list[str]
+    generated_projection: list[str]
+    projection_exact_match: bool | None
     normalized_exact_match: bool
 
 
@@ -165,9 +169,14 @@ def evaluate_example(
     validation = validate_read_only_sql(extracted_sql, allowed_tables=allowed_tables)
     required_tables = set(example.get("metadata", {}).get("required_tables", []))
     required_terms = tuple(example.get("metadata", {}).get("required_terms", []))
+    expected_projection = list(example.get("metadata", {}).get("required_projection", []))
     expected_normalized = normalize(example["output"], allowed_tables)
     generated_normalized = validation.normalized_sql if validation.valid else None
-    normalized_sql_for_checks = (generated_normalized or extracted_sql).lower()
+    sql_texts_for_term_checks = (
+        extracted_sql.lower(),
+        (generated_normalized or "").lower(),
+    )
+    generated_projection = extract_projection(generated_normalized or extracted_sql)
 
     return LoraEvalResult(
         example_id=example["id"],
@@ -182,7 +191,16 @@ def evaluate_example(
         tables=validation.tables,
         required_tables_present=required_tables.issubset(set(validation.tables)),
         required_terms_present=all(
-            term.lower() in normalized_sql_for_checks for term in required_terms
+            any(term.lower() in sql_text for sql_text in sql_texts_for_term_checks)
+            for term in required_terms
+        ),
+        expected_projection=expected_projection,
+        generated_projection=generated_projection,
+        projection_exact_match=(
+            None
+            if not expected_projection
+            else [item.lower() for item in generated_projection]
+            == [item.lower() for item in expected_projection]
         ),
         normalized_exact_match=(
             generated_normalized is not None
@@ -194,16 +212,47 @@ def evaluate_example(
 
 def summarize(results: list[LoraEvalResult]) -> dict[str, Any]:
     total = len(results)
+    projection_results = [
+        result for result in results if result.projection_exact_match is not None
+    ]
     return {
         "total": total,
         "valid_sql": sum(result.validation_valid for result in results),
         "required_tables_present": sum(result.required_tables_present for result in results),
         "required_terms_present": sum(result.required_terms_present for result in results),
+        "projection_examples": len(projection_results),
+        "projection_exact_match": sum(
+            result.projection_exact_match is True for result in projection_results
+        ),
         "normalized_exact_match": sum(result.normalized_exact_match for result in results),
         "avg_latency_ms": round(sum(result.latency_ms for result in results) / total)
         if total
         else 0,
     }
+
+
+def extract_projection(sql: str) -> list[str]:
+    try:
+        parsed = parse_one(sql, read="postgres")
+    except Exception:
+        return []
+    if not isinstance(parsed, exp.Select):
+        return []
+
+    projection: list[str] = []
+    for expression in parsed.expressions:
+        alias = expression.alias
+        if alias:
+            projection.append(alias)
+            continue
+        if isinstance(expression, exp.Column):
+            projection.append(expression.name)
+            continue
+        if isinstance(expression, exp.Star):
+            projection.append("*")
+            continue
+        projection.append(expression.sql(dialect="postgres").lower())
+    return projection
 
 
 def summarize_by_intent(results: list[LoraEvalResult]) -> dict[str, Any]:
@@ -272,6 +321,7 @@ def main() -> None:
             f"valid={result.validation_valid} "
             f"tables={result.required_tables_present} "
             f"terms={result.required_terms_present} "
+            f"projection={result.projection_exact_match} "
             f"exact={result.normalized_exact_match} "
             f"latency_ms={result.latency_ms}"
         )

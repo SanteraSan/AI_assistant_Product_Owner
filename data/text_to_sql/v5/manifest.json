@@ -1,0 +1,37 @@
+{
+  "dataset_version": "text_to_sql_v5",
+  "total_examples": 220,
+  "total_intents": 44,
+  "splits": {
+    "train": 160,
+    "validation": 30,
+    "test": 30
+  },
+  "intent_splits": {
+    "train": 32,
+    "validation": 6,
+    "test": 6
+  },
+  "split_policy": "intent_level_split_with_projection_support",
+  "base_dataset": "text_to_sql_v4",
+  "support_focus": [
+    "projection exactness",
+    "model vs id projection contrast",
+    "latest evaluation error reports"
+  ],
+  "allowed_tables": [
+    "chat_messages",
+    "chat_sessions",
+    "conversation_summaries",
+    "evaluation_results",
+    "evaluation_runs",
+    "rag_request_logs",
+    "rag_source_logs"
+  ],
+  "format": {
+    "instruction": "natural language analytics request",
+    "input": "PostgreSQL schema context",
+    "output": "single read-only PostgreSQL SELECT statement",
+    "metadata": "source, intent_id, required_tables, required_terms, required_projection, tags, split"
+  }
+}

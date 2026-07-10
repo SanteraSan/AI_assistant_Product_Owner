@@ -3170,3 +3170,52 @@ V4 LoRA:
 - current best held-out score is `30/30` valid SQL, `30/30` required tables, `25/30` exact match;
 - further blind training is not the right next move;
 - next improvement should be V5 dataset/evaluator: projection contrast examples, projection coverage metrics, less brittle `IS NOT NULL` required-term check, and optional adapter continuation training.
+
+## 2026-07-10: M7 LoRA V5 Projection Metrics
+
+Контекст:
+
+- V4 exact match остановился на `25/30`;
+- оставшаяся ошибка была не в таблицах и не в safety, а в projection: модель путала `id` и `model`/пропускала `model`;
+- нужна отдельная метрика на точный набор output columns, иначе такой дефект теряется среди generic SQL checks.
+
+Что сделано:
+
+- добавлен `scripts/generate_text_to_sql_dataset_v5.py`;
+- V5 добавляет `required_projection` в metadata каждого example;
+- evaluator теперь извлекает SELECT projection через `sqlglot` и пишет `expected_projection`, `generated_projection`, `projection_exact_match`;
+- `required_terms` check исправлен: проверяет raw SQL и normalized SQL, чтобы `IS NOT NULL` не давал false negative после AST-normalization;
+- создан report `research/TEXT_TO_SQL_DATASET_V5.md`.
+
+Важная находка:
+
+- первая V5 попытка показала, что сам test intent был недостаточно честным: natural-language request не просил `model`, но expected SQL требовал `model`;
+- V5 был скорректирован: held-out latest-error request теперь явно перечисляет нужные columns;
+- train support при этом не содержит точной копии held-out test SQL, а учит projection contrast через близкие, но отличающиеся examples.
+
+Baseline на исправленном V5:
+
+- base model: valid SQL `29/30`;
+- required tables `29/30`;
+- projection exact `17/30`;
+- normalized exact `0/30`;
+- avg latency `543ms`;
+- eval VRAM peak by `nvidia-smi`: `6528 MB`.
+
+V5 LoRA:
+
+- adapter: `models/text_to_sql_lora/qwen2_5_coder_7b_v5_projection_steps400`;
+- steps: `400`;
+- train examples: `160`;
+- validation examples: `30`;
+- train loss: `0.0483`;
+- training VRAM peak by `nvidia-smi`: `11541 MB`;
+- eval result: valid SQL `30/30`, required tables `30/30`, required terms `30/30`, projection exact `30/30`, normalized exact `30/30`;
+- eval avg latency: `809ms`;
+- eval VRAM peak by `nvidia-smi`: `6650 MB`.
+
+Вывод:
+
+- projection metric was necessary: it caught the exact failure class from V4;
+- making required columns explicit in the NL instruction is part of dataset quality, not just model quality;
+- V5 is the current best local Text-to-SQL adapter result and is strong enough to move toward Analytics UI integration next.

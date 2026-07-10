@@ -1,0 +1,39 @@
+{
+  "model_name": "Qwen/Qwen2.5-Coder-7B-Instruct",
+  "adapter": "models/text_to_sql_lora/qwen2_5_coder_7b_v5_projection_steps400",
+  "dataset": "data/text_to_sql/v5",
+  "max_steps": 400,
+  "train_examples": 160,
+  "validation_examples": 30,
+  "train_metrics": {
+    "train_runtime": 970.3921,
+    "train_samples_per_second": 1.649,
+    "train_steps_per_second": 0.412,
+    "train_loss": 0.04827360211173073,
+    "epoch": 10.0
+  },
+  "memory_peak": {
+    "torch_allocated_mb": 7665,
+    "torch_reserved_mb": 10534,
+    "torch_max_allocated_mb": 10069,
+    "torch_max_reserved_mb": 10534,
+    "nvidia_smi_memory_used_mb": 11541
+  },
+  "eval_summary": {
+    "total": 30,
+    "valid_sql": 30,
+    "required_tables_present": 30,
+    "required_terms_present": 30,
+    "projection_examples": 30,
+    "projection_exact_match": 30,
+    "normalized_exact_match": 30,
+    "avg_latency_ms": 809
+  },
+  "eval_memory_peak": {
+    "torch_allocated_mb": 5399,
+    "torch_reserved_mb": 5698,
+    "torch_max_allocated_mb": 5614,
+    "torch_max_reserved_mb": 5698,
+    "nvidia_smi_memory_used_mb": 6650
+  }
+}
