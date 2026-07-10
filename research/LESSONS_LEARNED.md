@@ -2736,3 +2736,34 @@ Full project regression:
 
 - новый порядок лучше соответствует текущей зрелости проекта: сначала укрепить backend, затем добавить измеримый LoRA fine-tuning кейс, после этого сделать аналитический UI/reporting layer;
 - M5 остаётся закрытым стабильным фундаментом, а дальнейшая работа строится вокруг PostgreSQL analytics, safe SQL generation и воспроизводимых benchmarks.
+
+## 2026-07-10: Backend Hardening Roadmap
+
+Контекст:
+
+- перед M7/M8 нужен отдельный production-readiness проход по backend;
+- hardening должен быть не “большим рефакторингом”, а последовательностью небольших проверяемых stages;
+- CI/CD пока не входит в scope, фокус остаётся на локально воспроизводимых командах, tests, smoke checks и regression.
+
+Что сделано:
+
+- добавлен `research/BACKEND_HARDENING_ROADMAP.md`;
+- roadmap привязан к текущему baseline: FastAPI, async SQLAlchemy, Qdrant, Ollama, document ingestion и evaluation history;
+- 11 направлений разложены на implementation stages:
+  - Alembic migrations;
+  - DB constraints/indexes;
+  - config validation;
+  - structured logging/request id;
+  - error handling policy;
+  - request validation/limits;
+  - Auth/RBAC foundation;
+  - ingestion idempotency/status model;
+  - background jobs;
+  - health/readiness diagnostics;
+  - Redis-backed queueing, rate limiting и Ollama concurrency control.
+
+Вывод:
+
+- первым implementation шагом должен быть Alembic, потому что все дальнейшие DB changes лучше делать через migration discipline;
+- Redis/Ollama load protection остаётся обязательным hardening stage, но его безопаснее делать после config, errors, limits и readiness checks;
+- перед M7 Text-to-SQL нужен compact backend regression, чтобы подтвердить, что hardening не ослабил уже стабилизированный M5 behavior.
