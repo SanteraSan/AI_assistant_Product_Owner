@@ -2955,3 +2955,40 @@ Baseline run:
 - для следующего M7 этапа сохраняем матрицу `qwen3.5:9b`, `gemma4:12b`, `qwen2.5-coder:7b`;
 - LoRA/QLoRA нужно сравнивать с этим baseline, а не считать улучшение заранее;
 - следующий шаг: подготовить versioned Text-to-SQL dataset с train/validation/test split.
+
+## 2026-07-10: M7 Text-to-SQL Dataset V1
+
+Контекст:
+
+- после prompt-only baseline нужен versioned dataset для LoRA/QLoRA training spike;
+- dataset должен быть валидируемым и воспроизводимым, а не вручную собранным набором случайных строк;
+- первый dataset может быть небольшим, если он покрывает разные SQL patterns и имеет clear split.
+
+Что сделано:
+
+- добавлен generator `scripts/generate_text_to_sql_dataset.py`;
+- generator строит PostgreSQL schema context из SQLAlchemy metadata с PostgreSQL dialect types;
+- generated dataset сохранён в `data/text_to_sql/v1`;
+- добавлены `train.jsonl`, `validation.jsonl`, `test.jsonl`, `manifest.json`;
+- добавлен report `research/TEXT_TO_SQL_DATASET_V1.md`;
+- каждый `output` SQL проходит `validate_read_only_sql`.
+
+Dataset shape:
+
+- total examples: `48`;
+- train: `30`;
+- validation: `9`;
+- test: `9`;
+- covered patterns: joins, group by, filtered aggregates, JSONB, lateral joins, order/limit, latency analytics, RAG source analytics, chat/session analytics.
+
+Проверки:
+
+- generation smoke: `48` examples, SQL validation errors `0`;
+- script compile: passed;
+- full backend tests: `65 passed`;
+- lints по изменённым scripts: ошибок нет.
+
+Вывод:
+
+- dataset V1 достаточно хорош для первого LoRA training spike;
+- V1 не нужно считать финальным датасетом: после первой оценки LoRA стоит расширить V2 более сложными joins, safety-negative examples и большим числом paraphrases.

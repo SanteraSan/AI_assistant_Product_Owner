@@ -9,6 +9,7 @@ from time import perf_counter
 from typing import Any
 
 import asyncpg
+from sqlalchemy.dialects import postgresql
 
 from app.core.config import get_settings
 from app.db.base import Base
@@ -98,10 +99,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_schema_context() -> str:
+    dialect = postgresql.dialect()
     lines = ["PostgreSQL schema:"]
     for table in sorted(Base.metadata.sorted_tables, key=lambda item: item.name):
         columns = ", ".join(
-            f"{column.name} {column.type}" for column in table.columns
+            f"{column.name} {column.type.compile(dialect=dialect)}"
+            for column in table.columns
         )
         lines.append(f"- {table.name}({columns})")
     return "\n".join(lines)

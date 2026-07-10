@@ -1,0 +1,24 @@
+{
+  "dataset_version": "text_to_sql_v1",
+  "total_examples": 48,
+  "splits": {
+    "train": 30,
+    "validation": 9,
+    "test": 9
+  },
+  "allowed_tables": [
+    "chat_messages",
+    "chat_sessions",
+    "conversation_summaries",
+    "evaluation_results",
+    "evaluation_runs",
+    "rag_request_logs",
+    "rag_source_logs"
+  ],
+  "format": {
+    "instruction": "natural language analytics request",
+    "input": "PostgreSQL schema context",
+    "output": "single read-only PostgreSQL SELECT statement",
+    "metadata": "source, required_tables, tags, split"
+  }
+}
