@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     max_rag_top_k: int = 20
     max_filter_values: int = 50
     max_filter_value_chars: int = 512
+    redis_enabled: bool = True
+    redis_url: str = "redis://localhost:6379/0"
+    rate_limit_enabled: bool = True
+    rate_limit_requests: int = 60
+    rate_limit_window_seconds: int = 60
+    rate_limit_fail_open: bool = True
+    ollama_max_concurrency: int = 2
+    ollama_queue_timeout_seconds: float = 5.0
 
     @field_validator("rag_score_threshold", mode="before")
     @classmethod
@@ -59,6 +67,10 @@ class Settings(BaseSettings):
         "max_rag_top_k",
         "max_filter_values",
         "max_filter_value_chars",
+        "rate_limit_requests",
+        "rate_limit_window_seconds",
+        "ollama_max_concurrency",
+        "ollama_queue_timeout_seconds",
     )
     @classmethod
     def _positive_number(cls, value: int | float) -> int | float:
@@ -76,6 +88,14 @@ class Settings(BaseSettings):
         if not normalized.startswith(("http://", "https://")):
             raise ValueError("must start with http:// or https://")
         return normalized.rstrip("/")
+
+    @field_validator("redis_url")
+    @classmethod
+    def _redis_url(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized.startswith(("redis://", "rediss://")):
+            raise ValueError("must start with redis:// or rediss://")
+        return normalized
 
     @field_validator(
         "default_model",

@@ -15,6 +15,11 @@ def test_settings_rejects_invalid_urls() -> None:
         Settings(ollama_base_url="localhost:11434")
 
 
+def test_settings_rejects_invalid_redis_url() -> None:
+    with pytest.raises(ValidationError):
+        Settings(redis_url="localhost:6379")
+
+
 def test_settings_rejects_rag_top_k_above_configured_limit() -> None:
     with pytest.raises(ValidationError):
         Settings(rag_top_k=21, max_rag_top_k=20)

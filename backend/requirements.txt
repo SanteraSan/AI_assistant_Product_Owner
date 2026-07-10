@@ -14,4 +14,6 @@ pyyaml
 sqlalchemy
 asyncpg
 alembic
+redis
+hiredis
 pytest

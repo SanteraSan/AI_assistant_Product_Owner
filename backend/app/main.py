@@ -24,18 +24,37 @@ from app.services.conversation_memory_service import ConversationMemoryService
 from app.services.conversation_summary_service import ConversationSummaryService
 from app.services.feature_extractor import FeatureExtractor
 from app.services.ollama_client import OllamaClient
+from app.services.ollama_load_guard import OllamaLoadGuard, OllamaOverloadedError
 from app.services.query_router import QueryRouter
+from app.services.rate_limiter import RedisRateLimiter
 from app.services.rag_log_service import RagLogService
 from app.services.rag_service import RagService
+from app.services.redis_service import RedisService
 
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 db_engine = create_engine(settings.postgres_dsn)
 db_session_factory = create_session_factory(db_engine)
+redis_service = RedisService(settings.redis_url) if settings.redis_enabled else None
+rate_limiter = (
+    RedisRateLimiter(
+        redis_service=redis_service,
+        limit=settings.rate_limit_requests,
+        window_seconds=settings.rate_limit_window_seconds,
+        fail_open=settings.rate_limit_fail_open,
+    )
+    if redis_service is not None and settings.rate_limit_enabled
+    else None
+)
+ollama_load_guard = OllamaLoadGuard(
+    max_concurrency=settings.ollama_max_concurrency,
+    timeout_seconds=settings.ollama_queue_timeout_seconds,
+)
 ollama_client = OllamaClient(
     base_url=settings.ollama_base_url,
     timeout_seconds=settings.request_timeout_seconds,
+    load_guard=ollama_load_guard,
 )
 qdrant_store = QdrantStore(
     url=settings.qdrant_url,
@@ -92,6 +111,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await ollama_client.aclose()
+        if redis_service is not None:
+            await redis_service.aclose()
         await db_engine.dispose()
 
 
@@ -137,6 +158,25 @@ async def validation_exception_handler(
             "detail": exc.errors(),
             "error_type": "validation_error",
             "request_id": request_id,
+        },
+        headers={"X-Request-ID": request_id},
+    )
+
+
+@app.exception_handler(OllamaOverloadedError)
+async def ollama_overloaded_exception_handler(
+    request: Request,
+    exc: OllamaOverloadedError,
+) -> JSONResponse:
+    request_id = _request_id_from_request(request)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": str(exc),
+            "error_type": "ollama_overloaded",
+            "request_id": request_id,
+            "model": exc.model,
+            "operation": exc.operation,
         },
         headers={"X-Request-ID": request_id},
     )
@@ -189,15 +229,16 @@ async def health_ready() -> dict[str, object]:
 
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest) -> ChatResponse:
-    _enforce_chat_request_limits(request)
-    model = request.model or settings.default_model
+async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
+    _enforce_chat_request_limits(payload)
+    await _enforce_rate_limit(request=request, endpoint="chat")
+    model = payload.model or settings.default_model
     started_at = perf_counter()
 
     try:
         result = await ollama_client.generate(
             model=model,
-            prompt=request.message,
+            prompt=payload.message,
             think=False,
         )
     except httpx.ConnectError as exc:
@@ -221,8 +262,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
         latency_ms=latency_ms,
     )
     chat_exchange = await _try_save_chat_exchange(
-        session_id=request.session_id,
-        user_message=request.message,
+        session_id=payload.session_id,
+        user_message=payload.message,
         response=response,
         metadata={"endpoint": "/chat"},
     )
@@ -231,8 +272,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 
 @app.post("/rag/chat", response_model=RagChatResponse)
-async def rag_chat(request: RagChatRequest) -> RagChatResponse:
-    _enforce_rag_request_limits(request)
+async def rag_chat(request: Request, payload: RagChatRequest) -> RagChatResponse:
+    _enforce_rag_request_limits(payload)
+    await _enforce_rate_limit(request=request, endpoint="rag_chat")
     if not _qdrant_collection_exists():
         raise HTTPException(
             status_code=503,
@@ -244,32 +286,32 @@ async def rag_chat(request: RagChatRequest) -> RagChatResponse:
 
     try:
         conversation_context = await _build_conversation_context(
-            session_id=request.session_id,
-            message=request.message,
+            session_id=payload.session_id,
+            message=payload.message,
         )
         response = await rag_service.answer(
-            message=request.message,
-            model=request.model,
+            message=payload.message,
+            model=payload.model,
             retrieval_query=str(
-                conversation_context.get("retrieval_query") or request.message
+                conversation_context.get("retrieval_query") or payload.message
             ),
-            top_k=request.top_k,
-            score_threshold=request.score_threshold,
-            tenant_id=request.tenant_id or settings.default_tenant_id,
-            bucket_ids=request.bucket_ids,
-            features=request.features,
-            source_types=request.source_types,
-            document_ids=request.document_ids,
-            source_paths=request.source_paths,
-            max_sources_per_title=request.max_sources_per_title,
-            max_sources_per_source_type=request.max_sources_per_source_type,
-            max_sources_per_source_path=request.max_sources_per_source_path,
+            top_k=payload.top_k,
+            score_threshold=payload.score_threshold,
+            tenant_id=payload.tenant_id or settings.default_tenant_id,
+            bucket_ids=payload.bucket_ids,
+            features=payload.features,
+            source_types=payload.source_types,
+            document_ids=payload.document_ids,
+            source_paths=payload.source_paths,
+            max_sources_per_title=payload.max_sources_per_title,
+            max_sources_per_source_type=payload.max_sources_per_source_type,
+            max_sources_per_source_path=payload.max_sources_per_source_path,
             memory_context=_as_dict(conversation_context.get("prompt_memory")),
         )
         response.conversation_context = conversation_context
         chat_exchange = await _try_save_chat_exchange(
-            session_id=request.session_id,
-            user_message=request.message,
+            session_id=payload.session_id,
+            user_message=payload.message,
             response=response,
             metadata={
                 "endpoint": "/rag/chat",
@@ -283,7 +325,7 @@ async def rag_chat(request: RagChatRequest) -> RagChatResponse:
         _attach_chat_exchange(response, chat_exchange)
         try:
             await rag_log_service.log_response(
-                message=request.message,
+                message=payload.message,
                 response=response,
             )
         except Exception:
@@ -327,6 +369,8 @@ async def _readiness_snapshot() -> dict[str, object]:
         "qdrant_collection_exists": _qdrant_collection_exists(),
         "ollama_available": await ollama_client.health(),
     }
+    if settings.redis_enabled and redis_service is not None:
+        dependencies["redis_available"] = await redis_service.health()
     ready = all(dependencies.values())
     return {
         "status": "ready" if ready else "degraded",
@@ -338,15 +382,21 @@ async def _readiness_snapshot() -> dict[str, object]:
             "image_vision_model": settings.image_vision_model,
         },
         "limits": _limits_snapshot(),
+        "redis_enabled": settings.redis_enabled,
+        "rate_limit_enabled": settings.rate_limit_enabled,
     }
 
 
-def _limits_snapshot() -> dict[str, int]:
+def _limits_snapshot() -> dict[str, int | float]:
     return {
         "max_chat_message_chars": settings.max_chat_message_chars,
         "max_rag_top_k": settings.max_rag_top_k,
         "max_filter_values": settings.max_filter_values,
         "max_filter_value_chars": settings.max_filter_value_chars,
+        "rate_limit_requests": settings.rate_limit_requests,
+        "rate_limit_window_seconds": settings.rate_limit_window_seconds,
+        "ollama_max_concurrency": settings.ollama_max_concurrency,
+        "ollama_queue_timeout_seconds": settings.ollama_queue_timeout_seconds,
     }
 
 
@@ -394,6 +444,31 @@ def _enforce_filter_values_limit(*, field_name: str, values: list[str]) -> None:
                 f"{settings.max_filter_value_chars} characters"
             ),
         )
+
+
+async def _enforce_rate_limit(*, request: Request, endpoint: str) -> None:
+    if rate_limiter is None:
+        return
+    decision = await rate_limiter.check(
+        scope=_rate_limit_scope(request=request, endpoint=endpoint),
+    )
+    request.state.rate_limit = decision
+    if decision.allowed:
+        return
+    raise HTTPException(
+        status_code=429,
+        detail={
+            "message": "Rate limit exceeded",
+            "limit": decision.limit,
+            "window_seconds": decision.window_seconds,
+            "reason": decision.reason,
+        },
+    )
+
+
+def _rate_limit_scope(*, request: Request, endpoint: str) -> str:
+    client_host = request.client.host if request.client else "unknown"
+    return f"{endpoint}:{client_host}"
 
 
 async def _build_conversation_context(

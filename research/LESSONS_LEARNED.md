@@ -2859,3 +2859,40 @@ Full project regression:
 
 - backend errors теперь готовы к следующему hardening stage: Redis-backed rate limiting и controlled overload responses;
 - будущие `429/503` от queue/concurrency layer смогут возвращаться в едином формате и связываться с логами по request id.
+
+## 2026-07-10: Backend Hardening H11 Redis And Ollama Load Protection
+
+Контекст:
+
+- локальный Ollama inference является узким местом и не должен получать burst traffic напрямую;
+- цель hardening stage не в том, чтобы одновременно выполнить 1000 LLM generations, а в controlled backpressure: rate limit, concurrency limit, traceable overload response;
+- request id и unified error handling уже подготовлены предыдущим stage.
+
+Что сделано:
+
+- добавлен Redis service в `docker-compose.yml`;
+- добавлены Python dependencies `redis` и `hiredis`;
+- добавлен `RedisService` с health check и atomic `INCR + EXPIRE`;
+- добавлен `RedisRateLimiter` с fixed-window limit и configurable fail-open behavior;
+- `/chat` и `/rag/chat` проверяют rate limit перед expensive path;
+- добавлен `OllamaLoadGuard` с local semaphore и queue timeout;
+- `OllamaClient.generate/embed` теперь проходят через load guard;
+- overload от Ollama guard возвращается как traceable `503` с `error_type=ollama_overloaded`;
+- readiness учитывает Redis, если `REDIS_ENABLED=true`;
+- добавлен `scripts/run_http_burst_smoke.py` для local burst checks;
+- README и `.env.example` обновлены Redis/rate/concurrency командами.
+
+Проверки:
+
+- Redis compose smoke: `docker compose up -d redis`, `redis-cli ping` -> `PONG`;
+- burst script compile: passed;
+- focused load/rate/main tests: `15 passed`;
+- full backend tests: `59 passed`;
+- warnings: existing Qdrant compatibility warning и Starlette TestClient deprecation warning;
+- lints по изменённым Python-файлам: ошибок нет.
+
+Вывод:
+
+- backend получил первый рабочий слой load protection для expensive LLM endpoints;
+- rate limiting уже Redis-backed, а Ollama concurrency guard пока process-local, что достаточно для single-process local backend;
+- future hardening для production scale: distributed semaphore/queue, worker pool, metrics endpoint и более точные per-user/per-tenant policies.

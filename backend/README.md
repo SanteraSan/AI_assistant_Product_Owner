@@ -364,6 +364,40 @@ curl -i http://localhost:8000/health/live -H "X-Request-ID: demo-request-1"
 
 Если header не передан, backend сгенерирует новый request id. Ошибки API возвращают `request_id` в JSON body и `X-Request-ID` в headers, чтобы ответ пользователя можно было связать с backend logs.
 
+Redis используется как coordination layer для rate limiting, а Ollama-вызовы защищены local concurrency guard:
+
+```bash
+cd /home/santera/Projects
+docker compose up -d redis
+docker exec taskflow-redis redis-cli ping
+```
+
+Связанные `.env` настройки:
+
+```bash
+REDIS_ENABLED=true
+REDIS_URL=redis://localhost:6379/0
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_REQUESTS=60
+RATE_LIMIT_WINDOW_SECONDS=60
+RATE_LIMIT_FAIL_OPEN=true
+OLLAMA_MAX_CONCURRENCY=2
+OLLAMA_QUEUE_TIMEOUT_SECONDS=5
+```
+
+Локальный burst smoke:
+
+```bash
+cd /home/santera/Projects
+backend/.venv/bin/python backend/scripts/run_http_burst_smoke.py \
+  --url http://127.0.0.1:8000/chat \
+  --requests 1000 \
+  --concurrency 50 \
+  --model qwen3.5:9b
+```
+
+Цель smoke не в том, чтобы локальная машина одновременно сгенерировала 1000 LLM-ответов, а в том, чтобы backend вернул управляемые `200/429/503` и не уронил FastAPI/Ollama.
+
 Посмотреть последние RAG-запросы:
 
 ```bash

@@ -86,6 +86,8 @@ def test_limits_snapshot_contains_request_limits() -> None:
     assert limits["max_rag_top_k"] > 0
     assert limits["max_filter_values"] > 0
     assert limits["max_filter_value_chars"] > 0
+    assert limits["rate_limit_requests"] > 0
+    assert limits["ollama_max_concurrency"] > 0
 
 
 def test_chat_request_limit_rejects_oversized_message() -> None:

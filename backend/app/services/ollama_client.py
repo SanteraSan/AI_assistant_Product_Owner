@@ -2,11 +2,19 @@ from typing import Any
 
 import httpx
 
+from app.services.ollama_load_guard import OllamaLoadGuard
+
 
 class OllamaClient:
-    def __init__(self, base_url: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout_seconds: float,
+        load_guard: OllamaLoadGuard | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = httpx.Timeout(timeout_seconds)
+        self._load_guard = load_guard
         self._client: httpx.AsyncClient | None = None
 
     async def aclose(self) -> None:
@@ -46,7 +54,11 @@ class OllamaClient:
         if think is not None:
             payload["think"] = think
 
-        response = await self._http_client.post(f"{self._base_url}/api/generate", json=payload)
+        async with self._guarded_slot(model=model, operation="generate"):
+            response = await self._http_client.post(
+                f"{self._base_url}/api/generate",
+                json=payload,
+            )
         response.raise_for_status()
         return response.json()
 
@@ -56,7 +68,11 @@ class OllamaClient:
             "prompt": text,
         }
 
-        response = await self._http_client.post(f"{self._base_url}/api/embeddings", json=payload)
+        async with self._guarded_slot(model=model, operation="embed"):
+            response = await self._http_client.post(
+                f"{self._base_url}/api/embeddings",
+                json=payload,
+            )
         response.raise_for_status()
         data = response.json()
 
@@ -70,3 +86,16 @@ class OllamaClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(timeout=self._timeout)
         return self._client
+
+    def _guarded_slot(self, *, model: str, operation: str):
+        if self._load_guard is None:
+            return _NoopAsyncContext()
+        return self._load_guard.slot(model=model, operation=operation)
+
+
+class _NoopAsyncContext:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
