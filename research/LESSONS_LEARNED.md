@@ -2705,3 +2705,34 @@ Full project regression:
 - подтверждены PDF, Excel, DOCX, image OCR, vision digest, embedded Office images, Excel charts, legacy `.xls`, anchored DOCX/XLSX images, scanned table baseline и `office_media_consistency`;
 - `qwen3.5:9b` остаётся лучшим универсальным кандидатом для следующего этапа, потому что прошёл documents, summary/memory и core сценарии;
 - можно переходить к обсуждению `M5.9 Voice UI Bridge`, оставив long multi-turn user journey отдельным будущим e2e regression layer.
+
+## 2026-07-10: Roadmap Realignment After M5
+
+Контекст:
+
+- после final M5 regression стало понятно, что document/RAG слой достаточно стабилен для перехода к следующему крупному направлению;
+- ближайший фокус смещён с voice/multi-agent experiments на backend hardening, LoRA Text-to-SQL и analytics UI;
+- multi-agent, voice input, multi-collection retrieval и advanced model routing остаются future features.
+
+Решение:
+
+- перед M7/M8 добавить обязательный Backend Hardening Block;
+- M7 определить как `LoRA Text-to-SQL Fine-Tuning`;
+- M8 определить как `Analytics UI, Dashboards And Reports`;
+- fine-tuning делать именно как LoRA/QLoRA прикладной Text-to-SQL кейс, а не как classifier/router baseline;
+- baseline models для M7: `qwen3.5:9b`, `gemma4:12b`, `qwen2.5-coder:7b`, опционально `qwen2.5-coder:14b`;
+- LoRA candidate: Qwen Coder 7B class model;
+- основная метрика M7: не “модель красиво отвечает”, а SQL validity, execution success, schema adherence, read-only safety и latency.
+
+Правила выполнения:
+
+- каждый крупный stage завершается tests/smoke/regression по риску изменения;
+- результаты тестирования фиксируются в журнале;
+- после завершённого stage делается отдельный commit;
+- если coder models показывают слабый baseline, модельная матрица может быть заменена на более сильные локальные модели по фактическим результатам;
+- документация описывает только инженерные цели проекта и не привязывает roadmap к внешним причинам.
+
+Вывод:
+
+- новый порядок лучше соответствует текущей зрелости проекта: сначала укрепить backend, затем добавить измеримый LoRA fine-tuning кейс, после этого сделать аналитический UI/reporting layer;
+- M5 остаётся закрытым стабильным фундаментом, а дальнейшая работа строится вокруг PostgreSQL analytics, safe SQL generation и воспроизводимых benchmarks.

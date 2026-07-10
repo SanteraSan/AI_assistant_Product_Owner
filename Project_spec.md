@@ -557,78 +557,84 @@ Definition of Done:
 - пользователь может переопределить выбор вручную;
 - каждое решение объясняется в metadata.
 
-### M5. Fine-Tune Router Experiment
+### Backend Hardening Block
 
-Цель: быстро пощупать fine-tune и сравнить его с baseline.
-
-Задачи:
-
-- сгенерировать synthetic dataset;
-- разметить complexity и intent;
-- обучить маленький classifier;
-- замерить accuracy и latency;
-- сравнить с rule-based router.
-
-Definition of Done:
-
-- есть обученная модель router;
-- есть отчет по метрикам;
-- понятно, лучше ли fine-tune простого baseline.
-
-### M6. Multi-Collection RAG
-
-Цель: расширить RAG до трех доменов.
+Цель: перед новыми возможностями укрепить backend как production-minded foundation.
 
 Задачи:
 
-- создать `tech_knowledge`;
-- создать `user_feedback`;
-- создать `business_metrics`;
-- добавить parser для каждого типа данных;
-- реализовать multi-collection retrieval.
+- перейти к Alembic migrations для развития схемы БД;
+- добавить DB constraints и индексы для ключевых таблиц;
+- усилить config validation;
+- добавить structured logging и request/correlation id;
+- унифицировать error handling;
+- добавить request validation и limits;
+- заложить Auth/RBAC foundation с deterministic access filtering до prompt;
+- сделать ingestion idempotency и status model;
+- вынести heavy ingestion/OCR/vision/future audio в background jobs;
+- разделить health/readiness diagnostics;
+- добавить Redis-backed queueing, rate limiting и Ollama concurrency control.
 
 Definition of Done:
 
-- ассистент может отвечать по техдокам, отзывам и метрикам;
-- источники разделены по коллекциям;
-- можно видеть вклад каждой коллекции в ответ.
+- каждый hardening sub-step имеет тесты или smoke checks;
+- после существенных backend изменений запускается targeted regression;
+- результаты фиксируются в инженерном журнале.
 
-### M7. React UI
+### M7. LoRA Text-to-SQL Fine-Tuning
 
-Цель: сделать удобную демонстрацию проекта.
+Цель: добавить прикладной fine-tuning слой для аналитических вопросов к PostgreSQL.
 
 Задачи:
 
-- чат-интерфейс;
-- ручной выбор модели;
-- индикатор auto/manual mode;
-- отображение источников;
-- отображение router decision;
-- latency/debug panel.
+- собрать schema context для PostgreSQL;
+- сделать prompt-only Text-to-SQL baseline;
+- сравнить `qwen3.5:9b`, `gemma4:12b`, `qwen2.5-coder:7b` и опционально `qwen2.5-coder:14b`;
+- подготовить dataset формата `instruction/input/output`;
+- покрыть SQL cases: JOIN, GROUP BY, CTE, window functions, JSONB, date filters, top-N, evaluation analytics;
+- обучить LoRA/QLoRA adapter для Qwen Coder 7B class модели;
+- сравнить baseline vs LoRA на holdout benchmark;
+- добавить SQL validator: только read-only `SELECT`, schema adherence, timeout, запрет destructive statements;
+- интегрировать safe Text-to-SQL flow в backend только после validation и regression.
 
 Definition of Done:
 
-- проект можно показать без Postman;
-- пользователь видит, почему выбрана модель;
-- пользователь видит, на каких источниках основан ответ.
+- есть baseline report;
+- есть versioned dataset и train/validation/test split;
+- есть LoRA adapter artifact или documented compatibility finding;
+- есть holdout evaluation: SQL validity, execution success, schema adherence, safety, latency;
+- понятно, где LoRA улучшает baseline, а где нет.
 
-### M8. Research And Benchmarks
+### M8. Analytics UI, Dashboards And Reports
 
-Цель: сделать проект полезным как учебный отчет.
+Цель: сделать аналитический слой демонстрируемым и полезным без curl/Postman.
 
 Задачи:
 
-- сравнить модели по latency и качеству;
-- сравнить router strategies;
-- попробовать CPU pinning;
-- попробовать hybrid search;
-- задокументировать выводы.
+- Streamlit UI для аналитических вопросов;
+- отображать сгенерированный SQL;
+- выполнять только валидированные read-only queries;
+- показывать таблицу результата;
+- строить Plotly charts;
+- экспортировать Excel/PDF reports;
+- показывать debug metadata: model, latency, validator decision, execution status.
 
 Definition of Done:
 
-- README содержит benchmark section;
-- есть выводы, какие решения сработали;
-- есть список дальнейших улучшений.
+- есть end-to-end flow `question -> SQL -> table -> chart/report`;
+- есть smoke scenarios для UI/reporting;
+- результаты и ограничения задокументированы.
+
+### Future Features
+
+Направления, которые остаются в backlog и не блокируют M7/M8:
+
+- voice input / local STT / transcript-to-chat;
+- multi-collection Qdrant retrieval;
+- advanced model routing/provider strategy;
+- multi-agent layer.
+
+Правило: future features добавляются только после observability, evaluation criteria и clear failure modes.
 
 ## 12. Переменные Окружения
 
@@ -672,11 +678,11 @@ MVP успешен, если:
 
 Расширенная версия успешна, если:
 
-- router автоматически выбирает модель;
-- fine-tuned router сравнен с baseline;
-- три коллекции Qdrant работают независимо;
+- backend имеет migrations, validation, observability и overload protection;
+- LoRA Text-to-SQL сравнен с prompt-only baseline;
+- SQL generation проходит validation и read-only safety checks;
+- analytics UI показывает SQL, таблицу, график и report export;
 - context сохраняется при смене модели;
-- UI показывает ответ, источники и diagnostic metadata;
 - README содержит честные benchmark-выводы.
 
 ## 14. Главные Учебные Вопросы
@@ -688,10 +694,11 @@ MVP успешен, если:
 - насколько модель следует контексту;
 - когда маленькой модели достаточно;
 - когда нужна 7B или 14B модель;
-- дает ли fine-tune router пользу;
+- дает ли LoRA Text-to-SQL пользу относительно prompt-only baseline;
 - сколько стоит переключение модели по latency;
 - какие metadata улучшают поиск;
 - где RAG начинает галлюцинировать;
+- где SQL model нарушает schema или safety constraints;
 - какие решения стоит оставить для "почти production", а какие были просто учебным экспериментом.
 
 Главная цель проекта - не просто собрать демо, а понять внутреннюю механику LLM-приложения так, чтобы потом уверенно проектировать более серьезные системы.
