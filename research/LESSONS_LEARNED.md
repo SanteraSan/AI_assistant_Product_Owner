@@ -2636,3 +2636,27 @@ Future hardening:
 - реальные M5 failures после большого прогона закрыты targeted regression;
 - перед переходом к `M5.9 Voice UI Bridge` стоит повторить полный M5 regression, чтобы подтвердить отсутствие вторичных регрессий;
 - важный retrieval урок: для anchored visual evidence нельзя полагаться только на vector similarity, если пользователь задаёт точные числовые/табличные признаки.
+
+## 2026-07-10: Regression Strategy Before M5.9
+
+Контекст:
+
+- перед переходом к `M5.9 Voice UI Bridge` пользователь предложил разделить большой прогон на два этапа;
+- цель: сначала выбрать лучшую модель именно для document-heavy RAG, а затем проверить весь проект без полного Cartesian product;
+- long multi-turn user journey решено оставить отдельным третьим слоем чуть позже.
+
+Что сделано:
+
+- добавлен `research/REGRESSION_ENV_COMMANDS.md` с командами для Docker, Postgres/Qdrant, backend server, health check и optional reindex;
+- добавлен `research/DOCUMENT_ONLY_REGRESSION_SCENARIOS.md` с document-only набором: 16 document scenarios x 3 models = 48 results;
+- добавлен `research/FULL_PROJECT_REGRESSION_SCENARIOS.md` с full project strategy без Cartesian product;
+- full project regression разделён на:
+  - core chat/context/access: 18 scenarios x 3 models;
+  - summary/memory: 15 scenarios x `qwen3.5:9b`;
+  - documents: 16 scenarios x best document model from document-only regression.
+
+Вывод:
+
+- такой подход сохраняет диагностируемость и не раздувает прогон до шумной матрицы “всё на всём”;
+- document-only regression должен выбрать модель для документов;
+- full project regression после этого проверит весь продуктовый цикл более экономно: 85 results вместо 147 для полного Cartesian product.
