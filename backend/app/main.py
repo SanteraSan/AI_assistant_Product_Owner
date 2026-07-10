@@ -2,9 +2,12 @@ import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from time import perf_counter
+from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from app.clients.qdrant_store import QdrantStore
 from app.core.config import get_settings
@@ -97,6 +100,61 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request_id = _request_id_from_header(request.headers.get("X-Request-ID"))
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    request_id = _request_id_from_request(request)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.detail,
+            "error_type": "http_error",
+            "request_id": request_id,
+        },
+        headers={"X-Request-ID": request_id},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError,
+) -> JSONResponse:
+    request_id = _request_id_from_request(request)
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": exc.errors(),
+            "error_type": "validation_error",
+            "request_id": request_id,
+        },
+        headers={"X-Request-ID": request_id},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    request_id = _request_id_from_request(request)
+    logger.exception("Unhandled request error", extra={"request_id": request_id})
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "error_type": "internal_error",
+            "request_id": request_id,
+        },
+        headers={"X-Request-ID": request_id},
+    )
 
 
 @app.get("/health")
@@ -250,6 +308,17 @@ def _qdrant_collection_exists() -> bool:
         return qdrant_store.collection_exists()
     except Exception:
         return False
+
+
+def _request_id_from_header(value: str | None) -> str:
+    normalized = (value or "").strip()
+    if not normalized or len(normalized) > 128:
+        return str(uuid4())
+    return normalized
+
+
+def _request_id_from_request(request: Request) -> str:
+    return str(getattr(request.state, "request_id", "") or uuid4())
 
 
 async def _readiness_snapshot() -> dict[str, object]:

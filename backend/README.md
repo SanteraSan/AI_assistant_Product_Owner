@@ -356,6 +356,14 @@ MAX_FILTER_VALUES=50
 MAX_FILTER_VALUE_CHARS=512
 ```
 
+Каждый HTTP request получает `X-Request-ID`:
+
+```bash
+curl -i http://localhost:8000/health/live -H "X-Request-ID: demo-request-1"
+```
+
+Если header не передан, backend сгенерирует новый request id. Ошибки API возвращают `request_id` в JSON body и `X-Request-ID` в headers, чтобы ответ пользователя можно было связать с backend logs.
+
 Посмотреть последние RAG-запросы:
 
 ```bash

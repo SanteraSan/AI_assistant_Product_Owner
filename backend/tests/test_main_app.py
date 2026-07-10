@@ -40,6 +40,45 @@ def test_health_live_returns_ok() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_request_id_header_is_returned() -> None:
+    client = TestClient(main_module.app)
+
+    response = client.get("/health/live", headers={"X-Request-ID": "test-request-id"})
+
+    assert response.status_code == 200
+    assert response.headers["X-Request-ID"] == "test-request-id"
+
+
+def test_oversized_chat_request_returns_traceable_error() -> None:
+    client = TestClient(main_module.app)
+
+    response = client.post(
+        "/chat",
+        headers={"X-Request-ID": "limit-test"},
+        json={"message": "x" * 8001},
+    )
+
+    assert response.status_code == 413
+    assert response.headers["X-Request-ID"] == "limit-test"
+    assert response.json()["error_type"] == "http_error"
+    assert response.json()["request_id"] == "limit-test"
+
+
+def test_validation_error_returns_traceable_error() -> None:
+    client = TestClient(main_module.app)
+
+    response = client.post(
+        "/rag/chat",
+        headers={"X-Request-ID": "validation-test"},
+        json={"message": "ok", "top_k": 0},
+    )
+
+    assert response.status_code == 422
+    assert response.headers["X-Request-ID"] == "validation-test"
+    assert response.json()["error_type"] == "validation_error"
+    assert response.json()["request_id"] == "validation-test"
+
+
 def test_limits_snapshot_contains_request_limits() -> None:
     limits = _limits_snapshot()
 

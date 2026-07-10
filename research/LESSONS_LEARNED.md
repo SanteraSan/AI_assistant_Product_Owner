@@ -2831,3 +2831,31 @@ Full project regression:
 - backend получил первый слой управляемого отказа до тяжёлых LLM/RAG операций;
 - readiness теперь показывает dependency health отдельно от process liveness;
 - следующий шаг можно делать как DB constraints/indexes или request tracing/error handling, а Redis/Ollama protection лучше оставить после unified errors и structured logging.
+
+## 2026-07-10: Backend Hardening H4/H5 Request ID And Error Handling
+
+Контекст:
+
+- перед rate limiting/Redis/Ollama overload protection ошибки должны быть трассируемыми;
+- без request id сложно связать user-facing error, backend logs и future queue/limiter decisions.
+
+Что сделано:
+
+- добавлен `X-Request-ID` middleware;
+- backend принимает внешний `X-Request-ID` или генерирует UUID;
+- success и error responses возвращают `X-Request-ID` header;
+- добавлены exception handlers для `HTTPException`, `RequestValidationError` и unexpected exceptions;
+- error response содержит `detail`, `error_type`, `request_id`;
+- README описывает request id и traceable error behavior.
+
+Проверки:
+
+- focused request tracing tests: `10 passed`;
+- full backend tests: `55 passed`;
+- warnings: existing Qdrant compatibility warning и Starlette TestClient deprecation warning;
+- lints по изменённым Python-файлам: ошибок нет.
+
+Вывод:
+
+- backend errors теперь готовы к следующему hardening stage: Redis-backed rate limiting и controlled overload responses;
+- будущие `429/503` от queue/concurrency layer смогут возвращаться в едином формате и связываться с логами по request id.
