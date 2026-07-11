@@ -2,18 +2,27 @@ import { FileText, Folder, Pencil, Plus, Upload } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useRef, useState } from 'react'
 import type { Bucket } from '../../entities/bucket/model'
-import type { DocumentItem } from '../../entities/document/model'
+import type { DocumentItem, StagedDocumentItem } from '../../entities/document/model'
 import { Badge, Button, Card, Modal } from '../../shared/ui'
 
 type BucketWorkspaceProps = {
   buckets: Bucket[]
   availableDocuments: DocumentItem[]
+  canMutateDocuments: boolean
   documents: DocumentItem[]
-  onAddDocumentToBucket: (bucketId: string, documentId: string) => void
+  onCancelStagedDocument: (uploadId: string) => Promise<void>
+  onCommitChanges: (
+    bucketId: string,
+    changes: {
+      stagedUploadIds: string[]
+      existingDocumentIds: string[]
+      removedDocumentIds: string[]
+    },
+  ) => Promise<void>
   onCreateBucket: () => void
   onInspectBucket: (bucketId: string) => void
   onSelectBucket: (bucketId: string) => void
-  onUploadDocument: (bucketId: string, file: File) => void
+  onStageDocument: (file: File) => Promise<StagedDocumentItem>
 }
 
 const statusTone = {
@@ -25,28 +34,122 @@ const statusTone = {
 export function BucketWorkspace({
   availableDocuments,
   buckets,
+  canMutateDocuments,
   documents,
-  onAddDocumentToBucket,
+  onCancelStagedDocument,
+  onCommitChanges,
   onCreateBucket,
   onInspectBucket,
   onSelectBucket,
-  onUploadDocument,
+  onStageDocument,
 }: BucketWorkspaceProps) {
   const [openedBucket, setOpenedBucket] = useState<Bucket | null>(null)
+  const [existingDraftIds, setExistingDraftIds] = useState<string[]>([])
+  const [removedDocumentIds, setRemovedDocumentIds] = useState<string[]>([])
+  const [stagedUploads, setStagedUploads] = useState<StagedDocumentItem[]>([])
+  const [isSaving, setIsSaving] = useState(false)
+  const [draftError, setDraftError] = useState<string | null>(null)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
-  const documentsInBucket = new Set(documents.map((document) => document.id))
-  const addableDocuments = availableDocuments.filter((document) => !documentsInBucket.has(document.id))
+  const documentsInBucket = new Set(
+    documents
+      .filter((document) => !removedDocumentIds.includes(document.id))
+      .map((document) => document.id),
+  )
+  const existingDraftIdSet = new Set(existingDraftIds)
+  const addableDocuments = availableDocuments.filter(
+    (document) => !documentsInBucket.has(document.id) && !existingDraftIdSet.has(document.id),
+  )
+  const visibleDocuments = documents.filter((document) => !removedDocumentIds.includes(document.id))
+  const draftedExistingDocuments = availableDocuments.filter((document) =>
+    existingDraftIdSet.has(document.id),
+  )
+  const bucketDocumentCount = visibleDocuments.length + draftedExistingDocuments.length + stagedUploads.length
+  const availableDocumentCount = addableDocuments.length
+  const hasDraftChanges =
+    stagedUploads.length > 0 || existingDraftIds.length > 0 || removedDocumentIds.length > 0
 
   function openDocuments(bucket: Bucket) {
     onInspectBucket(bucket.id)
+    resetDraft()
     setOpenedBucket(bucket)
   }
 
-  function handleUpload(file: File | undefined) {
-    if (!file || openedBucket === null) {
+  async function handleUpload(file: File | undefined) {
+    if (!file || openedBucket === null || !canMutateDocuments) {
       return
     }
-    onUploadDocument(openedBucket.id, file)
+    setDraftError(null)
+    try {
+      const stagedDocument = await onStageDocument(file)
+      setStagedUploads((current) => [...current, stagedDocument])
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : 'Не удалось загрузить файл в staging.')
+    } finally {
+      if (uploadInputRef.current) {
+        uploadInputRef.current.value = ''
+      }
+    }
+  }
+
+  function handleClose() {
+    if (hasDraftChanges && !window.confirm('Закрыть без сохранения изменений bucket?')) {
+      return
+    }
+    resetDraft()
+    setOpenedBucket(null)
+  }
+
+  function handleDraftExistingDocument(documentId: string) {
+    setExistingDraftIds((current) =>
+      current.includes(documentId) ? current : [...current, documentId],
+    )
+  }
+
+  function handleCancelDraftExistingDocument(documentId: string) {
+    setExistingDraftIds((current) => current.filter((currentDocumentId) => currentDocumentId !== documentId))
+  }
+
+  function handleDraftRemoveDocument(documentId: string) {
+    setRemovedDocumentIds((current) =>
+      current.includes(documentId) ? current : [...current, documentId],
+    )
+  }
+
+  async function handleCancelStagedUpload(uploadId: string) {
+    setDraftError(null)
+    try {
+      await onCancelStagedDocument(uploadId)
+      setStagedUploads((current) => current.filter((upload) => upload.id !== uploadId))
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : 'Не удалось отменить staged upload.')
+    }
+  }
+
+  async function handleSaveChanges() {
+    if (openedBucket === null || !hasDraftChanges) {
+      return
+    }
+    setIsSaving(true)
+    setDraftError(null)
+    try {
+      await onCommitChanges(openedBucket.id, {
+        stagedUploadIds: stagedUploads.map((upload) => upload.id),
+        existingDocumentIds: existingDraftIds,
+        removedDocumentIds,
+      })
+      resetDraft()
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : 'Не удалось сохранить изменения bucket.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  function resetDraft() {
+    setExistingDraftIds([])
+    setRemovedDocumentIds([])
+    setStagedUploads([])
+    setDraftError(null)
   }
 
   return (
@@ -101,11 +204,13 @@ export function BucketWorkspace({
       </div>
 
       <Modal
+        bodyClassName="flex flex-1 flex-col overflow-hidden p-0"
         isOpen={openedBucket !== null}
-        onClose={() => setOpenedBucket(null)}
+        onClose={handleClose}
+        size="lg"
         title={openedBucket ? `Документы: ${openedBucket.name}` : 'Документы'}
       >
-        <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
           <p className="text-sm text-slate-500">
             Bucket хранит ссылки на документы. Доступ всё равно проверяется по owner/role/tenant.
           </p>
@@ -115,60 +220,164 @@ export function BucketWorkspace({
             ref={uploadInputRef}
             type="file"
           />
-          <Button onClick={() => uploadInputRef.current?.click()} variant="primary">
+          <Button
+            disabled={!canMutateDocuments}
+            onClick={() => uploadInputRef.current?.click()}
+            variant="primary"
+          >
             <Upload size={18} />
             Загрузить документ
           </Button>
         </div>
 
-        <section>
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-            В этом bucket
-          </h3>
-          <div className="space-y-3">
-            {documents.length === 0 ? (
-              <p className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-                Документов пока нет. Можно загрузить новый или добавить доступный из библиотеки.
-              </p>
-            ) : (
-              documents.map((document) => (
-                <DocumentRow document={document} key={document.id} />
-              ))
-            )}
-          </div>
-        </section>
+        <div className="min-h-0 flex-1 overflow-hidden px-6 py-4">
+          {!canMutateDocuments ? (
+            <p className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              Сейчас открыт demo bucket. Создай реальный bucket в БД, чтобы загружать и привязывать документы.
+            </p>
+          ) : null}
+          {draftError ? (
+            <p className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              {draftError}
+            </p>
+          ) : null}
 
-        <section className="mt-6">
-          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Доступные документы
-          </h3>
-          <div className="space-y-3">
-            {addableDocuments.length === 0 ? (
-              <p className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-                Нет дополнительных документов, доступных для добавления.
-              </p>
-            ) : (
-              addableDocuments.map((document) => (
-                <DocumentRow
-                  action={
-                    openedBucket ? (
-                      <Button
-                        onClick={() => onAddDocumentToBucket(openedBucket.id, document.id)}
-                        variant="ghost"
-                      >
-                        Добавить
-                      </Button>
-                    ) : null
-                  }
-                  document={document}
-                  key={document.id}
-                />
-              ))
-            )}
+          <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-4">
+            <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-100 bg-slate-50/60 p-4">
+              <h3 className="mb-3 shrink-0 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                В этом bucket
+                {bucketDocumentCount > 0 ? (
+                  <span className="ml-2 text-slate-400">{bucketDocumentCount}</span>
+                ) : null}
+              </h3>
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+                {visibleDocuments.length === 0 &&
+                draftedExistingDocuments.length === 0 &&
+                stagedUploads.length === 0 ? (
+                  <p className="rounded-2xl border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-500">
+                    Документов пока нет. Можно загрузить новый или добавить доступный из библиотеки.
+                  </p>
+                ) : (
+                  <>
+                    {visibleDocuments.map((document) => (
+                      <DocumentRow
+                        action={
+                          <Button
+                            disabled={!canMutateDocuments}
+                            onClick={() => handleDraftRemoveDocument(document.id)}
+                            variant="ghost"
+                          >
+                            Убрать
+                          </Button>
+                        }
+                        document={document}
+                        key={document.id}
+                      />
+                    ))}
+                    {draftedExistingDocuments.map((document) => (
+                      <DocumentRow
+                        action={
+                          <>
+                            <Badge tone="warning">draft</Badge>
+                            <Button
+                              onClick={() => handleCancelDraftExistingDocument(document.id)}
+                              variant="ghost"
+                            >
+                              Убрать
+                            </Button>
+                          </>
+                        }
+                        document={document}
+                        key={`draft-existing-${document.id}`}
+                      />
+                    ))}
+                    {stagedUploads.map((upload) => (
+                      <StagedDocumentRow
+                        action={
+                          <Button onClick={() => handleCancelStagedUpload(upload.id)} variant="ghost">
+                            Убрать
+                          </Button>
+                        }
+                        document={upload}
+                        key={upload.id}
+                      />
+                    ))}
+                  </>
+                )}
+              </div>
+            </section>
+
+            <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-100 bg-white p-4">
+              <h3 className="mb-3 shrink-0 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                Доступные документы
+                {availableDocumentCount > 0 ? (
+                  <span className="ml-2 text-slate-400">{availableDocumentCount}</span>
+                ) : null}
+              </h3>
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+                {addableDocuments.length === 0 ? (
+                  <p className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+                    Нет дополнительных документов, доступных для добавления.
+                  </p>
+                ) : (
+                  addableDocuments.map((document) => (
+                    <DocumentRow
+                      action={
+                        openedBucket ? (
+                          <Button
+                            disabled={!canMutateDocuments}
+                            onClick={() => handleDraftExistingDocument(document.id)}
+                            variant="ghost"
+                          >
+                            Добавить
+                          </Button>
+                        ) : null
+                      }
+                      document={document}
+                      key={document.id}
+                    />
+                  ))
+                )}
+              </div>
+            </section>
           </div>
-        </section>
+        </div>
+
+        <div className="flex shrink-0 items-center justify-between border-t border-slate-100 px-6 py-4">
+          <p className="text-sm text-slate-500">
+            {hasDraftChanges
+              ? 'Есть несохранённые изменения. Индексация начнётся после сохранения.'
+              : 'Изменений пока нет.'}
+          </p>
+          <Button disabled={!hasDraftChanges || isSaving} onClick={handleSaveChanges} variant="primary">
+            {isSaving ? 'Сохраняем...' : 'Сохранить'}
+          </Button>
+        </div>
       </Modal>
     </main>
+  )
+}
+
+function StagedDocumentRow({
+  action,
+  document,
+}: {
+  action?: ReactNode
+  document: StagedDocumentItem
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
+      <div>
+        <p className="font-medium text-slate-950">{document.fileName}</p>
+        <p className="mt-1 text-sm text-slate-500">
+          {document.sourceType} · staged · {document.uploadedAt}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Badge tone="warning">{document.status}</Badge>
+        {action}
+      </div>
+    </div>
   )
 }
 
@@ -179,20 +388,47 @@ function DocumentRow({
   action?: ReactNode
   document: DocumentItem
 }) {
+  const isIndexing = document.status === 'indexing'
+  const isUploadedOnly = document.status === 'uploaded'
   return (
-    <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 p-4">
-      <div>
-        <p className="font-medium text-slate-950">{document.fileName}</p>
-        <p className="mt-1 text-sm text-slate-500">
-          {document.sourceType} · {document.visibility} · {document.uploadedAt}
+    <div className="rounded-2xl border border-slate-200 p-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="font-medium text-slate-950">{document.fileName}</p>
+          <p className="mt-1 text-sm text-slate-500">
+            {document.sourceType} · {document.visibility} · {document.uploadedAt}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge tone={statusToneForDocument(document.status)}>{document.status}</Badge>
+          {action}
+        </div>
+      </div>
+      {isIndexing ? (
+        <div className="mt-3">
+          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full w-1/2 animate-pulse rounded-full bg-amber-400" />
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Документ сохраняется в Qdrant. Статус обновляется автоматически.
+          </p>
+        </div>
+      ) : null}
+      {isUploadedOnly ? (
+        <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          Документ сохранён в библиотеке, но для него ещё не создана задача индексации.
         </p>
-      </div>
-      <div className="flex items-center gap-2">
-        <Badge tone={document.status === 'indexed' ? 'success' : 'warning'}>
-          {document.status}
-        </Badge>
-        {action}
-      </div>
+      ) : null}
     </div>
   )
+}
+
+function statusToneForDocument(status: DocumentItem['status']) {
+  if (status === 'indexed') {
+    return 'success'
+  }
+  if (status === 'error' || status === 'index_failed') {
+    return 'danger'
+  }
+  return 'warning'
 }

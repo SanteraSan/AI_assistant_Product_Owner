@@ -1,4 +1,4 @@
-import { Bot, UserRound } from 'lucide-react'
+import { Bot, FileText, UserRound } from 'lucide-react'
 import type { ChatMessage } from '../../entities/chat/model'
 import type { Bucket } from '../../entities/bucket/model'
 import type { LocalModel, ModelApproach } from '../../entities/model/model'
@@ -8,18 +8,22 @@ import { Badge, Card } from '../../shared/ui'
 type ChatWorkspaceProps = {
   activeBucket?: Bucket
   approach: ModelApproach
+  attachDisabled?: boolean
   composerValue: string
   messages: ChatMessage[]
   selectedModel?: LocalModel
   onChangeComposerValue: (value: string) => void
+  onAttachFile?: (file: File) => void
   onSendMessage: () => void
 }
 
 export function ChatWorkspace({
   activeBucket,
   approach,
+  attachDisabled,
   composerValue,
   messages,
+  onAttachFile,
   onChangeComposerValue,
   onSendMessage,
   selectedModel,
@@ -58,6 +62,24 @@ export function ChatWorkspace({
                 }`}
               >
                 {message.content}
+                {message.attachments?.length ? (
+                  <div className="mt-3 space-y-2">
+                    {message.attachments.map((attachment) => (
+                      <div
+                        className="flex items-center justify-between gap-3 rounded-2xl bg-white/10 px-3 py-2 text-xs"
+                        key={attachment.id}
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <FileText size={16} />
+                          {attachment.fileName}
+                        </span>
+                        <Badge tone={attachment.status === 'indexed' ? 'success' : 'warning'}>
+                          {attachment.status}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
               {message.role === 'user' && (
                 <div className="mt-1 flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-700">
@@ -70,6 +92,8 @@ export function ChatWorkspace({
 
         <div className="border-t border-slate-200 bg-slate-50 px-8 py-5">
           <MessageComposer
+            attachDisabled={attachDisabled}
+            onAttachFile={onAttachFile}
             onChange={onChangeComposerValue}
             onSubmit={onSendMessage}
             value={composerValue}

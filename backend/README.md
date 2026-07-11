@@ -1356,6 +1356,55 @@ curl -s -X POST http://localhost:8000/documents/upload \
   --data-binary @notes.txt | jq
 ```
 
+### E0.2 Staged Upload And Indexing Baseline
+
+Production-like upload flow теперь должен идти через staging и явный commit:
+
+```bash
+curl -s -X POST http://localhost:8000/documents/stage \
+  -H "X-Tenant-ID: local_demo" \
+  -H "X-User-ID: local-user-1" \
+  -H "X-File-Name: notes.txt" \
+  -H "Content-Type: text/plain" \
+  --data-binary @notes.txt | jq
+```
+
+После review в UI staged upload сохраняется в bucket:
+
+```bash
+curl -s -X POST http://localhost:8000/buckets/<BUCKET_ID>/documents/-/commit \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: local_demo" \
+  -H "X-User-ID: local-user-1" \
+  -H "X-User-Roles: admin,analyst" \
+  -d '{
+    "staged_upload_ids": ["<STAGED_UPLOAD_ID>"],
+    "existing_document_ids": [],
+    "removed_document_ids": [],
+    "visibility": "private",
+    "allowed_roles": []
+  }' | jq
+```
+
+Commit создаёт:
+
+- `document_assets`;
+- `bucket_documents`;
+- `document_indexing_jobs`.
+
+Если backend подключен к Ollama и Qdrant, background task сразу запускает indexing baseline:
+
+```text
+committed document
+-> load_raw_documents
+-> chunk_documents
+-> Ollama embeddings
+-> Qdrant upsert
+-> document_assets.status=indexed
+```
+
+Если indexing падает, `document_assets.status=index_failed`, а `document_indexing_jobs.error` хранит причину. Эта job boundary позже может быть заменена Kafka worker'ом без изменения UI contract.
+
 Что сохраняется:
 
 - `tenant_id`;

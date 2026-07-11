@@ -123,6 +123,8 @@ class BucketDocument(Base):
         index=True,
     )
     added_by_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    indexing_status: Mapped[str] = mapped_column(String(32), default="indexed")
+    indexing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -158,6 +160,60 @@ class DocumentAclEntry(Base):
     )
 
     document: Mapped[DocumentAsset] = relationship(back_populates="acl_entries")
+
+
+class StagedDocumentUpload(Base):
+    __tablename__ = "staged_document_uploads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(255), index=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    original_file_name: Mapped[str] = mapped_column(String(512))
+    source_type: Mapped[str] = mapped_column(String(64))
+    source_path: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), default="staged")
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class DocumentIndexingJob(Base):
+    __tablename__ = "document_indexing_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(255), index=True)
+    bucket_id: Mapped[str] = mapped_column(String(36), index=True)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("document_assets.id", ondelete="CASCADE"),
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    chunks_indexed: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
 
 class RagRequestLog(Base):

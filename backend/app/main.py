@@ -25,6 +25,7 @@ from app.services.chat_history_service import ChatExchangeRecord, ChatHistorySer
 from app.services.conversation_context_service import ConversationContextService
 from app.services.conversation_memory_service import ConversationMemoryService
 from app.services.conversation_summary_service import ConversationSummaryService
+from app.services.document_indexing_service import DocumentIndexingService
 from app.services.feature_extractor import FeatureExtractor
 from app.services.ollama_client import OllamaClient
 from app.services.ollama_load_guard import OllamaLoadGuard, OllamaOverloadedError
@@ -103,6 +104,12 @@ bucket_service = BucketService(
     session_factory=db_session_factory,
     raw_data_dir=settings.raw_data_dir,
 )
+document_indexing_service = DocumentIndexingService(
+    session_factory=db_session_factory,
+    qdrant_store=qdrant_store,
+    ollama_client=ollama_client,
+    embedding_model=settings.embedding_model,
+)
 
 
 @asynccontextmanager
@@ -140,6 +147,7 @@ app = create_app()
 app.include_router(
     create_bucket_router(
         bucket_service=bucket_service,
+        document_indexing_service=document_indexing_service,
         default_tenant_id=settings.default_tenant_id,
     )
 )

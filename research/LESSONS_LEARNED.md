@@ -3349,3 +3349,60 @@ Access baseline:
 
 - E0.1 должен быть реализован до полноценного RAG через UI, чтобы RAG filters сразу строились на корректной модели доступа;
 - текущий `document_records` остаётся legacy baseline, новые product flows должны использовать document library model.
+
+## 2026-07-11: E0.2 Staged Upload And Qdrant Indexing Decision
+
+Контекст:
+
+- простой upload в bucket сразу создаёт persistent document, что неудобно для production UX;
+- пользователь может случайно выбрать файл, закрыть модалку или передумать;
+- RAG не может отвечать по uploaded file, пока файл не прошёл loader/chunking/embedding/upsert в Qdrant.
+
+Решение:
+
+- добавить staged upload flow: файл сначала попадает во временную область и становится draft;
+- сохранить bucket changes через явный commit action;
+- на commit создавать `document_assets`, `bucket_documents` и `document_indexing_jobs`;
+- индексировать committed documents сразу in-process baseline worker'ом, но через job boundary;
+- Kafka оставить следующим hardening step: `document_indexing_jobs` позже можно заменить/дополнить event-driven worker.
+
+Важный инвариант:
+
+- PostgreSQL хранит registry/status/access;
+- filesystem хранит bytes;
+- Qdrant хранит searchable chunks для RAG;
+- наличие файла в PostgreSQL ещё не означает, что RAG может по нему отвечать.
+
+## 2026-07-12: E0.2 Staged Upload And Qdrant Indexing Baseline
+
+Контекст:
+
+- после E0.1 document library потребовалось довести upload UX до production-like поведения;
+- важный product flow: файл из чата должен попадать в личную библиотеку и быть доступным для добавления в bucket, но не должен автоматически привязываться к последнему открытому bucket;
+- bucket membership и global document availability должны иметь разные статусы индексации.
+
+Что сделано:
+
+- добавлены `staged_document_uploads` и `document_indexing_jobs`;
+- добавлен staged upload API: `POST /documents/stage`, `DELETE /documents/stage/{upload_id}`;
+- добавлен явный commit API для bucket modal: `POST /buckets/{bucket_id}/documents/-/commit`;
+- добавлен personal commit API для chat attachments: `POST /documents/-/commit-personal`;
+- добавлен `DocumentIndexingService`, который переиспользует текущий ingestion path: `load_raw_documents` -> `chunk_documents` -> Ollama embeddings -> Qdrant upsert;
+- indexing одного uploaded file изолирован через временную папку, чтобы соседние файлы в `uploads` не могли уронить текущую job;
+- global `DocumentAsset.status` отделён от bucket-specific `BucketDocument.indexing_status`;
+- успешная bucket-specific индексация может перевести global document из `index_failed` в `indexed`, но провал bucket-specific job не откатывает global статус;
+- frontend bucket modal получила draft/save flow, отдельные скроллы для блоков `В этом bucket` и `Доступные документы`, счётчики документов и sticky header/footer;
+- chat attachments теперь отображаются в чате и проходят через personal commit без автоматической привязки к bucket.
+
+Проверки:
+
+- backend focused tests: `backend/tests/test_document_indexing_service.py` и `backend/tests/test_bucket_router.py` passed;
+- full backend suite: `81 passed`;
+- frontend build/lint были прогнаны пользователем после локальной настройки Node/npm;
+- manual UI smoke подтвердил staged upload, chat upload, добавление/удаление документов из bucket и разделение global/bucket статусов.
+
+Вывод:
+
+- E0.2 стал первым production-like upload/indexing baseline;
+- Kafka пока не нужен, но `document_indexing_jobs` уже задаёт правильную границу для будущего async/event-driven worker;
+- следующий этап перед Keycloak: подключить основной chat UI к реальному `/rag/chat`, чтобы auth/RBAC защищали уже настоящий chat contract, а не mock flow.

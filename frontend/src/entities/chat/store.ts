@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { mockBuckets } from '../bucket/model'
-import type { ChatMessage, ChatThread } from './model'
+import type { ChatAttachment, ChatMessage, ChatThread } from './model'
 import { mockMessagesByThreadId, mockThreads } from './model'
 
 type SendMessageContext = {
@@ -14,9 +14,11 @@ type ChatStore = {
   messagesByThreadId: Record<string, ChatMessage[]>
   threads: ChatThread[]
   createThread: () => void
+  addAttachmentMessage: (attachment: ChatAttachment) => void
   selectThread: (threadId: string) => void
   sendMessage: (text: string, context: SendMessageContext) => void
   setComposerValue: (value: string) => void
+  updateAttachmentStatuses: (attachments: ChatAttachment[]) => void
 }
 
 const initialThreadId = mockThreads[0]?.id ?? 'thread-1'
@@ -45,6 +47,35 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         [threadId]: [],
       },
       threads: [newThread, ...state.threads],
+    }))
+  },
+
+  addAttachmentMessage: (attachment: ChatAttachment) => {
+    const { activeThreadId } = get()
+    const message: ChatMessage = {
+      id: `attachment-${Date.now()}`,
+      role: 'user',
+      content: `Прикреплён файл: ${attachment.fileName}`,
+      attachments: [attachment],
+    }
+
+    set((state) => ({
+      messagesByThreadId: {
+        ...state.messagesByThreadId,
+        [activeThreadId]: [
+          ...(state.messagesByThreadId[activeThreadId] ?? []),
+          message,
+        ],
+      },
+      threads: state.threads.map((thread) =>
+        thread.id === activeThreadId
+          ? {
+              ...thread,
+              title: thread.title === 'Новый чат' ? attachment.fileName.slice(0, 48) : thread.title,
+              updatedAt: 'Только что',
+            }
+          : thread,
+      ),
     }))
   },
 
@@ -106,5 +137,26 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   setComposerValue: (value: string) => {
     set({ composerValue: value })
+  },
+
+  updateAttachmentStatuses: (attachments: ChatAttachment[]) => {
+    if (!attachments.length) {
+      return
+    }
+    const statusById = new Map(attachments.map((attachment) => [attachment.id, attachment.status]))
+    set((state) => ({
+      messagesByThreadId: Object.fromEntries(
+        Object.entries(state.messagesByThreadId).map(([threadId, messages]) => [
+          threadId,
+          messages.map((message) => ({
+            ...message,
+            attachments: message.attachments?.map((attachment) => ({
+              ...attachment,
+              status: statusById.get(attachment.id) ?? attachment.status,
+            })),
+          })),
+        ]),
+      ),
+    }))
   },
 }))

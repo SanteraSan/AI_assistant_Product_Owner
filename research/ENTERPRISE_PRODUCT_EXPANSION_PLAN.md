@@ -112,6 +112,42 @@ Definition of done:
 - user can upload a private document and link it to a bucket;
 - RAG-facing bucket document lists never include inaccessible documents.
 
+### Stage E0.2: Staged Upload And Indexing Baseline
+
+Goal:
+
+- make document upload production-like instead of "file selected means permanently saved";
+- keep bucket edits explicit through draft/stage/commit;
+- index committed documents into Qdrant so RAG can answer from uploaded files.
+
+Flow:
+
+```text
+UI file selection
+-> staged_document_uploads
+-> user reviews draft files in bucket modal
+-> commit bucket changes
+-> document_assets + bucket_documents
+-> document_indexing_jobs
+-> in-process indexing baseline
+-> Qdrant chunks with tenant/bucket/document metadata
+```
+
+Baseline constraints:
+
+- Kafka is not introduced in E0.2;
+- `document_indexing_jobs` is the architectural boundary that can later publish/consume Kafka events;
+- committed files live under document-level storage, not bucket folders, because one document can belong to many buckets;
+- removing a document from a bucket removes only `bucket_documents`, not `document_assets`.
+
+Definition of done:
+
+- staged uploads can be created and cancelled;
+- bucket modal has explicit save/commit behavior;
+- committed documents get `indexing` then `indexed` or `index_failed` status;
+- uploaded document chunks are upserted to Qdrant with `tenant_id`, `bucket_id`, `document_id`, `source_path`, and traceable `document_metadata`;
+- UI clearly distinguishes staged, indexing, indexed, and failed documents.
+
 ## Stage E1: Keycloak, BFF And RBAC
 
 Goal:

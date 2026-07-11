@@ -1,15 +1,22 @@
-from fastapi import APIRouter, Header, HTTPException, Request
+from urllib.parse import unquote
+
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import DocumentAsset, KnowledgeBucket
+from app.db.models import DocumentAsset, KnowledgeBucket, StagedDocumentUpload
 from app.models.bucket import (
     BucketCreateRequest,
     BucketResponse,
     BucketUpdateRequest,
+    CommitBucketDocumentsRequest,
+    CommitBucketDocumentsResponse,
+    CommitPersonalDocumentsRequest,
     DocumentResponse,
+    StagedDocumentResponse,
 )
 from app.services.access_policy import UserContext, parse_roles
 from app.services.bucket_service import BucketService
+from app.services.document_indexing_service import DocumentIndexingService
 
 
 DOCUMENT_VISIBILITIES = {"private", "role", "tenant", "team", "public"}
@@ -18,6 +25,7 @@ DOCUMENT_VISIBILITIES = {"private", "role", "tenant", "team", "public"}
 def create_bucket_router(
     *,
     bucket_service: BucketService,
+    document_indexing_service: DocumentIndexingService | None = None,
     default_tenant_id: str,
 ) -> APIRouter:
     router = APIRouter(tags=["buckets"])
@@ -46,6 +54,11 @@ def create_bucket_router(
         if visibility not in DOCUMENT_VISIBILITIES:
             raise HTTPException(status_code=422, detail="Unsupported document visibility.")
         return visibility
+
+    def decoded_file_name(file_name: str, encoding: str | None) -> str:
+        if (encoding or "").strip().lower() == "uri-component":
+            return unquote(file_name)
+        return file_name
 
     @router.get("/buckets", response_model=list[BucketResponse])
     async def list_buckets(
@@ -107,7 +120,10 @@ def create_bucket_router(
         )
         if documents is None:
             raise HTTPException(status_code=404, detail="Bucket not found.")
-        return [_document_response(document, bucket_id=bucket_id) for document in documents]
+        return [
+            _document_response(document, bucket_id=bucket_id, bucket_link=bucket_link)
+            for document, bucket_link in documents
+        ]
 
     @router.get("/documents/my", response_model=list[DocumentResponse])
     async def list_my_documents(
@@ -131,6 +147,40 @@ def create_bucket_router(
         )
         return [_document_response(document) for document in documents]
 
+    @router.post("/documents/stage", response_model=StagedDocumentResponse, status_code=201)
+    async def stage_document_upload(
+        request: Request,
+        file_name: str = Header(default="uploaded-file", alias="X-File-Name"),
+        file_name_encoding: str | None = Header(default=None, alias="X-File-Name-Encoding"),
+        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
+    ) -> StagedDocumentResponse:
+        content = await request.body()
+        if not content:
+            raise HTTPException(status_code=422, detail="Uploaded file is empty.")
+        upload = await bucket_service.stage_uploaded_document(
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            file_name=decoded_file_name(file_name, file_name_encoding),
+            content=content,
+            content_type=request.headers.get("content-type"),
+        )
+        return _staged_document_response(upload)
+
+    @router.delete("/documents/stage/{upload_id}", status_code=204)
+    async def cancel_document_upload(
+        upload_id: str,
+        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
+    ) -> None:
+        cancelled = await bucket_service.cancel_staged_upload(
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            upload_id=upload_id,
+        )
+        if not cancelled:
+            raise HTTPException(status_code=404, detail="Staged upload not found.")
+
     @router.post(
         "/buckets/{bucket_id}/documents/upload",
         response_model=DocumentResponse,
@@ -140,6 +190,7 @@ def create_bucket_router(
         bucket_id: str,
         request: Request,
         file_name: str = Header(default="uploaded-file", alias="X-File-Name"),
+        file_name_encoding: str | None = Header(default=None, alias="X-File-Name-Encoding"),
         tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
         user_id: str | None = Header(default=None, alias="X-User-ID"),
         roles: str | None = Header(default=None, alias="X-User-Roles"),
@@ -152,7 +203,7 @@ def create_bucket_router(
         document = await bucket_service.save_uploaded_document(
             user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
             bucket_id=bucket_id,
-            file_name=file_name,
+            file_name=decoded_file_name(file_name, file_name_encoding),
             content=content,
             content_type=request.headers.get("content-type"),
             visibility=normalized_visibility(visibility),
@@ -166,6 +217,7 @@ def create_bucket_router(
     async def upload_personal_document(
         request: Request,
         file_name: str = Header(default="uploaded-file", alias="X-File-Name"),
+        file_name_encoding: str | None = Header(default=None, alias="X-File-Name-Encoding"),
         tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
         user_id: str | None = Header(default=None, alias="X-User-ID"),
         roles: str | None = Header(default=None, alias="X-User-Roles"),
@@ -178,7 +230,7 @@ def create_bucket_router(
         document = await bucket_service.save_uploaded_document(
             user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
             bucket_id=None,
-            file_name=file_name,
+            file_name=decoded_file_name(file_name, file_name_encoding),
             content=content,
             content_type=request.headers.get("content-type"),
             visibility=normalized_visibility(visibility),
@@ -187,6 +239,30 @@ def create_bucket_router(
         if document is None:
             raise HTTPException(status_code=404, detail="Bucket not found.")
         return _document_response(document)
+
+    @router.post(
+        "/documents/-/commit-personal",
+        response_model=CommitBucketDocumentsResponse,
+    )
+    async def commit_personal_documents(
+        payload: CommitPersonalDocumentsRequest,
+        background_tasks: BackgroundTasks,
+        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
+    ) -> CommitBucketDocumentsResponse:
+        documents, indexing_job_ids = await bucket_service.commit_personal_documents(
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            staged_upload_ids=payload.staged_upload_ids,
+            visibility=payload.visibility,
+            allowed_roles=payload.allowed_roles,
+        )
+        if document_indexing_service is not None and indexing_job_ids:
+            background_tasks.add_task(document_indexing_service.process_jobs, indexing_job_ids)
+        return CommitBucketDocumentsResponse(
+            documents=[_document_response(document) for document in documents],
+            indexing_job_ids=indexing_job_ids,
+        )
 
     @router.post(
         "/buckets/{bucket_id}/documents/{document_id}",
@@ -208,6 +284,40 @@ def create_bucket_router(
         if document is None:
             raise HTTPException(status_code=404, detail="Bucket or document not found.")
         return _document_response(document, bucket_id=bucket_id)
+
+    @router.post(
+        "/buckets/{bucket_id}/documents/-/commit",
+        response_model=CommitBucketDocumentsResponse,
+    )
+    async def commit_bucket_documents(
+        bucket_id: str,
+        payload: CommitBucketDocumentsRequest,
+        background_tasks: BackgroundTasks,
+        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
+    ) -> CommitBucketDocumentsResponse:
+        committed = await bucket_service.commit_bucket_documents(
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            bucket_id=bucket_id,
+            staged_upload_ids=payload.staged_upload_ids,
+            existing_document_ids=payload.existing_document_ids,
+            removed_document_ids=payload.removed_document_ids,
+            visibility=payload.visibility,
+            allowed_roles=payload.allowed_roles,
+        )
+        if committed is None:
+            raise HTTPException(status_code=404, detail="Bucket not found.")
+        documents, indexing_job_ids = committed
+        if document_indexing_service is not None and indexing_job_ids:
+            background_tasks.add_task(document_indexing_service.process_jobs, indexing_job_ids)
+        return CommitBucketDocumentsResponse(
+            documents=[
+                _document_response(document, bucket_id=bucket_id)
+                for document in documents
+            ],
+            indexing_job_ids=indexing_job_ids,
+        )
 
     @router.delete("/buckets/{bucket_id}/documents/{document_id}", status_code=204)
     async def remove_document_from_bucket(
@@ -256,7 +366,13 @@ def _bucket_response(*, bucket: KnowledgeBucket, document_count: int) -> BucketR
     )
 
 
-def _document_response(document: DocumentAsset, *, bucket_id: str | None = None) -> DocumentResponse:
+def _document_response(
+    document: DocumentAsset,
+    *,
+    bucket_id: str | None = None,
+    bucket_link=None,
+) -> DocumentResponse:
+    bucket_indexing_status = getattr(bucket_link, "indexing_status", None)
     return DocumentResponse(
         id=document.id,
         tenant_id=document.tenant_id,
@@ -266,11 +382,28 @@ def _document_response(document: DocumentAsset, *, bucket_id: str | None = None)
         file_name=document.file_name,
         source_type=document.source_type,
         source_path=document.source_path,
-        status=document.status,
+        status=bucket_indexing_status or document.status,
+        bucket_indexing_status=bucket_indexing_status,
         visibility=document.visibility,
         allowed_roles=document.allowed_roles,
         size_bytes=document.size_bytes,
         error=document.error,
         created_at=document.created_at,
         updated_at=document.updated_at,
+    )
+
+
+def _staged_document_response(upload: StagedDocumentUpload) -> StagedDocumentResponse:
+    return StagedDocumentResponse(
+        id=upload.id,
+        tenant_id=upload.tenant_id,
+        owner_user_id=upload.owner_user_id,
+        original_file_name=upload.original_file_name,
+        source_type=upload.source_type,
+        status=upload.status,
+        size_bytes=upload.size_bytes,
+        error=upload.error,
+        created_at=upload.created_at,
+        expires_at=upload.expires_at,
+        updated_at=upload.updated_at,
     )

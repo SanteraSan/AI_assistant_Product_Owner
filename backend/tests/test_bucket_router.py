@@ -36,6 +36,28 @@ class _FakeDocument:
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
+@dataclass
+class _FakeStagedUpload:
+    id: str
+    tenant_id: str
+    owner_user_id: str | None
+    original_file_name: str
+    source_type: str
+    source_path: str
+    status: str = "staged"
+    size_bytes: int = 0
+    error: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    expires_at: datetime | None = None
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass
+class _FakeBucketDocument:
+    indexing_status: str = "indexed"
+    indexing_error: str | None = None
+
+
 class _FakeBucketService:
     def __init__(self) -> None:
         self.bucket = _FakeBucket(
@@ -45,6 +67,8 @@ class _FakeBucketService:
             description="Demo description",
         )
         self.document: _FakeDocument | None = None
+        self.bucket_link = _FakeBucketDocument()
+        self.staged_upload: _FakeStagedUpload | None = None
 
     async def list_buckets(self, *, tenant_id: str):
         assert tenant_id == "tenant-a"
@@ -76,7 +100,7 @@ class _FakeBucketService:
         assert user.user_id == "user-a"
         if bucket_id != self.bucket.id:
             return None
-        return [self.document] if self.document else []
+        return [(self.document, self.bucket_link)] if self.document else []
 
     async def get_document(self, *, user, document_id: str):
         assert user.tenant_id == "tenant-a"
@@ -103,6 +127,84 @@ class _FakeBucketService:
     async def remove_document_from_bucket(self, *, user, bucket_id: str, document_id: str):
         assert user.tenant_id == "tenant-a"
         return bucket_id == self.bucket.id
+
+    async def stage_uploaded_document(self, *, user, file_name: str, content: bytes, content_type: str | None):
+        assert user.tenant_id == "tenant-a"
+        assert user.user_id == "user-a"
+        assert content_type == "text/plain"
+        self.staged_upload = _FakeStagedUpload(
+            id="stage-1",
+            tenant_id=user.tenant_id,
+            owner_user_id=user.user_id,
+            original_file_name=file_name,
+            source_type="txt",
+            source_path="/tmp/stage-1.txt",
+            size_bytes=len(content),
+        )
+        return self.staged_upload
+
+    async def cancel_staged_upload(self, *, user, upload_id: str):
+        assert user.tenant_id == "tenant-a"
+        if self.staged_upload is None or self.staged_upload.id != upload_id:
+            return False
+        self.staged_upload.status = "cancelled"
+        return True
+
+    async def commit_bucket_documents(
+        self,
+        *,
+        user,
+        bucket_id: str,
+        staged_upload_ids: list[str],
+        existing_document_ids: list[str],
+        removed_document_ids: list[str],
+        visibility: str = "private",
+        allowed_roles: list[str] | None = None,
+    ):
+        assert user.tenant_id == "tenant-a"
+        assert bucket_id == self.bucket.id
+        assert staged_upload_ids == ["stage-1"]
+        assert existing_document_ids == []
+        assert removed_document_ids == ["old-document"]
+        assert visibility == "private"
+        self.document = _FakeDocument(
+            id="document-committed",
+            tenant_id=user.tenant_id,
+            title="notes.txt",
+            file_name="notes.txt",
+            source_type="txt",
+            source_path="/tmp/document-committed.txt",
+            status="indexing",
+            visibility=visibility,
+            allowed_roles=allowed_roles or [],
+            size_bytes=5,
+        )
+        return [self.document], ["job-1"]
+
+    async def commit_personal_documents(
+        self,
+        *,
+        user,
+        staged_upload_ids: list[str],
+        visibility: str = "private",
+        allowed_roles: list[str] | None = None,
+    ):
+        assert user.tenant_id == "tenant-a"
+        assert staged_upload_ids == ["stage-1"]
+        assert visibility == "private"
+        self.document = _FakeDocument(
+            id="document-personal",
+            tenant_id=user.tenant_id,
+            title="notes.txt",
+            file_name="notes.txt",
+            source_type="txt",
+            source_path="/tmp/document-personal.txt",
+            status="indexing",
+            visibility=visibility,
+            allowed_roles=allowed_roles or [],
+            size_bytes=5,
+        )
+        return [self.document], ["job-personal"]
 
     async def save_uploaded_document(
         self,
@@ -237,3 +339,111 @@ def test_add_existing_document_to_bucket() -> None:
 
     assert response.status_code == 201
     assert response.json()["bucket_id"] == "bucket-1"
+
+
+def test_stage_document_upload_accepts_raw_body() -> None:
+    client = _client()
+
+    response = client.post(
+        "/documents/stage",
+        content=b"hello",
+        headers={
+            "Content-Type": "text/plain",
+            "X-File-Name": "notes.txt",
+            "X-Tenant-ID": "tenant-a",
+            "X-User-ID": "user-a",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["id"] == "stage-1"
+    assert response.json()["original_file_name"] == "notes.txt"
+    assert response.json()["status"] == "staged"
+
+
+def test_stage_document_upload_decodes_cyrillic_file_name() -> None:
+    client = _client()
+
+    response = client.post(
+        "/documents/stage",
+        content=b"hello",
+        headers={
+            "Content-Type": "text/plain",
+            "X-File-Name": "%D1%82%D0%B5%D1%81%D1%82.txt",
+            "X-File-Name-Encoding": "uri-component",
+            "X-Tenant-ID": "tenant-a",
+            "X-User-ID": "user-a",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["original_file_name"] == "тест.txt"
+
+
+def test_cancel_staged_upload() -> None:
+    client = _client()
+    client.post(
+        "/documents/stage",
+        content=b"hello",
+        headers={
+            "Content-Type": "text/plain",
+            "X-File-Name": "notes.txt",
+            "X-Tenant-ID": "tenant-a",
+            "X-User-ID": "user-a",
+        },
+    )
+
+    response = client.delete(
+        "/documents/stage/stage-1",
+        headers={
+            "X-Tenant-ID": "tenant-a",
+            "X-User-ID": "user-a",
+        },
+    )
+
+    assert response.status_code == 204
+
+
+def test_commit_bucket_documents_returns_indexing_job_ids() -> None:
+    client = _client()
+
+    response = client.post(
+        "/buckets/bucket-1/documents/-/commit",
+        headers={
+            "X-Tenant-ID": "tenant-a",
+            "X-User-ID": "user-a",
+        },
+        json={
+            "staged_upload_ids": ["stage-1"],
+            "existing_document_ids": [],
+            "removed_document_ids": ["old-document"],
+            "visibility": "private",
+            "allowed_roles": [],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["documents"][0]["id"] == "document-committed"
+    assert response.json()["indexing_job_ids"] == ["job-1"]
+
+
+def test_commit_personal_documents_returns_document_without_bucket_id() -> None:
+    client = _client()
+
+    response = client.post(
+        "/documents/-/commit-personal",
+        headers={
+            "X-Tenant-ID": "tenant-a",
+            "X-User-ID": "user-a",
+        },
+        json={
+            "staged_upload_ids": ["stage-1"],
+            "visibility": "private",
+            "allowed_roles": [],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["documents"][0]["id"] == "document-personal"
+    assert response.json()["documents"][0]["bucket_id"] is None
+    assert response.json()["indexing_job_ids"] == ["job-personal"]

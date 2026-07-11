@@ -5,9 +5,18 @@ export type DocumentItem = {
   title: string
   fileName: string
   sourceType: string
-  status: 'uploaded' | 'indexing' | 'indexed' | 'error'
+  status: 'uploaded' | 'indexing' | 'indexed' | 'index_failed' | 'error'
   visibility: 'private' | 'role' | 'tenant' | 'team' | 'public'
   allowedRoles: string[]
+  uploadedAt: string
+}
+
+export type StagedDocumentItem = {
+  id: string
+  fileName: string
+  sourceType: string
+  status: 'staged' | 'committed' | 'cancelled' | 'expired' | 'error'
+  sizeBytes: number
   uploadedAt: string
 }
 

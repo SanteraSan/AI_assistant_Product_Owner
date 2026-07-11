@@ -1,12 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchBuckets } from '../../entities/bucket/api'
+import { useEffect } from 'react'
+import { createBucket, fetchBuckets } from '../../entities/bucket/api'
 import { mockBuckets } from '../../entities/bucket/model'
 import { useChatStore } from '../../entities/chat/store'
 import {
-  addDocumentToBucket,
+  cancelStagedDocument,
+  commitBucketDocuments,
+  commitPersonalDocuments,
   fetchAvailableDocuments,
   fetchBucketDocuments,
-  uploadDocument,
+  stageDocument,
 } from '../../entities/document/api'
 import { mockDocuments } from '../../entities/document/model'
 import { localModels } from '../../entities/model/model'
@@ -24,6 +27,7 @@ export function ChatPage() {
   const queryClient = useQueryClient()
   const {
     activeThreadId,
+    addAttachmentMessage,
     composerValue,
     createThread,
     messagesByThreadId,
@@ -31,6 +35,7 @@ export function ChatPage() {
     sendMessage,
     setComposerValue,
     threads,
+    updateAttachmentStatuses,
   } = useChatStore()
   const { currentUser, loginAsMockUser } = useAuthStore()
   const {
@@ -65,39 +70,126 @@ export function ChatPage() {
     enabled: hasBackendBuckets && Boolean(selectedBucketId),
     queryKey: ['bucket-documents', userForApi.tenantId, selectedBucketId],
     queryFn: () => fetchBucketDocuments(userForApi, selectedBucketId),
+    refetchInterval: (query) =>
+      query.state.data?.some((document) => document.status === 'indexing')
+        ? 3000
+        : false,
     retry: false,
   })
-  const documents = documentsQuery.data ?? mockDocuments
+  const documents = hasBackendBuckets ? (documentsQuery.data ?? []) : mockDocuments
   const availableDocumentsQuery = useQuery({
     enabled: hasBackendBuckets,
     queryKey: ['documents-available', userForApi.tenantId, userForApi.id, userForApi.roles],
     queryFn: () => fetchAvailableDocuments(userForApi),
+    refetchInterval: (query) =>
+      query.state.data?.some((document) => document.status === 'indexing') ? 3000 : false,
     retry: false,
   })
-  const availableDocuments = availableDocumentsQuery.data ?? mockDocuments
-  const addDocumentMutation = useMutation({
-    mutationFn: ({ bucketId, documentId }: { bucketId: string; documentId: string }) =>
-      addDocumentToBucket(userForApi, bucketId, documentId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['bucket-documents'] })
-      void queryClient.invalidateQueries({ queryKey: ['buckets'] })
-    },
+  const availableDocuments = hasBackendBuckets ? (availableDocumentsQuery.data ?? []) : mockDocuments
+  const stageDocumentMutation = useMutation({
+    mutationFn: (file: File) => stageDocument(userForApi, file),
   })
-  const uploadDocumentMutation = useMutation({
-    mutationFn: ({ bucketId, file }: { bucketId: string; file: File }) =>
-      uploadDocument(userForApi, bucketId, file, 'private'),
-    onSuccess: () => {
+  const cancelStagedDocumentMutation = useMutation({
+    mutationFn: (uploadId: string) => cancelStagedDocument(userForApi, uploadId),
+  })
+  const commitBucketDocumentsMutation = useMutation({
+    mutationFn: ({
+      bucketId,
+      existingDocumentIds,
+      removedDocumentIds,
+      stagedUploadIds,
+    }: {
+      bucketId: string
+      existingDocumentIds: string[]
+      removedDocumentIds: string[]
+      stagedUploadIds: string[]
+    }) =>
+      commitBucketDocuments(userForApi, bucketId, {
+        existingDocumentIds,
+        removedDocumentIds,
+        stagedUploadIds,
+        visibility: 'private',
+      }),
+    onSuccess: (committedDocuments, variables) => {
+      queryClient.setQueryData(
+        ['bucket-documents', userForApi.tenantId, variables.bucketId],
+        (current: typeof committedDocuments | undefined) => {
+          const remainingDocuments = (current ?? []).filter(
+            (document) => !variables.removedDocumentIds.includes(document.id),
+          )
+          const committedById = new Map(committedDocuments.map((document) => [document.id, document]))
+          const mergedDocuments = remainingDocuments.map((document) =>
+            committedById.get(document.id) ?? document,
+          )
+          for (const document of committedDocuments) {
+            if (!mergedDocuments.some((existingDocument) => existingDocument.id === document.id)) {
+              mergedDocuments.push(document)
+            }
+          }
+          return mergedDocuments
+        },
+      )
       void queryClient.invalidateQueries({ queryKey: ['bucket-documents'] })
       void queryClient.invalidateQueries({ queryKey: ['documents-available'] })
       void queryClient.invalidateQueries({ queryKey: ['buckets'] })
     },
   })
+  const commitPersonalDocumentsMutation = useMutation({
+    mutationFn: ({ stagedUploadIds }: { stagedUploadIds: string[] }) =>
+      commitPersonalDocuments(userForApi, {
+        stagedUploadIds,
+        visibility: 'private',
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['documents-available'] })
+    },
+  })
+  const createBucketMutation = useMutation({
+    mutationFn: () =>
+      createBucket(userForApi, {
+        name: `Личная база знаний ${new Date().toLocaleTimeString('ru-RU')}`,
+        description: 'Персональный bucket для документов, загруженных через UI.',
+      }),
+    onSuccess: (bucket) => {
+      void queryClient.invalidateQueries({ queryKey: ['buckets'] })
+      selectBucket(bucket.id)
+    },
+  })
+
+  useEffect(() => {
+    updateAttachmentStatuses(
+      availableDocuments.map((document) => ({
+        id: document.id,
+        fileName: document.fileName,
+        sourceType: document.sourceType,
+        status: document.status,
+      })),
+    )
+  }, [availableDocuments, updateAttachmentStatuses])
 
   function handleSendMessage() {
     sendMessage(composerValue, {
       bucketId: activeBucket?.id ?? selectedBucketId,
       bucketName: activeBucket?.name ?? 'Selected bucket',
     })
+  }
+
+  async function handleAttachFileToChat(file: File) {
+    try {
+      const stagedDocument = await stageDocumentMutation.mutateAsync(file)
+      const documents = await commitPersonalDocumentsMutation.mutateAsync({
+        stagedUploadIds: [stagedDocument.id],
+      })
+      const document = documents[0]
+      addAttachmentMessage({
+        id: document?.id ?? stagedDocument.id,
+        fileName: document?.fileName ?? stagedDocument.fileName,
+        sourceType: document?.sourceType ?? stagedDocument.sourceType,
+        status: document?.status ?? 'indexing',
+      })
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Не удалось загрузить документ.')
+    }
   }
 
   return (
@@ -136,6 +228,9 @@ export function ChatPage() {
             approach={selectedApproach}
             composerValue={composerValue}
             messages={messages}
+            onAttachFile={(file) => {
+              void handleAttachFileToChat(file)
+            }}
             onChangeComposerValue={setComposerValue}
             onSendMessage={handleSendMessage}
             selectedModel={selectedModel}
@@ -144,14 +239,18 @@ export function ChatPage() {
           <BucketWorkspace
             availableDocuments={availableDocuments}
             buckets={buckets}
+            canMutateDocuments={hasBackendBuckets}
             documents={documents}
-            onAddDocumentToBucket={(bucketId, documentId) =>
-              addDocumentMutation.mutate({ bucketId, documentId })
+            onCancelStagedDocument={(uploadId) =>
+              cancelStagedDocumentMutation.mutateAsync(uploadId)
             }
-            onCreateBucket={() => undefined}
+            onCommitChanges={async (bucketId, changes) => {
+              await commitBucketDocumentsMutation.mutateAsync({ bucketId, ...changes })
+            }}
+            onCreateBucket={() => createBucketMutation.mutate()}
             onInspectBucket={selectBucket}
             onSelectBucket={selectBucketAndOpenChat}
-            onUploadDocument={(bucketId, file) => uploadDocumentMutation.mutate({ bucketId, file })}
+            onStageDocument={(file) => stageDocumentMutation.mutateAsync(file)}
           />
         )}
       </section>

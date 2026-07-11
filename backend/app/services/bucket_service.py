@@ -1,12 +1,23 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from shutil import move
 from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.db.models import BucketDocument, DocumentAsset, KnowledgeBucket
+from app.db.models import (
+    BucketDocument,
+    DocumentAsset,
+    DocumentIndexingJob,
+    KnowledgeBucket,
+    StagedDocumentUpload,
+)
 from app.services.access_policy import UserContext, can_read_document
+
+
+PERSONAL_INDEX_BUCKET_ID = "__personal__"
 
 
 class BucketService:
@@ -18,6 +29,10 @@ class BucketService:
     ) -> None:
         self._session_factory = session_factory
         self._upload_root = _resolve_upload_root(raw_data_dir)
+
+    @property
+    def session_factory(self) -> async_sessionmaker[AsyncSession]:
+        return self._session_factory
 
     async def list_buckets(self, *, tenant_id: str) -> list[tuple[KnowledgeBucket, int]]:
         async with self._session_factory() as session:
@@ -80,7 +95,7 @@ class BucketService:
         *,
         user: UserContext,
         bucket_id: str,
-    ) -> list[DocumentAsset] | None:
+    ) -> list[tuple[DocumentAsset, BucketDocument]] | None:
         async with self._session_factory() as session:
             bucket = await self._get_bucket(
                 session=session,
@@ -90,7 +105,7 @@ class BucketService:
             if bucket is None:
                 return None
             result = await session.execute(
-                select(DocumentAsset)
+                select(DocumentAsset, BucketDocument)
                 .join(BucketDocument, BucketDocument.document_id == DocumentAsset.id)
                 .options(selectinload(DocumentAsset.acl_entries))
                 .where(
@@ -100,10 +115,10 @@ class BucketService:
                 )
                 .order_by(BucketDocument.created_at.desc())
             )
-            documents = list(result.scalars())
+            rows = list(result.all())
             return [
-                document
-                for document in documents
+                (document, bucket_document)
+                for document, bucket_document in rows
                 if can_read_document(
                     document=document,
                     user=user,
@@ -241,6 +256,268 @@ class BucketService:
             await session.commit()
             return True
 
+    async def stage_uploaded_document(
+        self,
+        *,
+        user: UserContext,
+        file_name: str,
+        content: bytes,
+        content_type: str | None,
+    ) -> StagedDocumentUpload:
+        async with self._session_factory() as session:
+            upload_id = str(uuid4())
+            safe_file_name = _safe_file_name(file_name)
+            target_dir = self._upload_root / user.tenant_id / "staging"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target_path = target_dir / f"{upload_id}_{safe_file_name}"
+            target_path.write_bytes(content)
+
+            upload = StagedDocumentUpload(
+                id=upload_id,
+                tenant_id=user.tenant_id,
+                owner_user_id=user.user_id,
+                original_file_name=safe_file_name,
+                source_type=_source_type_for_file(safe_file_name),
+                source_path=str(target_path),
+                status="staged",
+                size_bytes=len(content),
+                expires_at=datetime.now(UTC) + timedelta(days=1),
+                metadata_json={"content_type": content_type or "application/octet-stream"},
+            )
+            session.add(upload)
+            await session.commit()
+            await session.refresh(upload)
+            return upload
+
+    async def cancel_staged_upload(
+        self,
+        *,
+        user: UserContext,
+        upload_id: str,
+    ) -> bool:
+        async with self._session_factory() as session:
+            upload = await session.scalar(
+                select(StagedDocumentUpload).where(
+                    StagedDocumentUpload.tenant_id == user.tenant_id,
+                    StagedDocumentUpload.id == upload_id,
+                    StagedDocumentUpload.status == "staged",
+                )
+            )
+            if upload is None:
+                return False
+            if upload.owner_user_id is not None and upload.owner_user_id != user.user_id and not user.is_admin:
+                return False
+            Path(upload.source_path).unlink(missing_ok=True)
+            upload.status = "cancelled"
+            await session.commit()
+            return True
+
+    async def commit_bucket_documents(
+        self,
+        *,
+        user: UserContext,
+        bucket_id: str,
+        staged_upload_ids: list[str],
+        existing_document_ids: list[str],
+        removed_document_ids: list[str],
+        visibility: str = "private",
+        allowed_roles: list[str] | None = None,
+    ) -> tuple[list[DocumentAsset], list[str]] | None:
+        async with self._session_factory() as session:
+            bucket = await self._get_bucket(
+                session=session,
+                tenant_id=user.tenant_id,
+                bucket_id=bucket_id,
+            )
+            if bucket is None:
+                return None
+
+            committed_documents: list[DocumentAsset] = []
+            indexing_job_ids: list[str] = []
+            normalized_allowed_roles = allowed_roles or []
+
+            for document_id in _deduplicate_ids(removed_document_ids):
+                link = await session.scalar(
+                    select(BucketDocument).where(
+                        BucketDocument.tenant_id == user.tenant_id,
+                        BucketDocument.bucket_id == bucket_id,
+                        BucketDocument.document_id == document_id,
+                    )
+                )
+                if link is not None:
+                    await session.delete(link)
+
+            for document_id in _deduplicate_ids(existing_document_ids):
+                document = await session.scalar(
+                    select(DocumentAsset)
+                    .options(selectinload(DocumentAsset.acl_entries))
+                    .where(
+                        DocumentAsset.tenant_id == user.tenant_id,
+                        DocumentAsset.id == document_id,
+                    )
+                )
+                if document is None:
+                    continue
+                if not can_read_document(document=document, user=user, acl_entries=document.acl_entries):
+                    continue
+                await self._ensure_bucket_document_link(
+                    session=session,
+                    user=user,
+                    bucket_id=bucket_id,
+                    document_id=document.id,
+                    indexing_status="indexing",
+                )
+                job_id = str(uuid4())
+                session.add(
+                    DocumentIndexingJob(
+                        id=job_id,
+                        tenant_id=user.tenant_id,
+                        bucket_id=bucket_id,
+                        document_id=document.id,
+                        status="pending",
+                        metadata_json={"source": "bucket_existing_document_commit"},
+                    )
+                )
+                committed_documents.append(document)
+                indexing_job_ids.append(job_id)
+
+            for upload_id in _deduplicate_ids(staged_upload_ids):
+                upload = await session.scalar(
+                    select(StagedDocumentUpload).where(
+                        StagedDocumentUpload.tenant_id == user.tenant_id,
+                        StagedDocumentUpload.id == upload_id,
+                        StagedDocumentUpload.status == "staged",
+                    )
+                )
+                if upload is None:
+                    continue
+                if upload.owner_user_id is not None and upload.owner_user_id != user.user_id and not user.is_admin:
+                    continue
+
+                document_id = str(uuid4())
+                target_dir = self._upload_root / user.tenant_id / "documents"
+                target_dir.mkdir(parents=True, exist_ok=True)
+                target_path = target_dir / f"{document_id}_{upload.original_file_name}"
+                move(upload.source_path, target_path)
+
+                document = DocumentAsset(
+                    id=document_id,
+                    tenant_id=user.tenant_id,
+                    owner_user_id=user.user_id,
+                    title=upload.original_file_name,
+                    file_name=upload.original_file_name,
+                    source_type=upload.source_type,
+                    source_path=str(target_path),
+                    status="indexing",
+                    visibility=visibility,
+                    allowed_roles=normalized_allowed_roles,
+                    size_bytes=upload.size_bytes,
+                    metadata_json=dict(upload.metadata_json),
+                )
+                session.add(document)
+                await self._ensure_bucket_document_link(
+                    session=session,
+                    user=user,
+                    bucket_id=bucket_id,
+                    document_id=document_id,
+                    indexing_status="indexing",
+                )
+                job_id = str(uuid4())
+                session.add(
+                    DocumentIndexingJob(
+                        id=job_id,
+                        tenant_id=user.tenant_id,
+                        bucket_id=bucket_id,
+                        document_id=document_id,
+                        status="pending",
+                        metadata_json={"source": "bucket_commit"},
+                    )
+                )
+                upload.status = "committed"
+                upload.metadata_json = {
+                    **dict(upload.metadata_json),
+                    "document_id": document_id,
+                    "bucket_id": bucket_id,
+                }
+                committed_documents.append(document)
+                indexing_job_ids.append(job_id)
+
+            await session.commit()
+            for document in committed_documents:
+                await session.refresh(document)
+            return committed_documents, indexing_job_ids
+
+    async def commit_personal_documents(
+        self,
+        *,
+        user: UserContext,
+        staged_upload_ids: list[str],
+        visibility: str = "private",
+        allowed_roles: list[str] | None = None,
+    ) -> tuple[list[DocumentAsset], list[str]]:
+        async with self._session_factory() as session:
+            committed_documents: list[DocumentAsset] = []
+            indexing_job_ids: list[str] = []
+            normalized_allowed_roles = allowed_roles or []
+
+            for upload_id in _deduplicate_ids(staged_upload_ids):
+                upload = await session.scalar(
+                    select(StagedDocumentUpload).where(
+                        StagedDocumentUpload.tenant_id == user.tenant_id,
+                        StagedDocumentUpload.id == upload_id,
+                        StagedDocumentUpload.status == "staged",
+                    )
+                )
+                if upload is None:
+                    continue
+                if upload.owner_user_id is not None and upload.owner_user_id != user.user_id and not user.is_admin:
+                    continue
+
+                document_id = str(uuid4())
+                target_dir = self._upload_root / user.tenant_id / "documents"
+                target_dir.mkdir(parents=True, exist_ok=True)
+                target_path = target_dir / f"{document_id}_{upload.original_file_name}"
+                move(upload.source_path, target_path)
+
+                document = DocumentAsset(
+                    id=document_id,
+                    tenant_id=user.tenant_id,
+                    owner_user_id=user.user_id,
+                    title=upload.original_file_name,
+                    file_name=upload.original_file_name,
+                    source_type=upload.source_type,
+                    source_path=str(target_path),
+                    status="indexing",
+                    visibility=visibility,
+                    allowed_roles=normalized_allowed_roles,
+                    size_bytes=upload.size_bytes,
+                    metadata_json=dict(upload.metadata_json),
+                )
+                session.add(document)
+                job_id = str(uuid4())
+                session.add(
+                    DocumentIndexingJob(
+                        id=job_id,
+                        tenant_id=user.tenant_id,
+                        bucket_id=PERSONAL_INDEX_BUCKET_ID,
+                        document_id=document_id,
+                        status="pending",
+                        metadata_json={"source": "personal_commit"},
+                    )
+                )
+                upload.status = "committed"
+                upload.metadata_json = {
+                    **dict(upload.metadata_json),
+                    "document_id": document_id,
+                }
+                committed_documents.append(document)
+                indexing_job_ids.append(job_id)
+
+            await session.commit()
+            for document in committed_documents:
+                await session.refresh(document)
+            return committed_documents, indexing_job_ids
+
     async def save_uploaded_document(
         self,
         *,
@@ -297,6 +574,36 @@ class BucketService:
             await session.refresh(document)
             return document
 
+    async def _ensure_bucket_document_link(
+        self,
+        *,
+        session: AsyncSession,
+        user: UserContext,
+        bucket_id: str,
+        document_id: str,
+        indexing_status: str = "indexed",
+    ) -> None:
+        existing_link = await session.scalar(
+            select(BucketDocument).where(
+                BucketDocument.tenant_id == user.tenant_id,
+                BucketDocument.bucket_id == bucket_id,
+                BucketDocument.document_id == document_id,
+            )
+        )
+        if existing_link is None:
+            session.add(
+                BucketDocument(
+                    tenant_id=user.tenant_id,
+                    bucket_id=bucket_id,
+                    document_id=document_id,
+                    added_by_user_id=user.user_id,
+                    indexing_status=indexing_status,
+                )
+            )
+        else:
+            existing_link.indexing_status = indexing_status
+            existing_link.indexing_error = None
+
     async def _get_bucket(
         self,
         *,
@@ -328,3 +635,14 @@ def _safe_file_name(file_name: str) -> str:
 def _source_type_for_file(file_name: str) -> str:
     suffix = Path(file_name).suffix.lower().lstrip(".")
     return suffix or "unknown"
+
+
+def _deduplicate_ids(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = value.strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            result.append(normalized)
+    return result

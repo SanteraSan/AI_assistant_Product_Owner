@@ -1,6 +1,6 @@
 import { apiRequest } from '../../shared/api/httpClient'
 import type { User } from '../user/model'
-import type { DocumentItem } from './model'
+import type { DocumentItem, StagedDocumentItem } from './model'
 
 type DocumentDto = {
   id: string
@@ -13,6 +13,20 @@ type DocumentDto = {
   visibility: DocumentItem['visibility']
   allowed_roles: string[]
   created_at: string
+}
+
+type StagedDocumentDto = {
+  id: string
+  original_file_name: string
+  source_type: string
+  status: StagedDocumentItem['status']
+  size_bytes: number
+  created_at: string
+}
+
+type CommitDocumentsDto = {
+  documents: DocumentDto[]
+  indexing_job_ids: string[]
 }
 
 export async function fetchBucketDocuments(
@@ -72,6 +86,81 @@ export async function removeDocumentFromBucket(
   })
 }
 
+export async function stageDocument(user: User, file: File): Promise<StagedDocumentItem> {
+  const document = await apiRequest<StagedDocumentDto>('/documents/stage', {
+    body: await file.arrayBuffer(),
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      ...fileNameHeaders(file.name),
+    },
+    json: false,
+    method: 'POST',
+    tenantId: user.tenantId,
+    userId: user.id,
+    roles: user.roles,
+  })
+  return mapStagedDocument(document)
+}
+
+export async function cancelStagedDocument(user: User, uploadId: string): Promise<void> {
+  await apiRequest<void>(`/documents/stage/${uploadId}`, {
+    method: 'DELETE',
+    tenantId: user.tenantId,
+    userId: user.id,
+    roles: user.roles,
+  })
+}
+
+export async function commitBucketDocuments(
+  user: User,
+  bucketId: string,
+  payload: {
+    stagedUploadIds: string[]
+    existingDocumentIds: string[]
+    removedDocumentIds: string[]
+    visibility: DocumentItem['visibility']
+  },
+): Promise<DocumentItem[]> {
+  const response = await apiRequest<CommitDocumentsDto>(
+    `/buckets/${bucketId}/documents/-/commit`,
+    {
+      body: JSON.stringify({
+        staged_upload_ids: payload.stagedUploadIds,
+        existing_document_ids: payload.existingDocumentIds,
+        removed_document_ids: payload.removedDocumentIds,
+        visibility: payload.visibility,
+        allowed_roles: [],
+      }),
+      method: 'POST',
+      tenantId: user.tenantId,
+      userId: user.id,
+      roles: user.roles,
+    },
+  )
+  return response.documents.map(mapDocument)
+}
+
+export async function commitPersonalDocuments(
+  user: User,
+  payload: {
+    stagedUploadIds: string[]
+    visibility: DocumentItem['visibility']
+  },
+): Promise<DocumentItem[]> {
+  const response = await apiRequest<CommitDocumentsDto>('/documents/-/commit-personal', {
+    body: JSON.stringify({
+      staged_upload_ids: payload.stagedUploadIds,
+      visibility: payload.visibility,
+      allowed_roles: [],
+    }),
+    method: 'POST',
+    tenantId: user.tenantId,
+    userId: user.id,
+    roles: user.roles,
+  })
+  return response.documents.map(mapDocument)
+}
+
 function mapDocument(document: DocumentDto): DocumentItem {
   return {
     id: document.id,
@@ -87,6 +176,17 @@ function mapDocument(document: DocumentDto): DocumentItem {
   }
 }
 
+function mapStagedDocument(document: StagedDocumentDto): StagedDocumentItem {
+  return {
+    id: document.id,
+    fileName: document.original_file_name,
+    sourceType: document.source_type,
+    status: document.status,
+    sizeBytes: document.size_bytes,
+    uploadedAt: new Date(document.created_at).toLocaleString('ru-RU'),
+  }
+}
+
 export async function uploadDocument(
   user: User,
   bucketId: string,
@@ -98,7 +198,7 @@ export async function uploadDocument(
     headers: {
       'Content-Type': file.type || 'application/octet-stream',
       'X-Document-Visibility': visibility,
-      'X-File-Name': file.name,
+      ...fileNameHeaders(file.name),
     },
     json: false,
     method: 'POST',
@@ -107,4 +207,11 @@ export async function uploadDocument(
     roles: user.roles,
   })
   return mapDocument(document)
+}
+
+function fileNameHeaders(fileName: string): Record<string, string> {
+  return {
+    'X-File-Name': encodeURIComponent(fileName),
+    'X-File-Name-Encoding': 'uri-component',
+  }
 }

@@ -9,11 +9,19 @@ export type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
   content: string
+  attachments?: ChatAttachment[]
   sources?: Array<{
     id: string
     title: string
     sourceType: string
   }>
+}
+
+export type ChatAttachment = {
+  id: string
+  fileName: string
+  sourceType: string
+  status: 'uploaded' | 'indexing' | 'indexed' | 'index_failed' | 'error'
 }
 
 export const mockThreads: ChatThread[] = [
