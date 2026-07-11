@@ -3219,3 +3219,35 @@ V5 LoRA:
 - projection metric was necessary: it caught the exact failure class from V4;
 - making required columns explicit in the NL instruction is part of dataset quality, not just model quality;
 - V5 is the current best local Text-to-SQL adapter result and is strong enough to move toward Analytics UI integration next.
+
+## 2026-07-11: Enterprise Product Expansion Track
+
+Контекст:
+
+- после M5 ingestion, backend hardening и M7 LoRA Text-to-SQL проект готов перейти от backend-first лаборатории к product/enterprise форме;
+- следующий большой фокус: UI, auth/RBAC, model gateway, external providers, workflow automation, tool-use/agents and event-driven ingestion;
+- overhead на этом этапе не является главным ограничением: цель — изучить и показать архитектурные паттерны, которые встречаются в реальных product/enterprise системах.
+
+Что оформлено:
+
+- создан план `research/ENTERPRISE_PRODUCT_EXPANSION_PLAN.md`;
+- план разбит на stages E0-E7:
+  - E0 UI Skeleton;
+  - E1 Keycloak, BFF And RBAC;
+  - E2 Model Gateway And External Providers;
+  - E3 Agents, Function Calling And Tool Use;
+  - E4 n8n And Email/Workflow Integration;
+  - E5 Kafka And Event-Driven Ingestion;
+  - E6 Framework Adapters;
+  - E7 Product Hardening.
+
+Решение:
+
+- начинать с E0 UI Skeleton: login mock без Keycloak, buckets, upload, ingestion status, chat, source/evidence panel and model selector;
+- после появления видимого product surface заменить mock auth на Keycloak/BFF/RBAC;
+- сохранить текущее backend/RAG/LoRA ядро как authoritative service layer, а новые framework/gateway/agent слои подключать через adapters.
+
+Вывод:
+
+- UI skeleton теперь является ближайшим product step;
+- enterprise layers should be added incrementally while preserving access boundaries, traceability and evaluation discipline.
