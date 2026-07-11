@@ -16,7 +16,7 @@ import { ChatWorkspace } from '../../widgets/chat-workspace/ChatWorkspace'
 import { TopBar } from '../../widgets/top-bar/TopBar'
 
 export function ChatPage() {
-  const [activeBucketId, setActiveBucketId] = useState(mockBuckets[0]?.id ?? '')
+  const [activeBucketId, setActiveBucketId] = useState('')
   const [activeView, setActiveView] = useState<'chat' | 'buckets'>('chat')
   const [isLoginOpen, setIsLoginOpen] = useState(false)
   const [selectedApproach, setSelectedApproach] = useState<ModelApproach>('hybrid')
@@ -38,22 +38,26 @@ export function ChatPage() {
     queryFn: () => fetchBuckets(userForApi),
     retry: false,
   })
-  const buckets = bucketsQuery.data?.length ? bucketsQuery.data : mockBuckets
+  const hasBackendBuckets = Boolean(bucketsQuery.data?.length)
+  const buckets = hasBackendBuckets ? bucketsQuery.data! : mockBuckets
 
-  const activeBucket = buckets.find((bucket) => bucket.id === activeBucketId) ?? buckets[0]
+  const selectedBucketId = buckets.some((bucket) => bucket.id === activeBucketId)
+    ? activeBucketId
+    : (buckets[0]?.id ?? '')
+  const activeBucket = buckets.find((bucket) => bucket.id === selectedBucketId) ?? buckets[0]
   const selectedModel = localModels.find((model) => model.id === selectedModelId)
   const messages = messagesByThreadId[activeThreadId] ?? []
   const documentsQuery = useQuery({
-    enabled: Boolean(activeBucket?.id),
-    queryKey: ['bucket-documents', userForApi.tenantId, activeBucket?.id],
-    queryFn: () => fetchBucketDocuments(userForApi, activeBucket?.id ?? ''),
+    enabled: hasBackendBuckets && Boolean(selectedBucketId),
+    queryKey: ['bucket-documents', userForApi.tenantId, selectedBucketId],
+    queryFn: () => fetchBucketDocuments(userForApi, selectedBucketId),
     retry: false,
   })
   const documents = documentsQuery.data ?? mockDocuments
 
   function handleSendMessage() {
     sendMessage(composerValue, {
-      bucketId: activeBucket?.id ?? activeBucketId,
+      bucketId: activeBucket?.id ?? selectedBucketId,
       bucketName: activeBucket?.name ?? 'Selected bucket',
     })
   }
@@ -68,7 +72,7 @@ export function ChatPage() {
       />
       <section className="flex min-w-0 flex-1 flex-col">
         <TopBar
-          activeBucketId={activeBucketId}
+          activeBucketId={selectedBucketId}
           activeView={activeView}
           buckets={buckets}
           models={localModels}
