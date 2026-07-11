@@ -38,6 +38,7 @@ n8n / Email / External Workflows
 - Frameworks such as LangGraph, LangChain or LlamaIndex should be adapter/orchestration layers, not a rewrite of current services.
 - Kafka and workflow tooling should be introduced around explicit events, not as hidden background magic.
 - Every enterprise layer should add traceability: request id, user id, tenant id, bucket id, document id, tool call id and model provider.
+- Frontend follows Flux-style state flow: actions update Zustand/client state or React Query/server state first, then widgets render from state. Pages should not own business state through scattered local `useState`.
 
 ## Stage E0: UI Skeleton
 
@@ -60,6 +61,7 @@ Recommended implementation:
 
 - frontend: React/Vite or Next.js;
 - keep UI contracts explicit and typed;
+- use Zustand for client/business state and React Query for server state;
 - keep backend endpoints thin;
 - do not move ingestion/RAG logic into frontend;
 - start with mock auth context: `user_id`, `tenant_id`, roles.

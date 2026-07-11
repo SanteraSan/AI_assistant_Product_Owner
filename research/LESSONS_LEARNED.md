@@ -3291,3 +3291,31 @@ V5 LoRA:
 - upload endpoint сохраняет файл и document registry/status, но пока не запускает Qdrant indexing;
 - baseline upload принимает raw body + `X-File-Name`, чтобы не требовать `python-multipart` в системном Python окружении;
 - следующий шаг: связать upload registry с ingestion/chunking/embedding pipeline и убрать fallback mock data из UI.
+
+## 2026-07-11: Frontend Flux/Zustand State Rule
+
+Контекст:
+
+- первый UI skeleton начал с гибридного состояния: часть chat state уже была в Zustand, но workspace/auth/ui flags ещё жили в local `useState`;
+- для product-grade frontend нужен явный Flux-style flow: user action -> store/server state mutation -> render.
+
+Решение:
+
+- правило зафиксировано в `AGENTS.md`, `research/ENTERPRISE_PRODUCT_EXPANSION_PLAN.md` и UI plan;
+- client/business state хранится в Zustand;
+- server state хранится в React Query;
+- UI components остаются prop-driven;
+- page components должны быть orchestrator/view, а не владельцами domain state.
+
+Что изменено:
+
+- добавлен `entities/workspace/store.ts` для `activeView`, `activeBucketId`, `selectedModelId`, `selectedApproach`;
+- добавлен `entities/user/store.ts` для mock/current user actions;
+- добавлен `shared/ui/store.ts` для login modal UI state;
+- `ChatPage` больше не держит domain state через scattered `useState`, а читает Zustand stores и React Query.
+
+Проверки:
+
+- frontend: `npm run build` passed;
+- frontend: `npm run lint` passed;
+- backend quick tests: `13 passed`.

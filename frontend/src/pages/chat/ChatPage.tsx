@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchBuckets } from '../../entities/bucket/api'
 import { mockBuckets } from '../../entities/bucket/model'
@@ -6,22 +5,17 @@ import { useChatStore } from '../../entities/chat/store'
 import { fetchBucketDocuments } from '../../entities/document/api'
 import { mockDocuments } from '../../entities/document/model'
 import { localModels } from '../../entities/model/model'
-import type { ModelApproach } from '../../entities/model/model'
 import { mockUser } from '../../entities/user/model'
-import type { User } from '../../entities/user/model'
+import { useAuthStore } from '../../entities/user/store'
+import { useWorkspaceStore } from '../../entities/workspace/store'
 import { MockLoginModal } from '../../features/mock-login/MockLoginModal'
+import { useUiStore } from '../../shared/ui/store'
 import { BucketWorkspace } from '../../widgets/bucket-workspace/BucketWorkspace'
 import { ChatSidebar } from '../../widgets/chat-sidebar/ChatSidebar'
 import { ChatWorkspace } from '../../widgets/chat-workspace/ChatWorkspace'
 import { TopBar } from '../../widgets/top-bar/TopBar'
 
 export function ChatPage() {
-  const [activeBucketId, setActiveBucketId] = useState('')
-  const [activeView, setActiveView] = useState<'chat' | 'buckets'>('chat')
-  const [isLoginOpen, setIsLoginOpen] = useState(false)
-  const [selectedApproach, setSelectedApproach] = useState<ModelApproach>('hybrid')
-  const [selectedModelId, setSelectedModelId] = useState(localModels[0]?.id ?? '')
-  const [user, setUser] = useState<User | null>(null)
   const {
     activeThreadId,
     composerValue,
@@ -32,7 +26,21 @@ export function ChatPage() {
     setComposerValue,
     threads,
   } = useChatStore()
-  const userForApi = user ?? mockUser
+  const { currentUser, loginAsMockUser } = useAuthStore()
+  const {
+    activeBucketId,
+    activeView,
+    openBuckets,
+    openChat,
+    selectApproach,
+    selectBucket,
+    selectBucketAndOpenChat,
+    selectModel,
+    selectedApproach,
+    selectedModelId,
+  } = useWorkspaceStore()
+  const { closeLoginModal, isLoginModalOpen, openLoginModal } = useUiStore()
+  const userForApi = currentUser ?? mockUser
   const bucketsQuery = useQuery({
     queryKey: ['buckets', userForApi.tenantId],
     queryFn: () => fetchBuckets(userForApi),
@@ -76,14 +84,20 @@ export function ChatPage() {
           activeView={activeView}
           buckets={buckets}
           models={localModels}
-          onChangeApproach={setSelectedApproach}
-          onChangeBucket={setActiveBucketId}
-          onChangeModel={setSelectedModelId}
-          onChangeView={setActiveView}
-          onLoginClick={() => setIsLoginOpen(true)}
+          onChangeApproach={selectApproach}
+          onChangeBucket={selectBucket}
+          onChangeModel={selectModel}
+          onChangeView={(view) => {
+            if (view === 'chat') {
+              openChat()
+              return
+            }
+            openBuckets()
+          }}
+          onLoginClick={openLoginModal}
           selectedApproach={selectedApproach}
           selectedModelId={selectedModelId}
-          user={user}
+          user={currentUser}
         />
 
         {activeView === 'chat' ? (
@@ -101,18 +115,15 @@ export function ChatPage() {
             buckets={buckets}
             documents={documents}
             onCreateBucket={() => undefined}
-            onSelectBucket={(bucketId) => {
-              setActiveBucketId(bucketId)
-              setActiveView('chat')
-            }}
+            onSelectBucket={selectBucketAndOpenChat}
           />
         )}
       </section>
 
       <MockLoginModal
-        isOpen={isLoginOpen}
-        onClose={() => setIsLoginOpen(false)}
-        onLogin={setUser}
+        isOpen={isLoginModalOpen}
+        onClose={closeLoginModal}
+        onLogin={loginAsMockUser}
         user={mockUser}
       />
     </div>

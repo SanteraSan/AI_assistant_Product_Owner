@@ -29,6 +29,16 @@ These rules are for AI coding agents working on this pet project. The project is
 - Add abstractions only when they reduce real duplication or clarify ownership boundaries.
 - Preserve existing user changes. Do not revert unrelated files.
 
+## Frontend Architecture Principles
+
+- Use FSD boundaries for frontend code: `app`, `pages`, `widgets`, `features`, `entities`, `shared`.
+- Keep reusable UI components prop-driven and free of business decisions.
+- Follow Flux-style data flow: user interaction calls an action, action updates store/server state, components render from the resulting state.
+- Use Zustand for client/business state such as active chat, selected bucket, selected model, selected mode, mock/current user and UI modal flags.
+- Use React Query for server state such as buckets, documents, upload mutations and future RAG requests.
+- Avoid scattering business `useState` across pages. Page components should orchestrate stores, queries and widgets, not own domain behavior.
+- Do not call `fetch` directly from UI components. Keep typed API calls in `entities/*/api.ts` or `shared/api`.
+
 ## RAG And Evidence Boundaries
 
 - Evidence must come from retrieved sources, not from memory or assumptions.

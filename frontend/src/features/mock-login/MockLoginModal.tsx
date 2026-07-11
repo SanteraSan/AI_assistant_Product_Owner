@@ -5,7 +5,7 @@ type MockLoginModalProps = {
   isOpen: boolean
   user: User
   onClose: () => void
-  onLogin: (user: User) => void
+  onLogin: () => void
 }
 
 export function MockLoginModal({ isOpen, onClose, onLogin, user }: MockLoginModalProps) {
@@ -24,7 +24,7 @@ export function MockLoginModal({ isOpen, onClose, onLogin, user }: MockLoginModa
         </Button>
         <Button
           onClick={() => {
-            onLogin(user)
+            onLogin()
             onClose()
           }}
           variant="primary"
