@@ -22,11 +22,14 @@ class _FakeBucket:
 class _FakeDocument:
     id: str
     tenant_id: str
-    bucket_id: str
+    title: str
     file_name: str
     source_type: str
     source_path: str
+    owner_user_id: str | None = "user-a"
     status: str = "uploaded"
+    visibility: str = "private"
+    allowed_roles: list[str] = field(default_factory=list)
     size_bytes: int = 0
     error: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -68,37 +71,63 @@ class _FakeBucketService:
             self.bucket.description = description
         return self.bucket
 
-    async def list_documents(self, *, tenant_id: str, bucket_id: str):
-        assert tenant_id == "tenant-a"
+    async def list_documents(self, *, user, bucket_id: str):
+        assert user.tenant_id == "tenant-a"
+        assert user.user_id == "user-a"
         if bucket_id != self.bucket.id:
             return None
         return [self.document] if self.document else []
 
-    async def get_document(self, *, tenant_id: str, document_id: str):
-        assert tenant_id == "tenant-a"
+    async def get_document(self, *, user, document_id: str):
+        assert user.tenant_id == "tenant-a"
         if self.document is None or self.document.id != document_id:
             return None
         return self.document
 
+    async def list_my_documents(self, *, user):
+        assert user.tenant_id == "tenant-a"
+        return [self.document] if self.document else []
+
+    async def list_available_documents(self, *, user):
+        assert user.tenant_id == "tenant-a"
+        assert "analyst" in user.roles
+        return [self.document] if self.document else []
+
+    async def add_document_to_bucket(self, *, user, bucket_id: str, document_id: str):
+        assert user.tenant_id == "tenant-a"
+        assert user.user_id == "user-a"
+        if bucket_id != self.bucket.id or self.document is None or self.document.id != document_id:
+            return None
+        return self.document
+
+    async def remove_document_from_bucket(self, *, user, bucket_id: str, document_id: str):
+        assert user.tenant_id == "tenant-a"
+        return bucket_id == self.bucket.id
+
     async def save_uploaded_document(
         self,
         *,
-        tenant_id: str,
-        bucket_id: str,
+        user,
+        bucket_id: str | None,
         file_name: str,
         content: bytes,
         content_type: str | None,
+        visibility: str = "private",
+        allowed_roles: list[str] | None = None,
     ):
-        assert tenant_id == "tenant-a"
+        assert user.tenant_id == "tenant-a"
+        assert user.user_id == "user-a"
         assert bucket_id == self.bucket.id
         assert content_type == "text/plain"
         self.document = _FakeDocument(
             id="document-1",
-            tenant_id=tenant_id,
-            bucket_id=bucket_id,
+            tenant_id=user.tenant_id,
+            title=file_name,
             file_name=file_name,
             source_type="txt",
             source_path="/tmp/document-1.txt",
+            visibility=visibility,
+            allowed_roles=allowed_roles or [],
             size_bytes=len(content),
         )
         return self.document
@@ -148,9 +177,63 @@ def test_upload_document_accepts_raw_body() -> None:
             "Content-Type": "text/plain",
             "X-File-Name": "notes.txt",
             "X-Tenant-ID": "tenant-a",
+            "X-User-ID": "user-a",
         },
     )
 
     assert response.status_code == 201
     assert response.json()["file_name"] == "notes.txt"
     assert response.json()["size_bytes"] == 5
+    assert response.json()["visibility"] == "private"
+
+
+def test_list_available_documents_passes_roles_to_service() -> None:
+    client = _client()
+    client.post(
+        "/buckets/bucket-1/documents/upload",
+        content=b"hello",
+        headers={
+            "Content-Type": "text/plain",
+            "X-File-Name": "notes.txt",
+            "X-Tenant-ID": "tenant-a",
+            "X-User-ID": "user-a",
+            "X-User-Roles": "analyst",
+        },
+    )
+
+    response = client.get(
+        "/documents/available",
+        headers={
+            "X-Tenant-ID": "tenant-a",
+            "X-User-ID": "user-a",
+            "X-User-Roles": "analyst",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()[0]["id"] == "document-1"
+
+
+def test_add_existing_document_to_bucket() -> None:
+    client = _client()
+    client.post(
+        "/buckets/bucket-1/documents/upload",
+        content=b"hello",
+        headers={
+            "Content-Type": "text/plain",
+            "X-File-Name": "notes.txt",
+            "X-Tenant-ID": "tenant-a",
+            "X-User-ID": "user-a",
+        },
+    )
+
+    response = client.post(
+        "/buckets/bucket-1/documents/document-1",
+        headers={
+            "X-Tenant-ID": "tenant-a",
+            "X-User-ID": "user-a",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["bucket_id"] == "bucket-1"

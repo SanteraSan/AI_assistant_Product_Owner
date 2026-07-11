@@ -521,6 +521,11 @@ Q5: А что нужно объяснить PO в первую очередь?
 - ответ не содержит forbidden Alpha facts вроде `delayed delivery status` / `slack delivery visibility`;
 - LLM не получает Alpha chunks в prompt.
 
+Future E0.1 no-leak extension:
+
+- если документ связан с bucket через `bucket_documents`, но текущий user не имеет доступа по `owner/admin/tenant/role/ACL`, RAG retrieval не должен возвращать этот документ в sources;
+- bucket membership не считается самостоятельным grant rule.
+
 ## Test 26: Excel Row Ingestion
 
 Запрос:

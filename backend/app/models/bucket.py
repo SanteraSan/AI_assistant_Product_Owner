@@ -27,12 +27,25 @@ class BucketResponse(BaseModel):
 class DocumentResponse(BaseModel):
     id: str
     tenant_id: str
-    bucket_id: str
+    bucket_id: str | None = None
+    owner_user_id: str | None = None
+    title: str
     file_name: str
     source_type: str
     source_path: str
     status: str
+    visibility: str = "private"
+    allowed_roles: list[str] = Field(default_factory=list)
     size_bytes: int
     error: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class DocumentUploadOptions(BaseModel):
+    visibility: str = Field(default="private", pattern="^(private|role|tenant|team|public)$")
+    allowed_roles: list[str] = Field(default_factory=list, max_length=20)
+
+
+class AddDocumentToBucketRequest(BaseModel):
+    document_id: str = Field(..., min_length=1, max_length=36)

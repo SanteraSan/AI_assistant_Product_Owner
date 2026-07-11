@@ -70,6 +70,96 @@ class DocumentRecord(Base):
     bucket: Mapped[KnowledgeBucket] = relationship(back_populates="documents")
 
 
+class DocumentAsset(Base):
+    __tablename__ = "document_assets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(255), index=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(512))
+    file_name: Mapped[str] = mapped_column(String(512))
+    source_type: Mapped[str] = mapped_column(String(64))
+    source_path: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), default="uploaded")
+    visibility: Mapped[str] = mapped_column(String(32), default="private")
+    allowed_roles: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    bucket_links: Mapped[list["BucketDocument"]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+    )
+    acl_entries: Mapped[list["DocumentAclEntry"]] = relationship(
+        back_populates="document",
+        cascade="all, delete-orphan",
+    )
+
+
+class BucketDocument(Base):
+    __tablename__ = "bucket_documents"
+    __table_args__ = (
+        UniqueConstraint("bucket_id", "document_id", name="uq_bucket_documents_bucket_document"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(255), index=True)
+    bucket_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_buckets.id", ondelete="CASCADE"),
+        index=True,
+    )
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("document_assets.id", ondelete="CASCADE"),
+        index=True,
+    )
+    added_by_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    document: Mapped[DocumentAsset] = relationship(back_populates="bucket_links")
+
+
+class DocumentAclEntry(Base):
+    __tablename__ = "document_acl_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "subject_type",
+            "subject_id",
+            "permission",
+            name="uq_document_acl_entry",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(255), index=True)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("document_assets.id", ondelete="CASCADE"),
+        index=True,
+    )
+    subject_type: Mapped[str] = mapped_column(String(32))
+    subject_id: Mapped[str] = mapped_column(String(255))
+    permission: Mapped[str] = mapped_column(String(32), default="read")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    document: Mapped[DocumentAsset] = relationship(back_populates="acl_entries")
+
+
 class RagRequestLog(Base):
     __tablename__ = "rag_request_logs"
 

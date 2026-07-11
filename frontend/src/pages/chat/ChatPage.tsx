@@ -1,8 +1,13 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchBuckets } from '../../entities/bucket/api'
 import { mockBuckets } from '../../entities/bucket/model'
 import { useChatStore } from '../../entities/chat/store'
-import { fetchBucketDocuments } from '../../entities/document/api'
+import {
+  addDocumentToBucket,
+  fetchAvailableDocuments,
+  fetchBucketDocuments,
+  uploadDocument,
+} from '../../entities/document/api'
 import { mockDocuments } from '../../entities/document/model'
 import { localModels } from '../../entities/model/model'
 import { mockUser } from '../../entities/user/model'
@@ -16,6 +21,7 @@ import { ChatWorkspace } from '../../widgets/chat-workspace/ChatWorkspace'
 import { TopBar } from '../../widgets/top-bar/TopBar'
 
 export function ChatPage() {
+  const queryClient = useQueryClient()
   const {
     activeThreadId,
     composerValue,
@@ -62,6 +68,30 @@ export function ChatPage() {
     retry: false,
   })
   const documents = documentsQuery.data ?? mockDocuments
+  const availableDocumentsQuery = useQuery({
+    enabled: hasBackendBuckets,
+    queryKey: ['documents-available', userForApi.tenantId, userForApi.id, userForApi.roles],
+    queryFn: () => fetchAvailableDocuments(userForApi),
+    retry: false,
+  })
+  const availableDocuments = availableDocumentsQuery.data ?? mockDocuments
+  const addDocumentMutation = useMutation({
+    mutationFn: ({ bucketId, documentId }: { bucketId: string; documentId: string }) =>
+      addDocumentToBucket(userForApi, bucketId, documentId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['bucket-documents'] })
+      void queryClient.invalidateQueries({ queryKey: ['buckets'] })
+    },
+  })
+  const uploadDocumentMutation = useMutation({
+    mutationFn: ({ bucketId, file }: { bucketId: string; file: File }) =>
+      uploadDocument(userForApi, bucketId, file, 'private'),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['bucket-documents'] })
+      void queryClient.invalidateQueries({ queryKey: ['documents-available'] })
+      void queryClient.invalidateQueries({ queryKey: ['buckets'] })
+    },
+  })
 
   function handleSendMessage() {
     sendMessage(composerValue, {
@@ -112,10 +142,16 @@ export function ChatPage() {
           />
         ) : (
           <BucketWorkspace
+            availableDocuments={availableDocuments}
             buckets={buckets}
             documents={documents}
+            onAddDocumentToBucket={(bucketId, documentId) =>
+              addDocumentMutation.mutate({ bucketId, documentId })
+            }
             onCreateBucket={() => undefined}
+            onInspectBucket={selectBucket}
             onSelectBucket={selectBucketAndOpenChat}
+            onUploadDocument={(bucketId, file) => uploadDocumentMutation.mutate({ bucketId, file })}
           />
         )}
       </section>

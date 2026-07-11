@@ -1,14 +1,19 @@
 import { FileText, Folder, Pencil, Plus, Upload } from 'lucide-react'
-import { useState } from 'react'
+import type { ReactNode } from 'react'
+import { useRef, useState } from 'react'
 import type { Bucket } from '../../entities/bucket/model'
 import type { DocumentItem } from '../../entities/document/model'
 import { Badge, Button, Card, Modal } from '../../shared/ui'
 
 type BucketWorkspaceProps = {
   buckets: Bucket[]
+  availableDocuments: DocumentItem[]
   documents: DocumentItem[]
+  onAddDocumentToBucket: (bucketId: string, documentId: string) => void
   onCreateBucket: () => void
+  onInspectBucket: (bucketId: string) => void
   onSelectBucket: (bucketId: string) => void
+  onUploadDocument: (bucketId: string, file: File) => void
 }
 
 const statusTone = {
@@ -18,12 +23,31 @@ const statusTone = {
 } as const
 
 export function BucketWorkspace({
+  availableDocuments,
   buckets,
   documents,
+  onAddDocumentToBucket,
   onCreateBucket,
+  onInspectBucket,
   onSelectBucket,
+  onUploadDocument,
 }: BucketWorkspaceProps) {
   const [openedBucket, setOpenedBucket] = useState<Bucket | null>(null)
+  const uploadInputRef = useRef<HTMLInputElement | null>(null)
+  const documentsInBucket = new Set(documents.map((document) => document.id))
+  const addableDocuments = availableDocuments.filter((document) => !documentsInBucket.has(document.id))
+
+  function openDocuments(bucket: Bucket) {
+    onInspectBucket(bucket.id)
+    setOpenedBucket(bucket)
+  }
+
+  function handleUpload(file: File | undefined) {
+    if (!file || openedBucket === null) {
+      return
+    }
+    onUploadDocument(openedBucket.id, file)
+  }
 
   return (
     <main className="min-h-0 flex-1 overflow-y-auto bg-slate-50 p-8">
@@ -63,7 +87,7 @@ export function BucketWorkspace({
                 <Button onClick={() => onSelectBucket(bucket.id)} variant="ghost">
                   Выбрать
                 </Button>
-                <Button onClick={() => setOpenedBucket(bucket)} variant="secondary">
+                <Button onClick={() => openDocuments(bucket)} variant="secondary">
                   <FileText size={16} />
                   Документы
                 </Button>
@@ -81,31 +105,94 @@ export function BucketWorkspace({
         onClose={() => setOpenedBucket(null)}
         title={openedBucket ? `Документы: ${openedBucket.name}` : 'Документы'}
       >
-        <div className="mb-4 flex justify-end">
-          <Button variant="primary">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <p className="text-sm text-slate-500">
+            Bucket хранит ссылки на документы. Доступ всё равно проверяется по owner/role/tenant.
+          </p>
+          <input
+            className="hidden"
+            onChange={(event) => handleUpload(event.target.files?.[0])}
+            ref={uploadInputRef}
+            type="file"
+          />
+          <Button onClick={() => uploadInputRef.current?.click()} variant="primary">
             <Upload size={18} />
             Загрузить документ
           </Button>
         </div>
-        <div className="space-y-3">
-          {documents.map((document) => (
-            <div
-              className="flex items-center justify-between rounded-2xl border border-slate-200 p-4"
-              key={document.id}
-            >
-              <div>
-                <p className="font-medium text-slate-950">{document.fileName}</p>
-                <p className="mt-1 text-sm text-slate-500">
-                  {document.sourceType} · {document.uploadedAt}
-                </p>
-              </div>
-              <Badge tone={document.status === 'indexed' ? 'success' : 'warning'}>
-                {document.status}
-              </Badge>
-            </div>
-          ))}
-        </div>
+
+        <section>
+          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+            В этом bucket
+          </h3>
+          <div className="space-y-3">
+            {documents.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+                Документов пока нет. Можно загрузить новый или добавить доступный из библиотеки.
+              </p>
+            ) : (
+              documents.map((document) => (
+                <DocumentRow document={document} key={document.id} />
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className="mt-6">
+          <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
+            Доступные документы
+          </h3>
+          <div className="space-y-3">
+            {addableDocuments.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+                Нет дополнительных документов, доступных для добавления.
+              </p>
+            ) : (
+              addableDocuments.map((document) => (
+                <DocumentRow
+                  action={
+                    openedBucket ? (
+                      <Button
+                        onClick={() => onAddDocumentToBucket(openedBucket.id, document.id)}
+                        variant="ghost"
+                      >
+                        Добавить
+                      </Button>
+                    ) : null
+                  }
+                  document={document}
+                  key={document.id}
+                />
+              ))
+            )}
+          </div>
+        </section>
       </Modal>
     </main>
+  )
+}
+
+function DocumentRow({
+  action,
+  document,
+}: {
+  action?: ReactNode
+  document: DocumentItem
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 p-4">
+      <div>
+        <p className="font-medium text-slate-950">{document.fileName}</p>
+        <p className="mt-1 text-sm text-slate-500">
+          {document.sourceType} · {document.visibility} · {document.uploadedAt}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Badge tone={document.status === 'indexed' ? 'success' : 'warning'}>
+          {document.status}
+        </Badge>
+        {action}
+      </div>
+    </div>
   )
 }

@@ -3319,3 +3319,33 @@ V5 LoRA:
 - frontend: `npm run build` passed;
 - frontend: `npm run lint` passed;
 - backend quick tests: `13 passed`.
+
+## 2026-07-11: E0.1 Document Library And Access Model Decision
+
+Контекст:
+
+- baseline `document_records.bucket_id` сделал документ частью одного bucket;
+- для product/enterprise модели этого недостаточно: один документ может быть доступен нескольким bucket, а сам bucket не должен расширять права доступа;
+- пользовательские upload-документы должны по умолчанию быть private/owner-only.
+
+Решение:
+
+- ввести `document_assets` как системную библиотеку документов;
+- ввести `bucket_documents` как связь bucket/document;
+- ввести `document_acl_entries` для явных grant rules;
+- использовать `visibility`: `private`, `role`, `tenant`, `team`, `public`;
+- на первом шаге реально использовать `private`, `role`, `tenant`, а `team/public` оставить как future-compatible values;
+- правило: bucket membership never grants access by itself.
+
+Access baseline:
+
+- user видит документ, если он owner;
+- admin видит документы tenant;
+- `tenant` visibility доступна всем в tenant;
+- `role` visibility доступна пользователям с пересечением roles;
+- explicit ACL может дать `read`/`admin`.
+
+Вывод:
+
+- E0.1 должен быть реализован до полноценного RAG через UI, чтобы RAG filters сразу строились на корректной модели доступа;
+- текущий `document_records` остаётся legacy baseline, новые product flows должны использовать document library model.

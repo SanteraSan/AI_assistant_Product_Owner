@@ -1312,6 +1312,50 @@ curl -s http://localhost:8000/documents/<DOCUMENT_ID>/status \
   -H "X-Tenant-ID: local_demo" | jq
 ```
 
+### E0.1 Document Library And Access Model
+
+E0.1 меняет смысл document registry: документ теперь может существовать в личной/tenant библиотеке без привязки к bucket, а bucket хранит ссылку на доступный документ.
+
+Новые таблицы:
+
+- `document_assets` - системная библиотека документов;
+- `bucket_documents` - many-to-many связь bucket/document;
+- `document_acl_entries` - explicit ACL grants для будущего RBAC.
+
+Базовое правило доступа:
+
+- owner видит свой private документ;
+- `admin` видит документы tenant;
+- `tenant` visibility видна всем в tenant;
+- `role` visibility видна пользователям с пересечением ролей;
+- bucket membership сам по себе не выдаёт доступ.
+
+Примеры:
+
+```bash
+curl -s http://localhost:8000/documents/available \
+  -H "X-Tenant-ID: local_demo" \
+  -H "X-User-ID: local-user-1" \
+  -H "X-User-Roles: admin,analyst" | jq
+```
+
+```bash
+curl -s -X POST http://localhost:8000/buckets/<BUCKET_ID>/documents/<DOCUMENT_ID> \
+  -H "X-Tenant-ID: local_demo" \
+  -H "X-User-ID: local-user-1" \
+  -H "X-User-Roles: admin,analyst" | jq
+```
+
+```bash
+curl -s -X POST http://localhost:8000/documents/upload \
+  -H "X-Tenant-ID: local_demo" \
+  -H "X-User-ID: local-user-1" \
+  -H "X-Document-Visibility: private" \
+  -H "X-File-Name: notes.txt" \
+  -H "Content-Type: text/plain" \
+  --data-binary @notes.txt | jq
+```
+
 Что сохраняется:
 
 - `tenant_id`;

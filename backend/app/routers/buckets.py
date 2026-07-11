@@ -1,14 +1,18 @@
 from fastapi import APIRouter, Header, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import DocumentRecord, KnowledgeBucket
+from app.db.models import DocumentAsset, KnowledgeBucket
 from app.models.bucket import (
     BucketCreateRequest,
     BucketResponse,
     BucketUpdateRequest,
     DocumentResponse,
 )
+from app.services.access_policy import UserContext, parse_roles
 from app.services.bucket_service import BucketService
+
+
+DOCUMENT_VISIBILITIES = {"private", "role", "tenant", "team", "public"}
 
 
 def create_bucket_router(
@@ -24,6 +28,24 @@ def create_bucket_router(
     def user_from_header(x_user_id: str | None) -> str | None:
         normalized = (x_user_id or "").strip()
         return normalized or None
+
+    def user_context(
+        *,
+        tenant_id: str | None,
+        user_id: str | None,
+        roles: str | None,
+    ) -> UserContext:
+        return UserContext(
+            tenant_id=tenant_from_header(tenant_id),
+            user_id=user_from_header(user_id),
+            roles=parse_roles(roles),
+        )
+
+    def normalized_visibility(raw_visibility: str) -> str:
+        visibility = raw_visibility.strip().lower()
+        if visibility not in DOCUMENT_VISIBILITIES:
+            raise HTTPException(status_code=422, detail="Unsupported document visibility.")
+        return visibility
 
     @router.get("/buckets", response_model=list[BucketResponse])
     async def list_buckets(
@@ -76,13 +98,37 @@ def create_bucket_router(
     async def list_documents(
         bucket_id: str,
         tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
     ) -> list[DocumentResponse]:
         documents = await bucket_service.list_documents(
-            tenant_id=tenant_from_header(tenant_id),
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
             bucket_id=bucket_id,
         )
         if documents is None:
             raise HTTPException(status_code=404, detail="Bucket not found.")
+        return [_document_response(document, bucket_id=bucket_id) for document in documents]
+
+    @router.get("/documents/my", response_model=list[DocumentResponse])
+    async def list_my_documents(
+        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
+    ) -> list[DocumentResponse]:
+        documents = await bucket_service.list_my_documents(
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+        )
+        return [_document_response(document) for document in documents]
+
+    @router.get("/documents/available", response_model=list[DocumentResponse])
+    async def list_available_documents(
+        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
+    ) -> list[DocumentResponse]:
+        documents = await bucket_service.list_available_documents(
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+        )
         return [_document_response(document) for document in documents]
 
     @router.post(
@@ -95,28 +141,99 @@ def create_bucket_router(
         request: Request,
         file_name: str = Header(default="uploaded-file", alias="X-File-Name"),
         tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        visibility: str = Header(default="private", alias="X-Document-Visibility"),
+        allowed_roles: str | None = Header(default=None, alias="X-Document-Roles"),
     ) -> DocumentResponse:
         content = await request.body()
         if not content:
             raise HTTPException(status_code=422, detail="Uploaded file is empty.")
         document = await bucket_service.save_uploaded_document(
-            tenant_id=tenant_from_header(tenant_id),
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
             bucket_id=bucket_id,
             file_name=file_name,
             content=content,
             content_type=request.headers.get("content-type"),
+            visibility=normalized_visibility(visibility),
+            allowed_roles=sorted(parse_roles(allowed_roles)),
+        )
+        if document is None:
+            raise HTTPException(status_code=404, detail="Bucket not found.")
+        return _document_response(document, bucket_id=bucket_id)
+
+    @router.post("/documents/upload", response_model=DocumentResponse, status_code=201)
+    async def upload_personal_document(
+        request: Request,
+        file_name: str = Header(default="uploaded-file", alias="X-File-Name"),
+        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        visibility: str = Header(default="private", alias="X-Document-Visibility"),
+        allowed_roles: str | None = Header(default=None, alias="X-Document-Roles"),
+    ) -> DocumentResponse:
+        content = await request.body()
+        if not content:
+            raise HTTPException(status_code=422, detail="Uploaded file is empty.")
+        document = await bucket_service.save_uploaded_document(
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            bucket_id=None,
+            file_name=file_name,
+            content=content,
+            content_type=request.headers.get("content-type"),
+            visibility=normalized_visibility(visibility),
+            allowed_roles=sorted(parse_roles(allowed_roles)),
         )
         if document is None:
             raise HTTPException(status_code=404, detail="Bucket not found.")
         return _document_response(document)
 
+    @router.post(
+        "/buckets/{bucket_id}/documents/{document_id}",
+        response_model=DocumentResponse,
+        status_code=201,
+    )
+    async def add_existing_document_to_bucket(
+        bucket_id: str,
+        document_id: str,
+        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
+    ) -> DocumentResponse:
+        document = await bucket_service.add_document_to_bucket(
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            bucket_id=bucket_id,
+            document_id=document_id,
+        )
+        if document is None:
+            raise HTTPException(status_code=404, detail="Bucket or document not found.")
+        return _document_response(document, bucket_id=bucket_id)
+
+    @router.delete("/buckets/{bucket_id}/documents/{document_id}", status_code=204)
+    async def remove_document_from_bucket(
+        bucket_id: str,
+        document_id: str,
+        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
+    ) -> None:
+        removed = await bucket_service.remove_document_from_bucket(
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            bucket_id=bucket_id,
+            document_id=document_id,
+        )
+        if removed is None:
+            raise HTTPException(status_code=404, detail="Bucket not found.")
+
     @router.get("/documents/{document_id}/status", response_model=DocumentResponse)
     async def get_document_status(
         document_id: str,
         tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
     ) -> DocumentResponse:
         document = await bucket_service.get_document(
-            tenant_id=tenant_from_header(tenant_id),
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
             document_id=document_id,
         )
         if document is None:
@@ -139,15 +256,19 @@ def _bucket_response(*, bucket: KnowledgeBucket, document_count: int) -> BucketR
     )
 
 
-def _document_response(document: DocumentRecord) -> DocumentResponse:
+def _document_response(document: DocumentAsset, *, bucket_id: str | None = None) -> DocumentResponse:
     return DocumentResponse(
         id=document.id,
         tenant_id=document.tenant_id,
-        bucket_id=document.bucket_id,
+        bucket_id=bucket_id,
+        owner_user_id=document.owner_user_id,
+        title=document.title,
         file_name=document.file_name,
         source_type=document.source_type,
         source_path=document.source_path,
         status=document.status,
+        visibility=document.visibility,
+        allowed_roles=document.allowed_roles,
         size_bytes=document.size_bytes,
         error=document.error,
         created_at=document.created_at,

@@ -73,6 +73,45 @@ Definition of done:
 - UI state is visible enough to demo the product flow;
 - no Keycloak dependency yet.
 
+### Stage E0.1: Document Library And Access Model
+
+Goal:
+
+- split "document exists in the system" from "document is linked to a bucket";
+- introduce owner/visibility/role access rules before full Keycloak/RBAC integration.
+
+Scope:
+
+- `document_assets` as system-level document library;
+- `bucket_documents` as many-to-many links between buckets and documents;
+- `document_acl_entries` for explicit grants;
+- default uploaded document visibility is owner-only/private;
+- admins can see tenant documents;
+- role-based visibility supports team-lead/admin/developer style access;
+- bucket membership never grants access by itself.
+
+Access rule:
+
+```text
+can_read(document, user) =
+  same tenant
+  AND (
+    user is owner
+    OR user has admin role
+    OR visibility is tenant
+    OR visibility is role and user roles intersect allowed roles
+    OR explicit ACL grants read/admin
+  )
+```
+
+Definition of done:
+
+- user can see own documents;
+- user can see available documents according to access policy;
+- user can add an accessible existing document to a bucket;
+- user can upload a private document and link it to a bucket;
+- RAG-facing bucket document lists never include inaccessible documents.
+
 ## Stage E1: Keycloak, BFF And RBAC
 
 Goal:
