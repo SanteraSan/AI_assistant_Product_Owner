@@ -7,6 +7,7 @@ from uuid import uuid4
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.clients.qdrant_store import QdrantStore
@@ -18,6 +19,8 @@ from app.db.session import (
     init_db,
 )
 from app.models.chat import ChatRequest, ChatResponse, RagChatRequest, RagChatResponse
+from app.routers.buckets import create_bucket_router
+from app.services.bucket_service import BucketService
 from app.services.chat_history_service import ChatExchangeRecord, ChatHistoryService
 from app.services.conversation_context_service import ConversationContextService
 from app.services.conversation_memory_service import ConversationMemoryService
@@ -96,6 +99,10 @@ conversation_summary_service = ConversationSummaryService(
     summary_model=settings.conversation_summary_model,
     summary_temperature=settings.conversation_summary_temperature,
 )
+bucket_service = BucketService(
+    session_factory=db_session_factory,
+    raw_data_dir=settings.raw_data_dir,
+)
 
 
 @asynccontextmanager
@@ -117,10 +124,25 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
-    return FastAPI(title=settings.app_name, lifespan=lifespan)
+    fastapi_app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    if settings.cors_allowed_origins:
+        fastapi_app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_allowed_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    return fastapi_app
 
 
 app = create_app()
+app.include_router(
+    create_bucket_router(
+        bucket_service=bucket_service,
+        default_tenant_id=settings.default_tenant_id,
+    )
+)
 
 
 @app.middleware("http")

@@ -3251,3 +3251,43 @@ V5 LoRA:
 
 - UI skeleton теперь является ближайшим product step;
 - enterprise layers should be added incrementally while preserving access boundaries, traceability and evaluation discipline.
+
+## 2026-07-11: E0 UI Skeleton And Bucket API Baseline
+
+Контекст:
+
+- после enterprise expansion plan начат первый product surface: frontend UI skeleton и минимальные backend endpoints для buckets/documents;
+- backend уже имел `/chat` и `/rag/chat`, но не имел product API для bucket management, document list/upload/status.
+
+Что сделано:
+
+- добавлен `frontend/` на React + Vite + TypeScript + TailwindCSS;
+- frontend разложен по FSD слоям: `app`, `pages`, `widgets`, `features`, `entities`, `shared`;
+- добавлены prop-driven UI primitives: `Button`, `Card`, `Badge`, `Select`, `Textarea`, `Modal`;
+- собран ChatGPT-like shell: sidebar history, top controls, chat workspace, composer, sources panel, bucket workspace;
+- добавлен Zustand store, чтобы каждый chat thread имел собственные messages;
+- добавлены backend tables `knowledge_buckets` и `document_records`;
+- добавлена Alembic migration `20260711_0002_bucket_document_registry.py`;
+- добавлены endpoints:
+  - `GET /buckets`;
+  - `POST /buckets`;
+  - `PATCH /buckets/{bucket_id}`;
+  - `GET /buckets/{bucket_id}/documents`;
+  - `POST /buckets/{bucket_id}/documents/upload`;
+  - `GET /documents/{document_id}/status`;
+- добавлен CORS baseline для Vite dev server;
+- frontend API layer подключён к buckets/documents endpoints с fallback на mock data.
+
+Проверки:
+
+- frontend: `npm run build` passed;
+- frontend: `npm run lint` passed;
+- backend compile: `python3 -m py_compile ...` passed;
+- backend focused tests через `backend/.venv`: `13 passed`;
+- системный `python3 -m pytest` не используется, потому что в системном Python нет `pytest`; рабочее окружение backend - `backend/.venv`.
+
+Ограничения baseline:
+
+- upload endpoint сохраняет файл и document registry/status, но пока не запускает Qdrant indexing;
+- baseline upload принимает raw body + `X-File-Name`, чтобы не требовать `python-multipart` в системном Python окружении;
+- следующий шаг: связать upload registry с ingestion/chunking/embedding pipeline и убрать fallback mock data из UI.

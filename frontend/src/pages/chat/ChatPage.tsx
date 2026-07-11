@@ -1,6 +1,9 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { fetchBuckets } from '../../entities/bucket/api'
 import { mockBuckets } from '../../entities/bucket/model'
 import { useChatStore } from '../../entities/chat/store'
+import { fetchBucketDocuments } from '../../entities/document/api'
 import { mockDocuments } from '../../entities/document/model'
 import { localModels } from '../../entities/model/model'
 import type { ModelApproach } from '../../entities/model/model'
@@ -29,10 +32,24 @@ export function ChatPage() {
     setComposerValue,
     threads,
   } = useChatStore()
+  const userForApi = user ?? mockUser
+  const bucketsQuery = useQuery({
+    queryKey: ['buckets', userForApi.tenantId],
+    queryFn: () => fetchBuckets(userForApi),
+    retry: false,
+  })
+  const buckets = bucketsQuery.data?.length ? bucketsQuery.data : mockBuckets
 
-  const activeBucket = mockBuckets.find((bucket) => bucket.id === activeBucketId)
+  const activeBucket = buckets.find((bucket) => bucket.id === activeBucketId) ?? buckets[0]
   const selectedModel = localModels.find((model) => model.id === selectedModelId)
   const messages = messagesByThreadId[activeThreadId] ?? []
+  const documentsQuery = useQuery({
+    enabled: Boolean(activeBucket?.id),
+    queryKey: ['bucket-documents', userForApi.tenantId, activeBucket?.id],
+    queryFn: () => fetchBucketDocuments(userForApi, activeBucket?.id ?? ''),
+    retry: false,
+  })
+  const documents = documentsQuery.data ?? mockDocuments
 
   function handleSendMessage() {
     sendMessage(composerValue, {
@@ -53,7 +70,7 @@ export function ChatPage() {
         <TopBar
           activeBucketId={activeBucketId}
           activeView={activeView}
-          buckets={mockBuckets}
+          buckets={buckets}
           models={localModels}
           onChangeApproach={setSelectedApproach}
           onChangeBucket={setActiveBucketId}
@@ -77,8 +94,8 @@ export function ChatPage() {
           />
         ) : (
           <BucketWorkspace
-            buckets={mockBuckets}
-            documents={mockDocuments}
+            buckets={buckets}
+            documents={documents}
             onCreateBucket={() => undefined}
             onSelectBucket={(bucketId) => {
               setActiveBucketId(bucketId)

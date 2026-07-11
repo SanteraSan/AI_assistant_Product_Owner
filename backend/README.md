@@ -1272,3 +1272,55 @@ Compatibility note: PaddlePaddle wheels могут отставать от но�
 - оценить runtime, размер зависимостей и пригодность для production ingestion.
 
 Итоговое решение по scanned OCR strategy зафиксировано в `research/SCANNED_OCR_STRATEGY.md`: текущий M5 production path остаётся на lightweight baseline, PaddleOCR остаётся optional advanced path/future hardening.
+
+## E0 UI Skeleton: Buckets And Document Registry API
+
+Для первого product UI добавлен минимальный API слой для управления buckets и document registry.
+
+Endpoints:
+
+```bash
+curl -s http://localhost:8000/buckets \
+  -H "X-Tenant-ID: local_demo" | jq
+```
+
+```bash
+curl -s -X POST http://localhost:8000/buckets \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: local_demo" \
+  -H "X-User-ID: local-user-1" \
+  -d '{"name":"Demo bucket","description":"Documents for UI demo"}' | jq
+```
+
+```bash
+curl -s http://localhost:8000/buckets/<BUCKET_ID>/documents \
+  -H "X-Tenant-ID: local_demo" | jq
+```
+
+Baseline upload пока принимает raw body, чтобы не вводить `python-multipart` в системное Python окружение:
+
+```bash
+curl -s -X POST http://localhost:8000/buckets/<BUCKET_ID>/documents/upload \
+  -H "X-Tenant-ID: local_demo" \
+  -H "X-File-Name: notes.txt" \
+  -H "Content-Type: text/plain" \
+  --data-binary @notes.txt | jq
+```
+
+```bash
+curl -s http://localhost:8000/documents/<DOCUMENT_ID>/status \
+  -H "X-Tenant-ID: local_demo" | jq
+```
+
+Что сохраняется:
+
+- `tenant_id`;
+- `bucket_id`;
+- `document_id`;
+- `source_type`;
+- `source_path`;
+- `status`;
+- `size_bytes`;
+- upload metadata.
+
+Ограничение baseline: upload endpoint сохраняет файл и registry/status, но ещё не запускает полноценный Qdrant indexing pipeline. Следующий шаг - связать uploaded document registry с ingestion/chunking/embedding worker.

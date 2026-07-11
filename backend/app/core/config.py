@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     rate_limit_fail_open: bool = True
     ollama_max_concurrency: int = 2
     ollama_queue_timeout_seconds: float = 5.0
+    cors_allowed_origins: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
 
     @field_validator("rag_score_threshold", mode="before")
     @classmethod

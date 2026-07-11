@@ -20,4 +20,4 @@ env/
 
 *.log
 
-models/
+/models/

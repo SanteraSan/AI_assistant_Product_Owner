@@ -1,6 +1,7 @@
 import { API_BASE_URL } from '../config/env'
 
 type RequestOptions = RequestInit & {
+  json?: boolean
   tenantId?: string
   userId?: string
   roles?: string[]
@@ -11,7 +12,9 @@ export async function apiRequest<TResponse>(
   options: RequestOptions = {},
 ): Promise<TResponse> {
   const headers = new Headers(options.headers)
-  headers.set('Content-Type', headers.get('Content-Type') ?? 'application/json')
+  if (options.json !== false) {
+    headers.set('Content-Type', headers.get('Content-Type') ?? 'application/json')
+  }
 
   if (options.tenantId) {
     headers.set('X-Tenant-ID', options.tenantId)
