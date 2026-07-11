@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from pathlib import Path
 from shutil import move
 from uuid import uuid4
@@ -165,12 +166,15 @@ class BucketService:
         async with self._session_factory() as session:
             result = await session.execute(
                 select(DocumentAsset)
-                .options(selectinload(DocumentAsset.acl_entries))
+                .options(
+                    selectinload(DocumentAsset.acl_entries),
+                    selectinload(DocumentAsset.bucket_links),
+                )
                 .where(DocumentAsset.tenant_id == user.tenant_id)
                 .order_by(DocumentAsset.created_at.desc())
             )
             documents = list(result.scalars())
-            return [
+            readable_documents = [
                 document
                 for document in documents
                 if can_read_document(
@@ -179,6 +183,7 @@ class BucketService:
                     acl_entries=document.acl_entries,
                 )
             ]
+            return _deduplicate_available_documents(readable_documents)
 
     async def add_document_to_bucket(
         self,
@@ -267,6 +272,7 @@ class BucketService:
         async with self._session_factory() as session:
             upload_id = str(uuid4())
             safe_file_name = _safe_file_name(file_name)
+            content_sha256 = _content_sha256(content)
             target_dir = self._upload_root / user.tenant_id / "staging"
             target_dir.mkdir(parents=True, exist_ok=True)
             target_path = target_dir / f"{upload_id}_{safe_file_name}"
@@ -282,7 +288,10 @@ class BucketService:
                 status="staged",
                 size_bytes=len(content),
                 expires_at=datetime.now(UTC) + timedelta(days=1),
-                metadata_json={"content_type": content_type or "application/octet-stream"},
+                metadata_json={
+                    "content_type": content_type or "application/octet-stream",
+                    "content_sha256": content_sha256,
+                },
             )
             session.add(upload)
             await session.commit()
@@ -394,6 +403,45 @@ class BucketService:
                 if upload.owner_user_id is not None and upload.owner_user_id != user.user_id and not user.is_admin:
                     continue
 
+                existing_document = await _find_existing_uploaded_document(
+                    session=session,
+                    user=user,
+                    upload=upload,
+                )
+                if existing_document is not None:
+                    await self._ensure_bucket_document_link(
+                        session=session,
+                        user=user,
+                        bucket_id=bucket_id,
+                        document_id=existing_document.id,
+                        indexing_status="indexed"
+                        if existing_document.status == "indexed"
+                        else "indexing",
+                    )
+                    if existing_document.status != "indexed":
+                        job_id = str(uuid4())
+                        session.add(
+                            DocumentIndexingJob(
+                                id=job_id,
+                                tenant_id=user.tenant_id,
+                                bucket_id=bucket_id,
+                                document_id=existing_document.id,
+                                status="pending",
+                                metadata_json={"source": "bucket_existing_upload_dedup"},
+                            )
+                        )
+                        indexing_job_ids.append(job_id)
+                    Path(upload.source_path).unlink(missing_ok=True)
+                    upload.status = "committed"
+                    upload.metadata_json = {
+                        **dict(upload.metadata_json),
+                        "document_id": existing_document.id,
+                        "bucket_id": bucket_id,
+                        "deduplicated": True,
+                    }
+                    committed_documents.append(existing_document)
+                    continue
+
                 document_id = str(uuid4())
                 target_dir = self._upload_root / user.tenant_id / "documents"
                 target_dir.mkdir(parents=True, exist_ok=True)
@@ -473,6 +521,22 @@ class BucketService:
                 if upload.owner_user_id is not None and upload.owner_user_id != user.user_id and not user.is_admin:
                     continue
 
+                existing_document = await _find_existing_uploaded_document(
+                    session=session,
+                    user=user,
+                    upload=upload,
+                )
+                if existing_document is not None:
+                    Path(upload.source_path).unlink(missing_ok=True)
+                    upload.status = "committed"
+                    upload.metadata_json = {
+                        **dict(upload.metadata_json),
+                        "document_id": existing_document.id,
+                        "deduplicated": True,
+                    }
+                    committed_documents.append(existing_document)
+                    continue
+
                 document_id = str(uuid4())
                 target_dir = self._upload_root / user.tenant_id / "documents"
                 target_dir.mkdir(parents=True, exist_ok=True)
@@ -541,6 +605,7 @@ class BucketService:
 
             document_id = str(uuid4())
             safe_file_name = _safe_file_name(file_name)
+            content_sha256 = _content_sha256(content)
             target_dir = self._upload_root / user.tenant_id / (bucket_id or "personal")
             target_dir.mkdir(parents=True, exist_ok=True)
             target_path = target_dir / f"{document_id}_{safe_file_name}"
@@ -558,7 +623,10 @@ class BucketService:
                 visibility=visibility,
                 allowed_roles=allowed_roles or [],
                 size_bytes=len(content),
-                metadata_json={"content_type": content_type or "application/octet-stream"},
+                metadata_json={
+                    "content_type": content_type or "application/octet-stream",
+                    "content_sha256": content_sha256,
+                },
             )
             session.add(document)
             if bucket_id is not None:
@@ -635,6 +703,62 @@ def _safe_file_name(file_name: str) -> str:
 def _source_type_for_file(file_name: str) -> str:
     suffix = Path(file_name).suffix.lower().lstrip(".")
     return suffix or "unknown"
+
+
+def _content_sha256(content: bytes) -> str:
+    return sha256(content).hexdigest()
+
+
+async def _find_existing_uploaded_document(
+    *,
+    session: AsyncSession,
+    user: UserContext,
+    upload: StagedDocumentUpload,
+) -> DocumentAsset | None:
+    content_sha256 = str(upload.metadata_json.get("content_sha256") or "").strip()
+    if not content_sha256:
+        return None
+    return await session.scalar(
+        select(DocumentAsset)
+        .where(
+            DocumentAsset.tenant_id == user.tenant_id,
+            DocumentAsset.owner_user_id == user.user_id,
+            DocumentAsset.file_name == upload.original_file_name,
+            DocumentAsset.size_bytes == upload.size_bytes,
+            DocumentAsset.metadata_json["content_sha256"].astext == content_sha256,
+        )
+        .order_by(
+            (DocumentAsset.status == "indexed").desc(),
+            DocumentAsset.created_at.desc(),
+        )
+    )
+
+
+def _deduplicate_available_documents(documents: list[DocumentAsset]) -> list[DocumentAsset]:
+    by_key: dict[tuple[str | None, str, int, str], DocumentAsset] = {}
+    for document in documents:
+        content_sha256 = str(document.metadata_json.get("content_sha256") or "").strip()
+        key = (
+            document.owner_user_id,
+            document.file_name,
+            document.size_bytes,
+            content_sha256 or f"size:{document.size_bytes}",
+        )
+        current = by_key.get(key)
+        if current is None or _document_dedup_rank(document) > _document_dedup_rank(current):
+            by_key[key] = document
+    return sorted(by_key.values(), key=lambda document: document.created_at, reverse=True)
+
+
+def _document_dedup_rank(document: DocumentAsset) -> tuple[int, int, datetime]:
+    status_rank = {
+        "indexed": 3,
+        "indexing": 2,
+        "uploaded": 1,
+        "index_failed": 0,
+    }.get(document.status, 0)
+    bucket_rank = 1 if document.bucket_links else 0
+    return status_rank, bucket_rank, document.created_at
 
 
 def _deduplicate_ids(values: list[str]) -> list[str]:

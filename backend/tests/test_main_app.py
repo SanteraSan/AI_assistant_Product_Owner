@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -77,6 +80,129 @@ def test_validation_error_returns_traceable_error() -> None:
     assert response.headers["X-Request-ID"] == "validation-test"
     assert response.json()["error_type"] == "validation_error"
     assert response.json()["request_id"] == "validation-test"
+
+
+def test_chat_sessions_endpoint_returns_user_sessions(monkeypatch) -> None:
+    timestamp = datetime(2026, 7, 12, 3, 15, tzinfo=UTC)
+
+    class _FakeChatHistoryService:
+        async def list_sessions(self, *, tenant_id: str, user_id: str | None, limit: int = 50):
+            assert tenant_id == "local_demo"
+            assert user_id == "local-user-1"
+            assert limit == 50
+            return [
+                SimpleNamespace(
+                    id="session-1",
+                    title="Тестовый чат",
+                    tenant_id=tenant_id,
+                    owner_user_id=user_id,
+                    active_bucket_id="bucket-1",
+                    model_id="qwen3.5:9b",
+                    approach="hybrid",
+                    metadata_json={},
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                )
+            ]
+
+    monkeypatch.setattr(main_module, "chat_history_service", _FakeChatHistoryService())
+    client = TestClient(main_module.app)
+
+    response = client.get(
+        "/chat/sessions",
+        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()[0]["id"] == "session-1"
+    assert response.json()[0]["active_bucket_id"] == "bucket-1"
+
+
+def test_chat_messages_endpoint_returns_session_messages(monkeypatch) -> None:
+    timestamp = datetime(2026, 7, 12, 3, 15, tzinfo=UTC)
+
+    class _FakeChatHistoryService:
+        async def list_messages(self, *, tenant_id: str, user_id: str | None, session_id: str):
+            assert tenant_id == "local_demo"
+            assert user_id == "local-user-1"
+            assert session_id == "session-1"
+            return [
+                SimpleNamespace(
+                    id="message-1",
+                    session_id=session_id,
+                    role="assistant",
+                    content="Ответ из истории",
+                    model="qwen3.5:9b",
+                    provider="ollama",
+                    latency_ms=100,
+                    metadata_json={"sources": []},
+                    created_at=timestamp,
+                )
+            ]
+
+    monkeypatch.setattr(main_module, "chat_history_service", _FakeChatHistoryService())
+    client = TestClient(main_module.app)
+
+    response = client.get(
+        "/chat/sessions/session-1/messages",
+        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()[0]["content"] == "Ответ из истории"
+
+
+def test_update_chat_session_endpoint_persists_context(monkeypatch) -> None:
+    timestamp = datetime(2026, 7, 12, 3, 15, tzinfo=UTC)
+
+    class _FakeChatHistoryService:
+        async def update_session(
+            self,
+            *,
+            tenant_id: str,
+            user_id: str | None,
+            session_id: str,
+            title: str | None = None,
+            active_bucket_id: str | None = None,
+            model_id: str | None = None,
+            approach: str | None = None,
+            metadata: dict[str, object] | None = None,
+        ):
+            assert tenant_id == "local_demo"
+            assert user_id == "local-user-1"
+            assert session_id == "session-1"
+            assert active_bucket_id == ""
+            assert model_id == "qwen3.5:9b"
+            assert approach == "hybrid"
+            return SimpleNamespace(
+                id=session_id,
+                title=title or "Тестовый чат",
+                tenant_id=tenant_id,
+                owner_user_id=user_id,
+                active_bucket_id=None,
+                model_id=model_id,
+                approach=approach,
+                metadata_json=metadata or {},
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
+
+    monkeypatch.setattr(main_module, "chat_history_service", _FakeChatHistoryService())
+    client = TestClient(main_module.app)
+
+    response = client.patch(
+        "/chat/sessions/session-1",
+        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+        json={
+            "active_bucket_id": "",
+            "model_id": "qwen3.5:9b",
+            "approach": "hybrid",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["active_bucket_id"] is None
+    assert response.json()["model_id"] == "qwen3.5:9b"
 
 
 def test_limits_snapshot_contains_request_limits() -> None:

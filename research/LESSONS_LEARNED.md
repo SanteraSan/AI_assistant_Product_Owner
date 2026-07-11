@@ -3406,3 +3406,205 @@ Access baseline:
 - E0.2 стал первым production-like upload/indexing baseline;
 - Kafka пока не нужен, но `document_indexing_jobs` уже задаёт правильную границу для будущего async/event-driven worker;
 - следующий этап перед Keycloak: подключить основной chat UI к реальному `/rag/chat`, чтобы auth/RBAC защищали уже настоящий chat contract, а не mock flow.
+
+## 2026-07-12: E0.3 Chat RAG Integration Baseline
+
+Контекст:
+
+- UI chat всё ещё возвращал mock response, хотя backend `/rag/chat` уже умел отвечать через RAG;
+- перед Keycloak/RBAC важно зафиксировать настоящий chat contract: какие поля frontend отправляет, какие sources отображает и где проходит граница доступа.
+
+Что сделано:
+
+- добавлен typed frontend API client `entities/chat/api.ts` для `/rag/chat`;
+- Zustand chat store разделён на явные actions: user message, assistant message, thread session id и thread context;
+- mock assistant response удалён из chat store;
+- `ChatPage.handleSendMessage` теперь вызывает backend `/rag/chat`;
+- в request передаются `message`, `model`, `tenant_id`, `bucket_ids` или `document_ids`, а также mock user headers;
+- `ChatWorkspace` показывает loading state во время генерации и использует real sources из assistant response;
+- ошибки backend отображаются как assistant error message, чтобы пользователь видел проблему в контексте чата.
+
+Важное ограничение:
+
+- текущий Qdrant filter использует `bucket_ids` и `document_ids` как сужающие условия вместе;
+- поэтому E0.3 baseline применяет правило: если есть indexed chat attachments, отправлять explicit `document_ids` без `bucket_ids`; если attachments нет, использовать выбранный bucket;
+- полноценное смешивание bucket context + personal document context лучше сделать отдельным backend шагом через OR/filter groups или multi-search merge.
+
+Проверки:
+
+- frontend: `npm run lint` passed;
+- frontend: `npm run build` passed;
+- backend focused tests: `11 passed`;
+- backend full suite: `81 passed`;
+- IDE diagnostics по изменённым frontend файлам: no linter errors.
+
+Вывод:
+
+- E0.3 закрывает главный product gap между UI и RAG backend;
+- следующий архитектурный шаг перед Keycloak: решить, нужен ли backend OR-context для одновременного bucket + personal attachments, или это станет частью будущего tool/context router.
+
+## 2026-07-12: E0.3 Chat History Persistence Baseline
+
+Контекст:
+
+- после подключения `/rag/chat` история чатов всё ещё жила в Zustand и терялась при перезагрузке frontend;
+- backend уже имел базовые `chat_sessions`/`chat_messages`, но не было product endpoints для UI и явной привязки к mock user/tenant.
+
+Что сделано:
+
+- `chat_sessions` расширены полями `tenant_id`, `owner_user_id`, `active_bucket_id`, `model_id`, `approach`, `metadata_json`;
+- добавлена Alembic migration `20260712_0006_chat_session_context.py`;
+- добавлены endpoints:
+  - `GET /chat/sessions`;
+  - `POST /chat/sessions`;
+  - `GET /chat/sessions/{session_id}/messages`;
+- `/chat` и `/rag/chat` сохраняют exchange с tenant/user metadata;
+- `/rag/chat` сохраняет sources в message metadata, чтобы frontend мог восстановить панель источников после reload;
+- frontend добавил typed chat history API и загружает sessions/messages через React Query;
+- кнопка `Новый чат` создаёт backend session, а не только local Zustand thread.
+
+Ограничения baseline:
+
+- удаление/переименование чатов пока не реализованы;
+- старые sessions без `tenant_id` не будут видны в новом user-scoped списке, если их не мигрировать отдельным data backfill;
+- attachments в исторических сообщениях пока не восстанавливаются как вложения, только как обычные saved messages/sources.
+
+Проверки:
+
+- frontend: `npm run lint` passed;
+- frontend: `npm run build` passed;
+- backend focused tests: `31 passed`;
+- backend full suite: `86 passed`;
+- IDE diagnostics: no linter errors.
+
+## 2026-07-12: E0.3 Chat Context Scope Refinement
+
+Контекст:
+
+- manual smoke показал, что пользовательская фраза `по всем доступным документам` не должна зависеть от выбранного bucket;
+- если chat session уже сохранена, выбор bucket/model/approach должен восстанавливаться вместе с историей чата.
+
+Что изменено:
+
+- добавлен `PATCH /chat/sessions/{session_id}` для сохранения dropdown state;
+- frontend сохраняет `active_bucket_id`, `model_id`, `approach` при изменении dropdown;
+- при выборе chat session frontend восстанавливает dropdown state из backend session;
+- `/rag/chat` принимает и сохраняет `approach`;
+- если выбран `Без bucket` или вопрос явно просит `все доступные документы`, frontend передаёт indexed accessible `document_ids` вместо bucket scope.
+
+Вывод:
+
+- chat scope стал явным: `bucket_ids` для выбранного bucket, `document_ids` для all-accessible/document-library поиска;
+- это временно реализовано на frontend через already-authorized `documents/available`, а после Keycloak/RBAC стоит перенести scope resolution в backend service.
+
+## 2026-07-12: E0.3 Filename-Aware Retrieval Fix
+
+Контекст:
+
+- manual smoke с `AGENTS.md` показал, что документ был `indexed` и лежал в Qdrant, но вопрос по имени файла возвращал пустой контекст;
+- причина: embedding по фразе `о чем написано в файле AGENTS.md` давал лучший chunk около `0.59`, а default threshold `0.68` отсеивал все chunks;
+- имя файла хранится в metadata, но semantic vector search сам по себе не обязан находить файл по имени.
+
+Что изменено:
+
+- frontend теперь распознаёт явное имя файла в вопросе и передаёт matching indexed `document_ids`;
+- matching учитывает имя файла, stem и title без регистра/пробелов/пунктуации;
+- backend снижает score threshold до `0.45`, если задан узкий document scope (`1-3` document/source path filters) и пользователь не передал threshold явно;
+- широкий режим `все доступные документы` не получает такое снижение автоматически, чтобы не тащить слишком много мусорного контекста.
+
+Вывод:
+
+- вопрос по конкретному файлу должен идти через exact document scope, а не только через embedding similarity;
+- после Keycloak/RBAC стоит перенести filename/document scope resolution из frontend в backend, чтобы UI не владел access-sensitive логикой.
+
+## 2026-07-12: E0.3 UI Context Versus Retrieval Scope
+
+Контекст:
+
+- manual smoke показал, что после ответа dropdown context сбрасывался в `Без bucket`;
+- причина: retrieval scope (`bucket_ids=[]`, `document_ids=[...]`) использовался как UI session context и затирал `chat_sessions.active_bucket_id`;
+- второй симптом: `AGENTS.md` попадал в retrieved chunk, но prompt header показывал только заголовок `AI Development Rules...`, поэтому модель не видела связь chunk с файлом `AGENTS.md`.
+
+Что изменено:
+
+- `/rag/chat` получил отдельное поле `active_bucket_id`;
+- frontend отправляет `active_bucket_id` отдельно от `bucket_ids/document_ids`;
+- `ChatHistoryService` обновляет `chat_sessions.active_bucket_id` только из UI context, а не из retrieval scope;
+- RAG prompt source header теперь включает `file=<document_file_name>`.
+
+Вывод:
+
+- UI context, retrieval filters и evidence metadata должны быть отдельными слоями;
+- нельзя восстанавливать состояние dropdown'ов из retrieval filters, потому что exact document search и all-doc search могут легитимно использовать `bucket_ids=[]`.
+
+## 2026-07-12: E0.3 Image-Only Upload Indexing Fallback
+
+Контекст:
+
+- manual upload фото дерева через chat/bucket уходил в `index_failed`;
+- причина: baseline image loader для `png/jpg/jpeg` сначала делает OCR, а фото без текста не создаёт `RawDocument`;
+- без `RawDocument` chunking возвращал пустой список, и `DocumentIndexingService` падал с `No chunks produced for uploaded document.`
+
+Что изменено:
+
+- `DocumentIndexingService` получил image-only fallback через `image_digest_service`;
+- если OCR/обычный loader не дали документов для `png/jpg/jpeg`, сервис строит `image_digest` через vision model;
+- fallback сохраняет исходные `tenant_id`, `bucket_id`, `document_id`, `source_path`, `document_file_name`;
+- добавлены unit tests на image digest fallback и supported image source types.
+
+Ограничения:
+
+- fallback зависит от доступности `IMAGE_VISION_MODEL` в Ollama;
+- если vision model недоступна, документ всё ещё может перейти в `index_failed`, но причина будет уже инфраструктурная, а не пустой OCR.
+
+Проверки:
+
+- backend focused tests: `backend/tests/test_document_indexing_service.py` passed;
+- backend full suite: `92 passed`;
+- frontend lint/build: passed.
+
+## 2026-07-12: E0.3 Chat Attachment Image Context
+
+Контекст:
+
+- после загрузки изображения через chat пользователь сразу спросил `что изображено на картинке?`;
+- ответ ушёл в старые текстовые документы, потому что `Без bucket` сначала превращался в all-accessible `document_ids`, а attachment context проверялся позже;
+- после ответа локальное attachment-сообщение пропадало, потому что frontend перезагружал backend chat history, где attachment message пока не сохраняется.
+
+Что изменено:
+
+- приоритет chat context стал: explicit filename -> indexed attachments -> all available/no bucket -> selected bucket;
+- backend `QueryRouter` распознаёт image intent (`картинка`, `изображение`, `фото`, `image`, `picture`);
+- для image intent выбираются `image_digest` и `image_ocr`, а required source type включает `image_digest`;
+- frontend merge history теперь сохраняет локальные attachment messages при загрузке server messages.
+
+Вывод:
+
+- attachment context должен быть сильнее глобального `Без bucket`, потому пользователь ожидает ответ по только что прикреплённому файлу;
+- persistence attachment messages стоит сделать отдельным backend шагом, чтобы после полного reload они восстанавливались не только из локального state.
+
+## 2026-07-12: E0.3 Uploaded Document Deduplication
+
+Контекст:
+
+- после нескольких загрузок одного и того же `images.jpeg` через chat personal upload в доступных документах появилось много одинаковых файлов;
+- диагностика PostgreSQL показала несколько `document_assets` с одинаковым `file_name`, `owner_user_id`, `size_bytes` и разными UUID;
+- часть старых дублей была `index_failed`, часть стала `indexed` после image digest fallback.
+
+Причина:
+
+- staged upload всегда создавал новый `DocumentAsset`;
+- у staged upload/document asset не было `content_sha256`, поэтому backend не мог понять, что это тот же самый файл;
+- `/documents/available` честно возвращал все доступные assets.
+
+Что изменено:
+
+- staged upload и raw upload сохраняют `content_sha256` в `metadata_json`;
+- commit personal/bucket upload ищет существующий document asset того же tenant/user/file/hash/size и переиспользует его;
+- если existing document добавляется в bucket, создаётся только `bucket_documents` link, а не новый asset;
+- `/documents/available` дедуплицирует видимые документы: для старых записей без hash используется fallback key `owner + file_name + size_bytes`, предпочитая `indexed` документ.
+
+Ограничение:
+
+- старые дубли физически остаются в БД/файловой системе, но больше не должны размножаться и не должны отображаться пачкой в available list;
+- отдельный cleanup/backfill можно сделать позже, когда появится admin maintenance endpoint.

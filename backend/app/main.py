@@ -5,20 +5,30 @@ from time import perf_counter
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.clients.qdrant_store import QdrantStore
 from app.core.config import get_settings
+from app.db.models import ChatMessage, ChatSession
 from app.db.session import (
     create_engine,
     create_session_factory,
     database_available,
     init_db,
 )
-from app.models.chat import ChatRequest, ChatResponse, RagChatRequest, RagChatResponse
+from app.models.chat import (
+    ChatMessageResponse,
+    ChatRequest,
+    ChatResponse,
+    ChatSessionCreateRequest,
+    ChatSessionResponse,
+    ChatSessionUpdateRequest,
+    RagChatRequest,
+    RagChatResponse,
+)
 from app.routers.buckets import create_bucket_router
 from app.services.bucket_service import BucketService
 from app.services.chat_history_service import ChatExchangeRecord, ChatHistoryService
@@ -109,6 +119,8 @@ document_indexing_service = DocumentIndexingService(
     qdrant_store=qdrant_store,
     ollama_client=ollama_client,
     embedding_model=settings.embedding_model,
+    image_vision_enabled=settings.image_vision_enabled,
+    image_vision_model=settings.image_vision_model,
 )
 
 
@@ -258,8 +270,79 @@ async def health_ready() -> dict[str, object]:
     return snapshot
 
 
+@app.get("/chat/sessions", response_model=list[ChatSessionResponse])
+async def list_chat_sessions(
+    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    user_id: str | None = Header(default=None, alias="X-User-ID"),
+) -> list[ChatSessionResponse]:
+    sessions = await chat_history_service.list_sessions(
+        tenant_id=_tenant_from_header(tenant_id),
+        user_id=_user_from_header(user_id),
+    )
+    return [_chat_session_response(session) for session in sessions]
+
+
+@app.post("/chat/sessions", response_model=ChatSessionResponse, status_code=201)
+async def create_chat_session(
+    payload: ChatSessionCreateRequest,
+    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    user_id: str | None = Header(default=None, alias="X-User-ID"),
+) -> ChatSessionResponse:
+    session = await chat_history_service.create_session(
+        tenant_id=_tenant_from_header(tenant_id),
+        user_id=_user_from_header(user_id),
+        title=payload.title,
+        active_bucket_id=payload.active_bucket_id,
+        model_id=payload.model_id,
+        approach=payload.approach,
+        metadata=payload.metadata,
+    )
+    return _chat_session_response(session)
+
+
+@app.patch("/chat/sessions/{session_id}", response_model=ChatSessionResponse)
+async def update_chat_session(
+    session_id: str,
+    payload: ChatSessionUpdateRequest,
+    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    user_id: str | None = Header(default=None, alias="X-User-ID"),
+) -> ChatSessionResponse:
+    session = await chat_history_service.update_session(
+        tenant_id=_tenant_from_header(tenant_id),
+        user_id=_user_from_header(user_id),
+        session_id=session_id,
+        title=payload.title,
+        active_bucket_id=payload.active_bucket_id,
+        model_id=payload.model_id,
+        approach=payload.approach,
+        metadata=payload.metadata,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+    return _chat_session_response(session)
+
+
+@app.get("/chat/sessions/{session_id}/messages", response_model=list[ChatMessageResponse])
+async def list_chat_session_messages(
+    session_id: str,
+    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    user_id: str | None = Header(default=None, alias="X-User-ID"),
+) -> list[ChatMessageResponse]:
+    messages = await chat_history_service.list_messages(
+        tenant_id=_tenant_from_header(tenant_id),
+        user_id=_user_from_header(user_id),
+        session_id=session_id,
+    )
+    return [_chat_message_response(message) for message in messages]
+
+
 @app.post("/chat", response_model=ChatResponse)
-async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
+async def chat(
+    request: Request,
+    payload: ChatRequest,
+    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    user_id: str | None = Header(default=None, alias="X-User-ID"),
+) -> ChatResponse:
     _enforce_chat_request_limits(payload)
     await _enforce_rate_limit(request=request, endpoint="chat")
     model = payload.model or settings.default_model
@@ -293,16 +376,23 @@ async def chat(request: Request, payload: ChatRequest) -> ChatResponse:
     )
     chat_exchange = await _try_save_chat_exchange(
         session_id=payload.session_id,
+        tenant_id=_tenant_from_header(tenant_id),
+        user_id=_user_from_header(user_id),
         user_message=payload.message,
         response=response,
-        metadata={"endpoint": "/chat"},
+        metadata={"endpoint": "/chat", "model_id": model},
     )
     _attach_chat_exchange(response, chat_exchange)
     return response
 
 
 @app.post("/rag/chat", response_model=RagChatResponse)
-async def rag_chat(request: Request, payload: RagChatRequest) -> RagChatResponse:
+async def rag_chat(
+    request: Request,
+    payload: RagChatRequest,
+    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    user_id: str | None = Header(default=None, alias="X-User-ID"),
+) -> RagChatResponse:
     _enforce_rag_request_limits(payload)
     await _enforce_rate_limit(request=request, endpoint="rag_chat")
     if not _qdrant_collection_exists():
@@ -341,11 +431,28 @@ async def rag_chat(request: Request, payload: RagChatRequest) -> RagChatResponse
         response.conversation_context = conversation_context
         chat_exchange = await _try_save_chat_exchange(
             session_id=payload.session_id,
+            tenant_id=_tenant_from_header(tenant_id),
+            user_id=_user_from_header(user_id),
             user_message=payload.message,
             response=response,
             metadata={
                 "endpoint": "/rag/chat",
                 "collection": response.collection,
+                "model_id": response.model,
+                "approach": payload.approach,
+                "active_bucket_id": payload.active_bucket_id,
+                "bucket_ids": payload.bucket_ids,
+                "document_ids": payload.document_ids,
+                "sources": [
+                    {
+                        "id": source.id,
+                        "score": source.score,
+                        "title": source.title,
+                        "source_type": source.source_type,
+                        "source_path": source.source_path,
+                    }
+                    for source in response.sources
+                ],
                 "retrieval": response.retrieval,
                 "query_hints": response.query_hints,
                 "context_policy": response.context_policy,
@@ -562,6 +669,8 @@ def _conversation_context_error(*, message: str) -> dict[str, object]:
 async def _try_save_chat_exchange(
     *,
     session_id: str | None,
+    tenant_id: str | None,
+    user_id: str | None,
     user_message: str,
     response: ChatResponse,
     metadata: dict[str, object],
@@ -569,6 +678,8 @@ async def _try_save_chat_exchange(
     try:
         return await chat_history_service.save_exchange(
             session_id=session_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
             user_message=user_message,
             assistant_message=response.response,
             model=response.model,
@@ -579,6 +690,44 @@ async def _try_save_chat_exchange(
     except Exception:
         logger.exception("Chat history persistence failed")
         return None
+
+
+def _tenant_from_header(value: str | None) -> str:
+    return (value or settings.default_tenant_id).strip() or settings.default_tenant_id
+
+
+def _user_from_header(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    return normalized or None
+
+
+def _chat_session_response(session: ChatSession) -> ChatSessionResponse:
+    return ChatSessionResponse(
+        id=session.id,
+        title=session.title or "Untitled chat",
+        tenant_id=session.tenant_id,
+        owner_user_id=session.owner_user_id,
+        active_bucket_id=session.active_bucket_id,
+        model_id=session.model_id,
+        approach=session.approach,
+        metadata=session.metadata_json or {},
+        created_at=session.created_at.isoformat(),
+        updated_at=session.updated_at.isoformat(),
+    )
+
+
+def _chat_message_response(message: ChatMessage) -> ChatMessageResponse:
+    return ChatMessageResponse(
+        id=message.id,
+        session_id=message.session_id,
+        role=message.role,
+        content=message.content,
+        model=message.model,
+        provider=message.provider,
+        latency_ms=message.latency_ms,
+        metadata=message.metadata_json or {},
+        created_at=message.created_at.isoformat(),
+    )
 
 
 def _attach_chat_exchange(

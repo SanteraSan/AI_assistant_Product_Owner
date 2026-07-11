@@ -1416,4 +1416,51 @@ committed document
 - `size_bytes`;
 - upload metadata.
 
-Ограничение baseline: upload endpoint сохраняет файл и registry/status, но ещё не запускает полноценный Qdrant indexing pipeline. Следующий шаг - связать uploaded document registry с ingestion/chunking/embedding worker.
+Ограничение baseline: indexing запускается in-process через `BackgroundTasks`. Это достаточно для E0 UI flow, но для production его нужно вынести в durable worker/queue.
+
+### E0.3 Chat RAG And History Baseline
+
+UI chat подключён к `/rag/chat`, а история чатов теперь хранится в PostgreSQL.
+
+Новые/актуальные endpoints:
+
+```bash
+curl -s http://localhost:8000/chat/sessions \
+  -H "X-Tenant-ID: local_demo" \
+  -H "X-User-ID: local-user-1" | jq
+```
+
+```bash
+curl -s -X POST http://localhost:8000/chat/sessions \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: local_demo" \
+  -H "X-User-ID: local-user-1" \
+  -d '{"title":"Новый чат","active_bucket_id":null,"model_id":"qwen3.5:9b","approach":"hybrid"}' | jq
+```
+
+```bash
+curl -s http://localhost:8000/chat/sessions/<SESSION_ID>/messages \
+  -H "X-Tenant-ID: local_demo" \
+  -H "X-User-ID: local-user-1" | jq
+```
+
+Dropdown context сохраняется отдельным session update:
+
+```bash
+curl -s -X PATCH http://localhost:8000/chat/sessions/<SESSION_ID> \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: local_demo" \
+  -H "X-User-ID: local-user-1" \
+  -d '{"active_bucket_id":"","model_id":"qwen3.5:9b","approach":"hybrid"}' | jq
+```
+
+`POST /rag/chat` продолжает возвращать `session_id`, `user_message_id`, `assistant_message_id`. Frontend использует это для восстановления истории после перезагрузки.
+
+Если пользователь выбирает `Без bucket` или явно просит поиск `по всем доступным документам`, frontend передаёт indexed accessible `document_ids` из `/documents/available`. Это временный E0.3 baseline; после Keycloak/RBAC scope resolution должен переехать в backend.
+
+Важно: после этого этапа нужно применить миграции:
+
+```bash
+cd backend
+alembic upgrade head
+```

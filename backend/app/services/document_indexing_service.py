@@ -11,7 +11,10 @@ from app.clients.qdrant_store import QdrantStore
 from app.db.models import BucketDocument, DocumentAsset, DocumentIndexingJob
 from app.services.chunking import DocumentChunk, chunk_documents
 from app.services.document_loader import RawDocument, load_raw_documents
+from app.services.image_digest_service import load_image_digest_documents
 from app.services.ollama_client import OllamaClient
+
+IMAGE_SOURCE_TYPES = {"png", "jpg", "jpeg"}
 
 
 class DocumentIndexingService:
@@ -22,11 +25,15 @@ class DocumentIndexingService:
         qdrant_store: QdrantStore,
         ollama_client: OllamaClient,
         embedding_model: str,
+        image_vision_enabled: bool = False,
+        image_vision_model: str | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._qdrant_store = qdrant_store
         self._ollama_client = ollama_client
         self._embedding_model = embedding_model
+        self._image_vision_enabled = image_vision_enabled
+        self._image_vision_model = image_vision_model
 
     async def process_jobs(self, job_ids: list[str]) -> None:
         for job_id in job_ids:
@@ -105,6 +112,17 @@ class DocumentIndexingService:
 
     async def _index_document(self, *, document: DocumentAsset, bucket_id: str) -> int:
         raw_documents = _load_raw_documents_for_asset(document=document, bucket_id=bucket_id)
+        if not raw_documents and _can_build_image_digest(
+            document=document,
+            enabled=self._image_vision_enabled,
+            vision_model=self._image_vision_model,
+        ):
+            raw_documents = await _load_image_digest_documents_for_asset(
+                document=document,
+                bucket_id=bucket_id,
+                ollama_client=self._ollama_client,
+                vision_model=self._image_vision_model or "",
+            )
         chunks = chunk_documents(raw_documents)
         if not chunks:
             raise ValueError("No chunks produced for uploaded document.")
@@ -165,6 +183,62 @@ def _load_raw_documents_for_asset(*, document: DocumentAsset, bucket_id: str) ->
             )
             for raw_document in matching_documents
         ]
+
+
+async def _load_image_digest_documents_for_asset(
+    *,
+    document: DocumentAsset,
+    bucket_id: str,
+    ollama_client: OllamaClient,
+    vision_model: str,
+) -> list[RawDocument]:
+    source_path = Path(document.source_path)
+    with TemporaryDirectory(prefix="document-index-vision-") as temporary_dir_name:
+        temporary_dir = Path(temporary_dir_name)
+        temporary_path = temporary_dir / source_path.name
+        copy2(source_path, temporary_path)
+
+        loaded_documents = await load_image_digest_documents(
+            temporary_dir,
+            ollama_client=ollama_client,
+            vision_model=vision_model,
+            tenant_id=document.tenant_id,
+            bucket_id=bucket_id,
+        )
+        matching_documents = [
+            raw_document
+            for raw_document in loaded_documents
+            if Path(raw_document.source_path) == temporary_path
+        ]
+        return [
+            replace(
+                raw_document,
+                id=f"{document.id}:{raw_document.id}",
+                tenant_id=document.tenant_id,
+                bucket_id=bucket_id,
+                source_path=str(source_path),
+                metadata={
+                    **raw_document.metadata,
+                    "document_asset_id": document.id,
+                    "document_file_name": document.file_name,
+                    "document_visibility": document.visibility,
+                },
+            )
+            for raw_document in matching_documents
+        ]
+
+
+def _can_build_image_digest(
+    *,
+    document: DocumentAsset,
+    enabled: bool,
+    vision_model: str | None,
+) -> bool:
+    return (
+        enabled
+        and bool((vision_model or "").strip())
+        and document.source_type.lower() in IMAGE_SOURCE_TYPES
+    )
 
 
 def _should_update_document_status(job: DocumentIndexingJob) -> bool:

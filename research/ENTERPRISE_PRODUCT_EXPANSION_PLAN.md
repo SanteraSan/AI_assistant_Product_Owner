@@ -148,6 +148,31 @@ Definition of done:
 - uploaded document chunks are upserted to Qdrant with `tenant_id`, `bucket_id`, `document_id`, `source_path`, and traceable `document_metadata`;
 - UI clearly distinguishes staged, indexing, indexed, and failed documents.
 
+### Stage E0.3: Chat RAG Integration Baseline
+
+Goal:
+
+- replace mock assistant responses in the web UI with real `/rag/chat` calls;
+- make model, tenant, bucket and uploaded-document context explicit before Keycloak/RBAC.
+
+Scope:
+
+- typed frontend API client for `/rag/chat`;
+- chat store actions for user messages, assistant messages, session id and context metadata;
+- PostgreSQL-backed chat sessions/messages scoped by mock tenant/user headers;
+- loading/error states in the chat composer and message stream;
+- real RAG sources in the source/evidence panel;
+- context rule for the current backend filter model: use `bucket_ids` when chatting with a selected bucket, use explicit `document_ids` when indexed chat attachments are present.
+
+Definition of done:
+
+- sending a chat message calls `/rag/chat`;
+- response text and sources come from backend, not mock data;
+- selected model and mock tenant/user context are passed to backend;
+- indexed chat attachments can be used as explicit document context;
+- chat history survives frontend reload through `/chat/sessions` and `/chat/sessions/{session_id}/messages`;
+- frontend build/lint and backend tests pass.
+
 ## Stage E1: Keycloak, BFF And RBAC
 
 Goal:

@@ -249,7 +249,13 @@ class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active_bucket_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    model_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    approach: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

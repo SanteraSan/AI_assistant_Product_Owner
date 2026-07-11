@@ -85,6 +85,11 @@ class RagService:
         )
         selected_source_types = routing_decision.source_types
         selected_score_threshold = routing_decision.score_threshold
+        if score_threshold is None and _is_narrow_document_scope(
+            document_ids=selected_document_ids,
+            source_paths=selected_source_paths,
+        ):
+            selected_score_threshold = _lower_score_threshold(selected_score_threshold, 0.45)
         started_at = perf_counter()
 
         query_vector = await self._ollama_client.embed(
@@ -444,10 +449,14 @@ def build_rag_prompt(
         title = source.title or "Untitled source"
         source_type = source.source_type or "unknown"
         features = ", ".join(source.feature) if source.feature else "unknown"
+        file_name = _source_file_name(source)
         context_blocks.append(
             "\n".join(
                 [
-                    f"[CHUNK {index}: {source_type} | title={title} | feature={features}]",
+                    (
+                        f"[CHUNK {index}: {source_type} | title={title} | "
+                        f"file={file_name} | feature={features}]"
+                    ),
                     source.content.strip(),
                 ]
             )
@@ -458,11 +467,12 @@ def build_rag_prompt(
     memory_rules = [
         (
             "Память диалога помогает учитывать предыдущие цели и формулировки "
-            "пользователя, но не является источником фактов о продукте."
+            "пользователя, но не является источником фактов и не отменяет "
+            "актуальный блок Контекст."
         ),
         (
-            "Факты о продукте, метрики, причины инцидентов и рекомендации "
-            "бери только из блока Контекст."
+            "Факты из пользовательских документов, метрики, причины инцидентов "
+            "и рекомендации бери только из блока Контекст."
         ),
     ] if memory_text else []
     dynamic_rules = "\n".join(
@@ -473,6 +483,20 @@ def build_rag_prompt(
         [
             "- Отвечай на русском языке.",
             "- Не выдумывай факты, которых нет в контексте.",
+            (
+                "- Если в контексте есть релевантный фрагмент, ответь по нему, "
+                "даже если документ не относится к продукту TaskFlow AI."
+            ),
+            (
+                "- Если header источника содержит `file=<имя файла>`, считай этот chunk "
+                "фрагментом указанного файла. Не говори, что файл отсутствует, если "
+                "в Контексте есть chunk с таким `file`."
+            ),
+            (
+                "- Если источник выглядит как шутка, заметка или черновик, "
+                "можно указать это как оговорку, но не отказывайся отвечать "
+                "только из-за типа источника."
+            ),
             "- Если в контексте нет ответа, скажи, каких данных не хватает.",
             "- Отделяй факты из контекста от интерпретации и рекомендации.",
             "- Если используешь числа, бери их только из контекста.",
@@ -481,7 +505,7 @@ def build_rag_prompt(
         ]
     ).strip()
 
-    return f"""Ты — AI-ассистент для Product Owner в B2B SaaS продукте TaskFlow AI.
+    return f"""Ты — AI-ассистент для Product Owner, который отвечает по пользовательским документам.
 
 Твоя задача: ответить на вопрос пользователя строго на основе предоставленного контекста.
 
@@ -506,6 +530,18 @@ def _build_memory_prompt_text(memory_context: dict[str, object] | None) -> str:
         return ""
     content = str(memory_context.get("content") or "").strip()
     return content
+
+
+def _source_file_name(source: SourceChunk) -> str:
+    document_metadata = source.metadata.get("document_metadata") or {}
+    if isinstance(document_metadata, dict):
+        for key in ("document_file_name", "file_name"):
+            value = document_metadata.get(key)
+            if value:
+                return str(value)
+    if source.source_path:
+        return source.source_path.rsplit("/", maxsplit=1)[-1]
+    return "unknown"
 
 
 def _estimate_tokens(text: str) -> int:
@@ -608,6 +644,20 @@ def _filter_sources_by_score(
         for source in sources
         if source.score is not None and source.score >= score_threshold
     ]
+
+
+def _is_narrow_document_scope(
+    *,
+    document_ids: list[str],
+    source_paths: list[str],
+) -> bool:
+    return 0 < len(document_ids) + len(source_paths) <= 3
+
+
+def _lower_score_threshold(current: float | None, target: float) -> float:
+    if current is None:
+        return target
+    return min(current, target)
 
 
 def _contains_source_type(sources: list[SourceChunk], source_type: str) -> bool:

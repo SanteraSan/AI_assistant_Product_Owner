@@ -1,0 +1,220 @@
+import { apiRequest } from '../../shared/api/httpClient'
+import type { User } from '../user/model'
+import type { ChatMessage, ChatThread } from './model'
+
+type RagSourceDto = {
+  id: string
+  content: string
+  score?: number | null
+  title?: string | null
+  source_type?: string | null
+  source_path?: string | null
+  metadata?: Record<string, unknown>
+}
+
+type RagChatDto = {
+  model: string
+  response: string
+  latency_ms: number
+  session_id?: string | null
+  assistant_message_id?: string | null
+  sources: RagSourceDto[]
+}
+
+type ChatSessionDto = {
+  id: string
+  title: string
+  tenant_id?: string | null
+  owner_user_id?: string | null
+  active_bucket_id?: string | null
+  model_id?: string | null
+  approach?: string | null
+  metadata?: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+type ChatMessageDto = {
+  id: string
+  session_id: string
+  role: 'user' | 'assistant'
+  content: string
+  model?: string | null
+  provider?: string | null
+  latency_ms?: number | null
+  metadata?: Record<string, unknown>
+  created_at: string
+}
+
+export type SendRagMessagePayload = {
+  message: string
+  model?: string
+  approach?: string
+  activeBucketId?: string
+  sessionId?: string
+  tenantId: string
+  bucketIds: string[]
+  documentIds: string[]
+}
+
+export type CreateChatSessionPayload = {
+  title?: string
+  activeBucketId?: string
+  modelId?: string
+  approach?: string
+}
+
+export type UpdateChatSessionPayload = CreateChatSessionPayload & {
+  title?: string
+}
+
+export async function fetchChatSessions(user: User): Promise<ChatThread[]> {
+  const sessions = await apiRequest<ChatSessionDto[]>('/chat/sessions', {
+    tenantId: user.tenantId,
+    userId: user.id,
+    roles: user.roles,
+  })
+  return sessions.map(chatThreadFromDto)
+}
+
+export async function createChatSession(
+  user: User,
+  payload: CreateChatSessionPayload = {},
+): Promise<ChatThread> {
+  const session = await apiRequest<ChatSessionDto>('/chat/sessions', {
+    body: JSON.stringify({
+      title: payload.title ?? 'Новый чат',
+      active_bucket_id: payload.activeBucketId || null,
+      model_id: payload.modelId || null,
+      approach: payload.approach || null,
+    }),
+    method: 'POST',
+    tenantId: user.tenantId,
+    userId: user.id,
+    roles: user.roles,
+  })
+  return chatThreadFromDto(session)
+}
+
+export async function updateChatSession(
+  user: User,
+  sessionId: string,
+  payload: UpdateChatSessionPayload,
+): Promise<ChatThread> {
+  const session = await apiRequest<ChatSessionDto>(`/chat/sessions/${sessionId}`, {
+    body: JSON.stringify({
+      title: payload.title,
+      active_bucket_id: payload.activeBucketId ?? null,
+      model_id: payload.modelId ?? null,
+      approach: payload.approach ?? null,
+    }),
+    method: 'PATCH',
+    tenantId: user.tenantId,
+    userId: user.id,
+    roles: user.roles,
+  })
+  return chatThreadFromDto(session)
+}
+
+export async function fetchChatMessages(
+  user: User,
+  sessionId: string,
+): Promise<ChatMessage[]> {
+  const messages = await apiRequest<ChatMessageDto[]>(`/chat/sessions/${sessionId}/messages`, {
+    tenantId: user.tenantId,
+    userId: user.id,
+    roles: user.roles,
+  })
+  return messages.map(chatMessageFromDto)
+}
+
+export async function sendRagMessage(
+  user: User,
+  payload: SendRagMessagePayload,
+): Promise<{
+  message: ChatMessage
+  sessionId?: string
+}> {
+  const response = await apiRequest<RagChatDto>('/rag/chat', {
+    body: JSON.stringify({
+      message: payload.message,
+      model: payload.model,
+      approach: payload.approach,
+      active_bucket_id: payload.activeBucketId ?? null,
+      session_id: payload.sessionId,
+      tenant_id: payload.tenantId,
+      bucket_ids: payload.bucketIds,
+      document_ids: payload.documentIds,
+    }),
+    method: 'POST',
+    tenantId: user.tenantId,
+    userId: user.id,
+    roles: user.roles,
+  })
+
+  return {
+    message: {
+      id: response.assistant_message_id ?? `assistant-${Date.now()}`,
+      role: 'assistant',
+      content: response.response,
+      sources: response.sources.map((source) => ({
+        id: source.id,
+        title: source.title ?? source.source_path ?? 'Источник',
+        sourceType: source.source_type ?? 'unknown',
+      })),
+    },
+    sessionId: response.session_id ?? undefined,
+  }
+}
+
+function chatThreadFromDto(session: ChatSessionDto): ChatThread {
+  return {
+    id: session.id,
+    title: session.title || 'Новый чат',
+    updatedAt: formatRelativeDate(session.updated_at),
+    bucketId: session.active_bucket_id ?? '',
+    sessionId: session.id,
+    bucketIds: session.active_bucket_id ? [session.active_bucket_id] : [],
+    documentIds: [],
+    modelId: session.model_id ?? undefined,
+    approach: session.approach ?? undefined,
+  }
+}
+
+function chatMessageFromDto(message: ChatMessageDto): ChatMessage {
+  const sources = Array.isArray(message.metadata?.sources)
+    ? message.metadata.sources
+    : []
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    sources: sources
+      .filter((source): source is Record<string, unknown> => typeof source === 'object' && source !== null)
+      .map((source) => ({
+        id: String(source.id ?? source.qdrant_point_id ?? crypto.randomUUID()),
+        title: String(source.title ?? source.source_path ?? 'Источник'),
+        sourceType: String(source.source_type ?? 'unknown'),
+      })),
+  }
+}
+
+function formatRelativeDate(value: string): string {
+  const timestamp = Date.parse(value)
+  if (Number.isNaN(timestamp)) {
+    return 'Недавно'
+  }
+  const diffMs = Date.now() - timestamp
+  if (diffMs < 60_000) {
+    return 'Только что'
+  }
+  if (diffMs < 3_600_000) {
+    return `${Math.max(1, Math.floor(diffMs / 60_000))} мин. назад`
+  }
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    month: '2-digit',
+  }).format(timestamp)
+}

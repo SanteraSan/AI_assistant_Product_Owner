@@ -3,6 +3,11 @@ export type ChatThread = {
   title: string
   updatedAt: string
   bucketId: string
+  sessionId?: string
+  bucketIds?: string[]
+  documentIds?: string[]
+  modelId?: string
+  approach?: string
 }
 
 export type ChatMessage = {

@@ -1,11 +1,18 @@
 import { create } from 'zustand'
-import { mockBuckets } from '../bucket/model'
 import type { ChatAttachment, ChatMessage, ChatThread } from './model'
 import { mockMessagesByThreadId, mockThreads } from './model'
 
 type SendMessageContext = {
   bucketId: string
   bucketName: string
+}
+
+type ThreadContext = {
+  bucketId?: string
+  bucketIds: string[]
+  documentIds: string[]
+  modelId?: string
+  approach?: string
 }
 
 type ChatStore = {
@@ -15,9 +22,15 @@ type ChatStore = {
   threads: ChatThread[]
   createThread: () => void
   addAttachmentMessage: (attachment: ChatAttachment) => void
+  addAssistantMessage: (message: ChatMessage) => void
+  addUserMessage: (text: string, context: SendMessageContext) => void
+  upsertThread: (thread: ChatThread) => void
   selectThread: (threadId: string) => void
-  sendMessage: (text: string, context: SendMessageContext) => void
   setComposerValue: (value: string) => void
+  setThreadMessages: (threadId: string, messages: ChatMessage[]) => void
+  setThreads: (threads: ChatThread[]) => void
+  setThreadContext: (threadId: string, context: ThreadContext) => void
+  setThreadSessionId: (threadId: string, sessionId: string) => void
   updateAttachmentStatuses: (attachments: ChatAttachment[]) => void
 }
 
@@ -31,12 +44,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   createThread: () => {
     const threadId = `thread-${Date.now()}`
-    const fallbackBucketId = mockBuckets[0]?.id ?? 'taskflow_seed'
     const newThread: ChatThread = {
       id: threadId,
       title: 'Новый чат',
       updatedAt: 'Только что',
-      bucketId: fallbackBucketId,
+      bucketId: '',
     }
 
     set((state) => ({
@@ -79,14 +91,28 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }))
   },
 
-  selectThread: (threadId: string) => {
-    set({
-      activeThreadId: threadId,
-      composerValue: '',
-    })
+  addAssistantMessage: (message: ChatMessage) => {
+    const { activeThreadId } = get()
+    set((state) => ({
+      messagesByThreadId: {
+        ...state.messagesByThreadId,
+        [activeThreadId]: [
+          ...(state.messagesByThreadId[activeThreadId] ?? []),
+          message,
+        ],
+      },
+      threads: state.threads.map((thread) =>
+        thread.id === activeThreadId
+          ? {
+              ...thread,
+              updatedAt: 'Только что',
+            }
+          : thread,
+      ),
+    }))
   },
 
-  sendMessage: (text: string, context: SendMessageContext) => {
+  addUserMessage: (text: string, context: SendMessageContext) => {
     const trimmedText = text.trim()
     if (!trimmedText) {
       return
@@ -98,19 +124,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       role: 'user',
       content: trimmedText,
     }
-    const assistantMessage: ChatMessage = {
-      id: `assistant-${Date.now()}`,
-      role: 'assistant',
-      content:
-        'Пока это mock response. Следующий шаг — подключить `/rag/chat` и передавать туда model, tenant_id и выбранный bucket_ids.',
-      sources: [
-        {
-          id: `source-${Date.now()}`,
-          title: context.bucketName,
-          sourceType: 'bucket',
-        },
-      ],
-    }
 
     set((state) => ({
       composerValue: '',
@@ -119,7 +132,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         [activeThreadId]: [
           ...(state.messagesByThreadId[activeThreadId] ?? []),
           userMessage,
-          assistantMessage,
         ],
       },
       threads: state.threads.map((thread) =>
@@ -135,8 +147,87 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }))
   },
 
+  selectThread: (threadId: string) => {
+    set({
+      activeThreadId: threadId,
+      composerValue: '',
+    })
+  },
+
+  upsertThread: (thread: ChatThread) => {
+    set((state) => {
+      const existingThread = state.threads.find((current) => current.id === thread.id)
+      return {
+        activeThreadId: thread.id,
+        composerValue: '',
+        messagesByThreadId: {
+          ...state.messagesByThreadId,
+          [thread.id]: state.messagesByThreadId[thread.id] ?? [],
+        },
+        threads: existingThread
+          ? state.threads.map((current) => (current.id === thread.id ? thread : current))
+          : [thread, ...state.threads],
+      }
+    })
+  },
+
   setComposerValue: (value: string) => {
     set({ composerValue: value })
+  },
+
+  setThreadMessages: (threadId: string, messages: ChatMessage[]) => {
+    set((state) => ({
+      messagesByThreadId: {
+        ...state.messagesByThreadId,
+        [threadId]: mergeWithLocalAttachmentMessages(
+          state.messagesByThreadId[threadId] ?? [],
+          messages,
+        ),
+      },
+    }))
+  },
+
+  setThreads: (threads: ChatThread[]) => {
+    set((state) => {
+      const activeThreadStillExists = threads.some((thread) => thread.id === state.activeThreadId)
+      const activeThreadId = activeThreadStillExists
+        ? state.activeThreadId
+        : (threads[0]?.id ?? state.activeThreadId)
+      return {
+        activeThreadId,
+        messagesByThreadId: {
+          ...Object.fromEntries(threads.map((thread) => [thread.id, state.messagesByThreadId[thread.id] ?? []])),
+          ...state.messagesByThreadId,
+        },
+        threads,
+      }
+    })
+  },
+
+  setThreadContext: (threadId: string, context: ThreadContext) => {
+    set((state) => ({
+      threads: state.threads.map((thread) =>
+        thread.id === threadId
+          ? {
+              ...thread,
+              ...context,
+            }
+          : thread,
+      ),
+    }))
+  },
+
+  setThreadSessionId: (threadId: string, sessionId: string) => {
+    set((state) => ({
+      threads: state.threads.map((thread) =>
+        thread.id === threadId
+          ? {
+              ...thread,
+              sessionId,
+            }
+          : thread,
+      ),
+    }))
   },
 
   updateAttachmentStatuses: (attachments: ChatAttachment[]) => {
@@ -160,3 +251,14 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }))
   },
 }))
+
+function mergeWithLocalAttachmentMessages(
+  localMessages: ChatMessage[],
+  serverMessages: ChatMessage[],
+): ChatMessage[] {
+  const serverIds = new Set(serverMessages.map((message) => message.id))
+  const localAttachmentMessages = localMessages.filter(
+    (message) => message.attachments?.length && !serverIds.has(message.id),
+  )
+  return [...localAttachmentMessages, ...serverMessages]
+}

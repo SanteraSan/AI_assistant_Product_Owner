@@ -83,7 +83,6 @@ class QueryRouter:
             "техническ",
             "причин",
             "root cause",
-            "почему",
             "rate limit",
             "rate limits",
             "retry",
@@ -124,6 +123,33 @@ class QueryRouter:
             "incident_note",
             "support_ticket",
             "metric_row",
+        ]
+        self._visual_chart_markers = (
+            "diagram",
+            "diagrams",
+            "диаграм",
+            "chart",
+            "charts",
+            "график",
+            "визуализац",
+        )
+        self._visual_image_markers = (
+            "изображен",
+            "изображён",
+            "изображение",
+            "картинк",
+            "фото",
+            "photo",
+            "image",
+            "picture",
+        )
+        self._visual_chart_source_types = [
+            "excel_chart",
+            "image_digest",
+        ]
+        self._visual_image_source_types = [
+            "image_digest",
+            "image_ocr",
         ]
 
     def route(
@@ -179,6 +205,22 @@ class QueryRouter:
             and not support_feedback_intent
             and not technical_root_cause_intent
         )
+        visual_chart_intent = (
+            _contains_any(normalized, self._visual_chart_markers)
+            and not metric_intent
+            and not release_notes_intent
+            and not support_feedback_intent
+            and not technical_root_cause_intent
+            and not incident_intent
+        )
+        visual_image_intent = (
+            _contains_any(normalized, self._visual_image_markers)
+            and not metric_intent
+            and not release_notes_intent
+            and not support_feedback_intent
+            and not technical_root_cause_intent
+            and not incident_intent
+        )
 
         selected_source_types = source_types
         selected_score_threshold = score_threshold
@@ -214,6 +256,20 @@ class QueryRouter:
             selected_source_types = self._incident_source_types
             applied_hints.append("incident_source_types")
 
+        if visual_chart_intent and not user_provided_source_types:
+            selected_source_types = self._visual_chart_source_types
+            applied_hints.append("visual_chart_source_types")
+            required_source_types.append("excel_chart")
+
+        if visual_image_intent and not user_provided_source_types:
+            selected_source_types = self._visual_image_source_types
+            applied_hints.append("visual_image_source_types")
+            required_source_types.append("image_digest")
+
+        if (visual_chart_intent or visual_image_intent) and not user_provided_score_threshold:
+            selected_score_threshold = _lower_threshold(score_threshold, 0.55)
+            applied_hints.append("visual_score_threshold")
+
         return QueryRoutingDecision(
             source_types=selected_source_types,
             score_threshold=selected_score_threshold,
@@ -224,6 +280,8 @@ class QueryRouter:
                 "support_feedback_intent": support_feedback_intent,
                 "technical_root_cause_intent": technical_root_cause_intent,
                 "incident_intent": incident_intent,
+                "visual_chart_intent": visual_chart_intent,
+                "visual_image_intent": visual_image_intent,
                 "applied_hints": applied_hints,
                 "required_source_types": required_source_types,
                 "user_provided_source_types": user_provided_source_types,

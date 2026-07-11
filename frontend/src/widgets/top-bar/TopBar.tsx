@@ -69,7 +69,10 @@ export function TopBar({
         <Select
           label="Контекст"
           onChange={(event) => onChangeBucket(event.target.value)}
-          options={buckets.map((bucket) => ({ label: bucket.name, value: bucket.id }))}
+          options={[
+            { label: 'Без bucket', value: '' },
+            ...buckets.map((bucket) => ({ label: bucket.name, value: bucket.id })),
+          ]}
           value={activeBucketId}
         />
         <Button onClick={onLoginClick} variant="ghost">

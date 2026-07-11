@@ -1,4 +1,6 @@
 from app.models.chat import SourceChunk
+from app.db.models import ChatSession
+from app.services.chat_history_service import _apply_session_context
 from app.services.rag_service import (
     _apply_source_diversity,
     _docx_neighbor_sources,
@@ -8,9 +10,12 @@ from app.services.rag_service import (
     _extract_exact_numeric_terms,
     _extract_docx_exact_terms,
     _filter_sources_by_score,
+    _is_narrow_document_scope,
     _looks_like_document_header_question,
+    _lower_score_threshold,
     _remove_numeric_metric_lines,
     _required_source_types_for_supplement,
+    build_rag_prompt,
 )
 
 
@@ -47,6 +52,17 @@ def test_filter_sources_by_score_keeps_sources_at_or_above_threshold() -> None:
     kept = _filter_sources_by_score(sources, 0.60)
 
     assert [source.id for source in kept] == ["edge", "high"]
+
+
+def test_narrow_document_scope_can_lower_score_threshold() -> None:
+    assert _is_narrow_document_scope(document_ids=["doc-1"], source_paths=[])
+    assert _is_narrow_document_scope(document_ids=["doc-1", "doc-2"], source_paths=["/tmp/a.md"])
+    assert not _is_narrow_document_scope(document_ids=[], source_paths=[])
+    assert not _is_narrow_document_scope(
+        document_ids=["doc-1", "doc-2", "doc-3", "doc-4"],
+        source_paths=[],
+    )
+    assert _lower_score_threshold(0.68, 0.45) == 0.45
 
 
 def test_source_diversity_limits_duplicate_titles() -> None:
@@ -91,6 +107,71 @@ def test_remove_numeric_metric_lines_keeps_qualitative_context() -> None:
     assert "Root cause" in sanitized
     assert "12%" not in sanitized
     assert "1400 ms" not in sanitized
+
+
+def test_rag_prompt_prioritizes_current_context_over_memory_and_product_scope() -> None:
+    prompt = build_rag_prompt(
+        question="Что в выбранном bucket написано про слонов?",
+        sources=[
+            _source(
+                "joke",
+                title="Шутки",
+                source_type="txt",
+                content="Слоны не летают потому что они тяжелые, а размах ушей не слишком большой!",
+            )
+        ],
+        memory_context={
+            "used": True,
+            "content": "Раньше данных про слонов не было.",
+        },
+    )
+
+    assert "не отменяет актуальный блок Контекст" in prompt
+    assert "даже если документ не относится к продукту TaskFlow AI" in prompt
+    assert "не отказывайся отвечать только из-за типа источника" in prompt
+    assert "Слоны не летают" in prompt
+
+
+def test_rag_prompt_includes_document_file_name_in_source_header() -> None:
+    prompt = build_rag_prompt(
+        question="О чем написано в файле AGENTS.md?",
+        sources=[
+            _source(
+                "agents",
+                title="AI Development Rules For Product Owner Assistant",
+                source_type="md",
+                content="# AI Development Rules For Product Owner Assistant",
+                metadata={
+                    "document_metadata": {
+                        "document_file_name": "AGENTS.md",
+                    }
+                },
+            )
+        ],
+    )
+
+    assert "file=AGENTS.md" in prompt
+    assert "Не говори, что файл отсутствует" in prompt
+    assert "который отвечает по пользовательским документам" in prompt
+
+
+def test_chat_session_context_uses_active_bucket_separately_from_retrieval_scope() -> None:
+    session = ChatSession(id="session-1", title="chat", active_bucket_id="bucket-a")
+
+    _apply_session_context(
+        session,
+        {
+            "active_bucket_id": "bucket-a",
+            "bucket_ids": [],
+            "document_ids": ["doc-1"],
+            "model_id": "qwen3.5:9b",
+            "approach": "hybrid",
+        },
+    )
+
+    assert session.active_bucket_id == "bucket-a"
+    assert session.model_id == "qwen3.5:9b"
+    assert session.approach == "hybrid"
 
 
 def test_extract_exact_numeric_terms_for_excel_identifiers() -> None:

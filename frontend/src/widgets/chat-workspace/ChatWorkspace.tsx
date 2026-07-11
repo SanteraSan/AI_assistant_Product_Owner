@@ -10,6 +10,7 @@ type ChatWorkspaceProps = {
   approach: ModelApproach
   attachDisabled?: boolean
   composerValue: string
+  isSending?: boolean
   messages: ChatMessage[]
   selectedModel?: LocalModel
   onChangeComposerValue: (value: string) => void
@@ -22,6 +23,7 @@ export function ChatWorkspace({
   approach,
   attachDisabled,
   composerValue,
+  isSending,
   messages,
   onAttachFile,
   onChangeComposerValue,
@@ -38,7 +40,7 @@ export function ChatWorkspace({
           <Card className="p-5">
             <p className="text-sm font-medium text-slate-500">Активный контекст</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Badge>{activeBucket?.name ?? 'Bucket не выбран'}</Badge>
+              <Badge>{activeBucket?.name ?? 'Без bucket'}</Badge>
               <Badge>{selectedModel?.label ?? 'Модель не выбрана'}</Badge>
               <Badge>{approach}</Badge>
             </div>
@@ -88,11 +90,22 @@ export function ChatWorkspace({
               )}
             </div>
           ))}
+          {isSending ? (
+            <div className="flex justify-start gap-3">
+              <div className="mt-1 flex h-9 w-9 items-center justify-center rounded-full bg-slate-950 text-white">
+                <Bot size={18} />
+              </div>
+              <div className="rounded-3xl border border-slate-200 bg-white px-5 py-4 text-sm leading-6 text-slate-500">
+                Думаю над ответом...
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="border-t border-slate-200 bg-slate-50 px-8 py-5">
           <MessageComposer
             attachDisabled={attachDisabled}
+            disabled={isSending}
             onAttachFile={onAttachFile}
             onChange={onChangeComposerValue}
             onSubmit={onSendMessage}
