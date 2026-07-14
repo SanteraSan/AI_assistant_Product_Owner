@@ -177,7 +177,7 @@ Definition of done:
 
 ## Этап E1: Keycloak, BFF And RBAC
 
-Статус: **in progress** — E1.1–E1.3 готовы (Keycloak, BFF, backend service JWT + RAG scope). Следующий шаг — frontend auth через BFF.
+Статус: **in progress** — E1.1–E1.4 готовы (Keycloak, BFF, backend JWT, frontend same-origin auth). Остаётся ручной browser smoke + финальный journal close.
 
 Цель:
 

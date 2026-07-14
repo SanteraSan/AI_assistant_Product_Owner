@@ -17,6 +17,7 @@ type TopBarProps = {
   onChangeModel: (modelId: string) => void
   onChangeView: (view: 'chat' | 'buckets') => void
   onLoginClick: () => void
+  onLogoutClick?: () => void
 }
 
 export function TopBar({
@@ -29,6 +30,7 @@ export function TopBar({
   onChangeModel,
   onChangeView,
   onLoginClick,
+  onLogoutClick,
   selectedApproach,
   selectedModelId,
   user,
@@ -75,8 +77,8 @@ export function TopBar({
           ]}
           value={activeBucketId}
         />
-        <Button onClick={onLoginClick} variant="ghost">
-          {user ? user.displayName || user.email : 'Войти'}
+        <Button onClick={user ? onLogoutClick ?? onLoginClick : onLoginClick} variant="ghost">
+          {user ? `${user.displayName || user.email} · Выйти` : 'Войти'}
         </Button>
       </div>
     </header>

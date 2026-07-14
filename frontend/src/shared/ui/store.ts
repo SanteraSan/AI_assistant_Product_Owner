@@ -1,13 +1,7 @@
 import { create } from 'zustand'
 
 type UiStore = {
-  isLoginModalOpen: boolean
-  closeLoginModal: () => void
-  openLoginModal: () => void
+  // Reserved for non-auth UI flags.
 }
 
-export const useUiStore = create<UiStore>((set) => ({
-  isLoginModalOpen: false,
-  closeLoginModal: () => set({ isLoginModalOpen: false }),
-  openLoginModal: () => set({ isLoginModalOpen: true }),
-}))
+export const useUiStore = create<UiStore>(() => ({}))

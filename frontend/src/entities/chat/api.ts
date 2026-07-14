@@ -1,5 +1,4 @@
 import { apiRequest } from '../../shared/api/httpClient'
-import type { User } from '../user/model'
 import type { ChatMessage, ChatThread } from './model'
 
 type RagSourceDto = {
@@ -68,77 +67,56 @@ export type UpdateChatSessionPayload = CreateChatSessionPayload & {
   title?: string
 }
 
-export async function fetchChatSessions(user: User): Promise<ChatThread[]> {
-  const sessions = await apiRequest<ChatSessionDto[]>('/chat/sessions', {
-    tenantId: user.tenantId,
-    userId: user.id,
-    roles: user.roles,
-  })
+export async function fetchChatSessions(): Promise<ChatThread[]> {
+  const sessions = await apiRequest<ChatSessionDto[]>('/api/chat/sessions')
   return sessions.map(chatThreadFromDto)
 }
 
 export async function createChatSession(
-  user: User,
   payload: CreateChatSessionPayload = {},
 ): Promise<ChatThread> {
-  const session = await apiRequest<ChatSessionDto>('/chat/sessions', {
+  const session = await apiRequest<ChatSessionDto>('/api/chat/sessions', {
     body: JSON.stringify({
       title: payload.title ?? 'Новый чат',
       active_bucket_id: payload.activeBucketId || null,
       model_id: payload.modelId || null,
-      approach: payload.approach || null,
-    }),
-    method: 'POST',
-    tenantId: user.tenantId,
-    userId: user.id,
-    roles: user.roles,
+      approach: payload.approach || null
+  }),
+    method: 'POST'
   })
   return chatThreadFromDto(session)
 }
 
 export async function updateChatSession(
-  user: User,
   sessionId: string,
   payload: UpdateChatSessionPayload,
 ): Promise<ChatThread> {
-  const session = await apiRequest<ChatSessionDto>(`/chat/sessions/${sessionId}`, {
+  const session = await apiRequest<ChatSessionDto>(`/api/chat/sessions/${sessionId}`, {
     body: JSON.stringify({
       title: payload.title,
       active_bucket_id: payload.activeBucketId ?? null,
       model_id: payload.modelId ?? null,
-      approach: payload.approach ?? null,
-    }),
-    method: 'PATCH',
-    tenantId: user.tenantId,
-    userId: user.id,
-    roles: user.roles,
+      approach: payload.approach ?? null
+  }),
+    method: 'PATCH'
   })
   return chatThreadFromDto(session)
 }
 
-export async function deleteChatSession(user: User, sessionId: string): Promise<void> {
-  await apiRequest<void>(`/chat/sessions/${sessionId}`, {
-    method: 'DELETE',
-    tenantId: user.tenantId,
-    userId: user.id,
-    roles: user.roles,
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  await apiRequest<void>(`/api/chat/sessions/${sessionId}`, {
+    method: 'DELETE'
   })
 }
 
 export async function fetchChatMessages(
-  user: User,
   sessionId: string,
 ): Promise<ChatMessage[]> {
-  const messages = await apiRequest<ChatMessageDto[]>(`/chat/sessions/${sessionId}/messages`, {
-    tenantId: user.tenantId,
-    userId: user.id,
-    roles: user.roles,
-  })
+  const messages = await apiRequest<ChatMessageDto[]>(`/api/chat/sessions/${sessionId}/messages`)
   return messages.map(chatMessageFromDto)
 }
 
 export async function saveChatAttachmentMessage(
-  user: User,
   sessionId: string,
   attachment: {
     documentId: string
@@ -147,29 +125,25 @@ export async function saveChatAttachmentMessage(
     status: string
   },
 ): Promise<ChatMessage> {
-  const message = await apiRequest<ChatMessageDto>(`/chat/sessions/${sessionId}/attachments`, {
+  const message = await apiRequest<ChatMessageDto>(`/api/chat/sessions/${sessionId}/attachments`, {
     body: JSON.stringify({
       document_id: attachment.documentId,
       file_name: attachment.fileName,
       source_type: attachment.sourceType,
-      status: attachment.status,
-    }),
-    method: 'POST',
-    tenantId: user.tenantId,
-    userId: user.id,
-    roles: user.roles,
+      status: attachment.status
+  }),
+    method: 'POST'
   })
   return chatMessageFromDto(message)
 }
 
 export async function sendRagMessage(
-  user: User,
   payload: SendRagMessagePayload,
 ): Promise<{
   message: ChatMessage
   sessionId?: string
 }> {
-  const response = await apiRequest<RagChatDto>('/rag/chat', {
+  const response = await apiRequest<RagChatDto>('/api/rag/chat', {
     body: JSON.stringify({
       message: payload.message,
       model: payload.model,
@@ -178,12 +152,9 @@ export async function sendRagMessage(
       session_id: payload.sessionId,
       tenant_id: payload.tenantId,
       bucket_ids: payload.bucketIds,
-      document_ids: payload.documentIds,
-    }),
-    method: 'POST',
-    tenantId: user.tenantId,
-    userId: user.id,
-    roles: user.roles,
+      document_ids: payload.documentIds
+  }),
+    method: 'POST'
   })
 
   return {
@@ -194,10 +165,10 @@ export async function sendRagMessage(
       sources: response.sources.map((source) => ({
         id: source.id,
         title: source.title ?? source.source_path ?? 'Источник',
-        sourceType: source.source_type ?? 'unknown',
-      })),
-    },
-    sessionId: response.session_id ?? undefined,
+        sourceType: source.source_type ?? 'unknown'
+  }))
+  },
+    sessionId: response.session_id ?? undefined
   }
 }
 
@@ -214,7 +185,7 @@ function chatThreadFromDto(session: ChatSessionDto): ChatThread {
     bucketIds: session.active_bucket_id ? [session.active_bucket_id] : [],
     documentIds: attachedDocumentIds,
     modelId: session.model_id ?? undefined,
-    approach: session.approach ?? undefined,
+    approach: session.approach ?? undefined
   }
 }
 
@@ -235,16 +206,16 @@ function chatMessageFromDto(message: ChatMessageDto): ChatMessage {
         id: String(attachment.id ?? ''),
         fileName: String(attachment.file_name ?? attachment.fileName ?? 'file'),
         sourceType: String(attachment.source_type ?? attachment.sourceType ?? 'unknown'),
-        status: normalizeAttachmentStatus(attachment.status),
-      }))
+        status: normalizeAttachmentStatus(attachment.status)
+  }))
       .filter((attachment) => attachment.id),
     sources: sources
       .filter((source): source is Record<string, unknown> => typeof source === 'object' && source !== null)
       .map((source) => ({
         id: String(source.id ?? source.qdrant_point_id ?? crypto.randomUUID()),
         title: String(source.title ?? source.source_path ?? 'Источник'),
-        sourceType: String(source.source_type ?? 'unknown'),
-      })),
+        sourceType: String(source.source_type ?? 'unknown')
+  }))
   }
 }
 
@@ -279,6 +250,6 @@ function formatRelativeDate(value: string): string {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    month: '2-digit',
+    month: '2-digit'
   }).format(timestamp)
 }

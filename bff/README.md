@@ -21,6 +21,14 @@ cp .env.example .env
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
+For Vite same-origin auth (recommended local mode), set:
+
+```bash
+BFF_PUBLIC_BASE_URL=http://localhost:5173
+```
+
+so OIDC `redirect_uri` is `http://localhost:5173/auth/callback` and the session cookie is set on the SPA origin via the Vite proxy.
+
 Requirements:
 
 - Keycloak running (`docker compose up -d keycloak`)

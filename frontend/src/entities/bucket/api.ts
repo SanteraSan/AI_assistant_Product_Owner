@@ -1,5 +1,4 @@
 import { apiRequest } from '../../shared/api/httpClient'
-import type { User } from '../user/model'
 import type { Bucket } from './model'
 
 type BucketDto = {
@@ -10,73 +9,58 @@ type BucketDto = {
   document_count: number
 }
 
-export async function fetchBuckets(user: User): Promise<Bucket[]> {
-  const buckets = await apiRequest<BucketDto[]>('/buckets', {
-    tenantId: user.tenantId,
-    userId: user.id,
-    roles: user.roles,
-  })
+export async function fetchBuckets(): Promise<Bucket[]> {
+  const buckets = await apiRequest<BucketDto[]>('/api/buckets')
   return buckets.map((bucket) => ({
     id: bucket.id,
     name: bucket.name,
     description: bucket.description,
     documentCount: bucket.document_count,
-    status: bucket.status,
+    status: bucket.status
   }))
 }
 
 export async function createBucket(
-  user: User,
   payload: {
     name: string
     description: string
   },
 ): Promise<Bucket> {
-  const bucket = await apiRequest<BucketDto>('/buckets', {
+  const bucket = await apiRequest<BucketDto>('/api/buckets', {
     body: JSON.stringify(payload),
-    method: 'POST',
-    tenantId: user.tenantId,
-    userId: user.id,
-    roles: user.roles,
+    method: 'POST'
   })
   return {
     id: bucket.id,
     name: bucket.name,
     description: bucket.description,
     documentCount: bucket.document_count,
-    status: bucket.status,
+    status: bucket.status
   }
 }
 
 export async function updateBucket(
-  user: User,
   bucketId: string,
   payload: {
     name?: string
     description?: string
   },
 ): Promise<Bucket> {
-  const bucket = await apiRequest<BucketDto>(`/buckets/${bucketId}`, {
+  const bucket = await apiRequest<BucketDto>(`/api/buckets/${bucketId}`, {
     body: JSON.stringify(payload),
-    method: 'PATCH',
-    tenantId: user.tenantId,
-    userId: user.id,
-    roles: user.roles,
+    method: 'PATCH'
   })
   return {
     id: bucket.id,
     name: bucket.name,
     description: bucket.description,
     documentCount: bucket.document_count,
-    status: bucket.status,
+    status: bucket.status
   }
 }
 
-export async function deleteBucket(user: User, bucketId: string): Promise<void> {
-  await apiRequest<void>(`/buckets/${bucketId}`, {
-    method: 'DELETE',
-    tenantId: user.tenantId,
-    userId: user.id,
-    roles: user.roles,
+export async function deleteBucket(bucketId: string): Promise<void> {
+  await apiRequest<void>(`/api/buckets/${bucketId}`, {
+    method: 'DELETE'
   })
 }

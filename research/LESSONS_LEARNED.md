@@ -31,6 +31,26 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E1.4 Frontend Same-Origin Auth Via BFF
+
+Контекст:
+- backend уже требует service JWT; SPA всё ещё слала mock `X-User-*` напрямую на `:8000`;
+- нужен same-origin cookie + CSRF через BFF.
+
+Наблюдение:
+- Vite proxy `/auth` + `/api` → `:8001` даёт cookie на origin `:5173`;
+- `BFF_PUBLIC_BASE_URL=http://localhost:5173` критичен: иначе callback/cookie остаются на `:8001`;
+- MockLogin удалён; bootstrap `/auth/me` в `AppProviders`; mutations шлют `X-CSRF-Token`;
+- `npm run build` (tsc) зелёный.
+
+Решение:
+- frontend больше не владеет identity headers;
+- login = redirect `/auth/login`, logout = `POST /auth/logout` + clear store.
+
+Вывод:
+- E1 stack локально замкнут: Keycloak → BFF → backend JWT → RBAC scope;
+- нужен ручной browser smoke login (`admin@local` / `ChangeMe123!`).
+
 ## 2026-07-14: E1.3 Backend Service JWT And RAG Scope
 
 Контекст:

@@ -2,10 +2,9 @@ import { API_BASE_URL } from '../config/env'
 
 type RequestOptions = RequestInit & {
   json?: boolean
-  tenantId?: string
-  userId?: string
-  roles?: string[]
 }
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
 export async function apiRequest<TResponse>(
   path: string,
@@ -16,19 +15,20 @@ export async function apiRequest<TResponse>(
     headers.set('Content-Type', headers.get('Content-Type') ?? 'application/json')
   }
 
-  if (options.tenantId) {
-    headers.set('X-Tenant-ID', options.tenantId)
-  }
-  if (options.userId) {
-    headers.set('X-User-ID', options.userId)
-  }
-  if (options.roles?.length) {
-    headers.set('X-User-Roles', options.roles.join(','))
+  const method = (options.method ?? 'GET').toUpperCase()
+  if (!SAFE_METHODS.has(method)) {
+    // Lazy import avoids circular dependency with entities/user/store.
+    const { useAuthStore } = await import('../../entities/user/store')
+    const csrfToken = useAuthStore.getState().csrfToken
+    if (csrfToken) {
+      headers.set('X-CSRF-Token', csrfToken)
+    }
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
+    credentials: 'include',
   })
 
   if (!response.ok) {

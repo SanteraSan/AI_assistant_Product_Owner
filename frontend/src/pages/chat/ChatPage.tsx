@@ -26,11 +26,8 @@ import {
 import { mockDocuments } from '../../entities/document/model'
 import { localModels } from '../../entities/model/model'
 import type { ModelApproach } from '../../entities/model/model'
-import { mockUser } from '../../entities/user/model'
 import { useAuthStore } from '../../entities/user/store'
 import { useWorkspaceStore } from '../../entities/workspace/store'
-import { MockLoginModal } from '../../features/mock-login/MockLoginModal'
-import { useUiStore } from '../../shared/ui/store'
 import { BucketWorkspace } from '../../widgets/bucket-workspace/BucketWorkspace'
 import { ChatSidebar } from '../../widgets/chat-sidebar/ChatSidebar'
 import { ChatWorkspace } from '../../widgets/chat-workspace/ChatWorkspace'
@@ -59,7 +56,8 @@ export function ChatPage() {
     upsertThread,
     updateAttachmentStatuses,
   } = useChatStore()
-  const { currentUser, loginAsMockUser } = useAuthStore()
+  const { currentUser, login, logout, status } = useAuthStore()
+  const isAuthenticated = status === 'authenticated' && Boolean(currentUser)
   const {
     activeBucketId,
     activeView,
@@ -72,11 +70,10 @@ export function ChatPage() {
     selectedApproach,
     selectedModelId,
   } = useWorkspaceStore()
-  const { closeLoginModal, isLoginModalOpen, openLoginModal } = useUiStore()
-  const userForApi = currentUser ?? mockUser
   const bucketsQuery = useQuery({
-    queryKey: ['buckets', userForApi.tenantId],
-    queryFn: () => fetchBuckets(userForApi),
+    enabled: isAuthenticated,
+    queryKey: ['buckets', currentUser?.tenantId],
+    queryFn: () => fetchBuckets(),
     retry: false,
   })
   const hasBackendBuckets = Boolean(bucketsQuery.data?.length)
@@ -90,21 +87,22 @@ export function ChatPage() {
   const messages = messagesByThreadId[activeThreadId] ?? []
   const activeThread = threads.find((thread) => thread.id === activeThreadId)
   const chatSessionsQuery = useQuery({
-    queryKey: ['chat-sessions', userForApi.tenantId, userForApi.id],
-    queryFn: () => fetchChatSessions(userForApi),
+    enabled: isAuthenticated,
+    queryKey: ['chat-sessions', currentUser?.tenantId, currentUser?.id],
+    queryFn: () => fetchChatSessions(),
     retry: false,
   })
   const activeSessionId = activeThread?.sessionId
   const chatMessagesQuery = useQuery({
-    enabled: Boolean(activeSessionId),
-    queryKey: ['chat-messages', userForApi.tenantId, userForApi.id, activeSessionId],
-    queryFn: () => fetchChatMessages(userForApi, activeSessionId!),
+    enabled: isAuthenticated && Boolean(activeSessionId),
+    queryKey: ['chat-messages', currentUser?.tenantId, currentUser?.id, activeSessionId],
+    queryFn: () => fetchChatMessages(activeSessionId!),
     retry: false,
   })
   const documentsQuery = useQuery({
-    enabled: hasBackendBuckets && Boolean(inspectedBucketId),
-    queryKey: ['bucket-documents', userForApi.tenantId, inspectedBucketId],
-    queryFn: () => fetchBucketDocuments(userForApi, inspectedBucketId),
+    enabled: isAuthenticated && hasBackendBuckets && Boolean(inspectedBucketId),
+    queryKey: ['bucket-documents', currentUser?.tenantId, inspectedBucketId],
+    queryFn: () => fetchBucketDocuments(inspectedBucketId),
     refetchInterval: (query) =>
       query.state.data?.some((document) => document.status === 'indexing')
         ? 3000
@@ -116,9 +114,9 @@ export function ChatPage() {
     [documentsQuery.data, hasBackendBuckets],
   )
   const availableDocumentsQuery = useQuery({
-    enabled: hasBackendBuckets,
-    queryKey: ['documents-available', userForApi.tenantId, userForApi.id, userForApi.roles],
-    queryFn: () => fetchAvailableDocuments(userForApi),
+    enabled: isAuthenticated && hasBackendBuckets,
+    queryKey: ['documents-available', currentUser?.tenantId, currentUser?.id, currentUser?.roles],
+    queryFn: () => fetchAvailableDocuments(),
     refetchInterval: (query) =>
       query.state.data?.some((document) => document.status === 'indexing') ? 3000 : false,
     retry: false,
@@ -128,10 +126,10 @@ export function ChatPage() {
     [availableDocumentsQuery.data, hasBackendBuckets],
   )
   const stageDocumentMutation = useMutation({
-    mutationFn: (file: File) => stageDocument(userForApi, file),
+    mutationFn: (file: File) => stageDocument(file),
   })
   const cancelStagedDocumentMutation = useMutation({
-    mutationFn: (uploadId: string) => cancelStagedDocument(userForApi, uploadId),
+    mutationFn: (uploadId: string) => cancelStagedDocument(uploadId),
   })
   const commitBucketDocumentsMutation = useMutation({
     mutationFn: ({
@@ -145,7 +143,7 @@ export function ChatPage() {
       removedDocumentIds: string[]
       stagedUploadIds: string[]
     }) =>
-      commitBucketDocuments(userForApi, bucketId, {
+      commitBucketDocuments(bucketId, {
         existingDocumentIds,
         removedDocumentIds,
         stagedUploadIds,
@@ -153,7 +151,7 @@ export function ChatPage() {
       }),
     onSuccess: (committedDocuments, variables) => {
       queryClient.setQueryData(
-        ['bucket-documents', userForApi.tenantId, variables.bucketId],
+        ['bucket-documents', currentUser?.tenantId, variables.bucketId],
         (current: typeof committedDocuments | undefined) => {
           const remainingDocuments = (current ?? []).filter(
             (document) => !variables.removedDocumentIds.includes(document.id),
@@ -177,7 +175,7 @@ export function ChatPage() {
   })
   const commitPersonalDocumentsMutation = useMutation({
     mutationFn: ({ stagedUploadIds }: { stagedUploadIds: string[] }) =>
-      commitPersonalDocuments(userForApi, {
+      commitPersonalDocuments({
         stagedUploadIds,
         visibility: 'private',
       }),
@@ -186,7 +184,7 @@ export function ChatPage() {
     },
   })
   const deleteDocumentMutation = useMutation({
-    mutationFn: (documentId: string) => deleteDocument(userForApi, documentId),
+    mutationFn: (documentId: string) => deleteDocument(documentId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['documents-available'] })
       void queryClient.invalidateQueries({ queryKey: ['bucket-documents'] })
@@ -200,7 +198,7 @@ export function ChatPage() {
     }: {
       documentId: string
       bucketId?: string
-    }) => retryDocumentIndexing(userForApi, documentId, bucketId),
+    }) => retryDocumentIndexing(documentId, bucketId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['documents-available'] })
       void queryClient.invalidateQueries({ queryKey: ['bucket-documents'] })
@@ -208,7 +206,7 @@ export function ChatPage() {
   })
   const createBucketMutation = useMutation({
     mutationFn: () =>
-      createBucket(userForApi, {
+      createBucket({
         name: `Личная база знаний ${new Date().toLocaleTimeString('ru-RU')}`,
         description: 'Персональный bucket для документов, загруженных через UI.',
       }),
@@ -226,13 +224,13 @@ export function ChatPage() {
       bucketId: string
       description: string
       name: string
-    }) => updateBucket(userForApi, bucketId, { name, description }),
+    }) => updateBucket(bucketId, { name, description }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['buckets'] })
     },
   })
   const deleteBucketMutation = useMutation({
-    mutationFn: (bucketId: string) => deleteBucket(userForApi, bucketId),
+    mutationFn: (bucketId: string) => deleteBucket(bucketId),
     onSuccess: (_result, bucketId) => {
       if (selectedBucketId === bucketId) {
         selectBucket('')
@@ -247,7 +245,7 @@ export function ChatPage() {
   })
   const createChatSessionMutation = useMutation({
     mutationFn: () =>
-      createChatSession(userForApi, {
+      createChatSession({
         title: 'Новый чат',
         activeBucketId: selectedBucketId,
         modelId: selectedModelId,
@@ -275,7 +273,7 @@ export function ChatPage() {
       sessionId: string
       title?: string
     }) =>
-      updateChatSession(userForApi, sessionId, {
+      updateChatSession(sessionId, {
         activeBucketId,
         approach,
         modelId,
@@ -287,7 +285,7 @@ export function ChatPage() {
     },
   })
   const deleteChatSessionMutation = useMutation({
-    mutationFn: (sessionId: string) => deleteChatSession(userForApi, sessionId),
+    mutationFn: (sessionId: string) => deleteChatSession(sessionId),
     onSuccess: (_result, sessionId) => {
       deleteThread(sessionId)
       void queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
@@ -295,13 +293,13 @@ export function ChatPage() {
   })
   const sendRagMessageMutation = useMutation({
     mutationFn: (message: string) =>
-      sendRagMessage(userForApi, {
+      sendRagMessage({
         message,
         model: selectedModelId,
         approach: selectedApproach,
         activeBucketId: selectedBucketId,
         sessionId: activeThread?.sessionId,
-        tenantId: userForApi.tenantId,
+        tenantId: currentUser!.tenantId,
         ...chatContext(message),
       }),
     onSuccess: ({ message, sessionId }) => {
@@ -311,7 +309,7 @@ export function ChatPage() {
       }
       void queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
       if (sessionId) {
-        void queryClient.invalidateQueries({ queryKey: ['chat-messages', userForApi.tenantId, userForApi.id, sessionId] })
+        void queryClient.invalidateQueries({ queryKey: ['chat-messages', currentUser?.tenantId, currentUser?.id, sessionId] })
       }
     },
     onError: (error) => {
@@ -466,7 +464,7 @@ export function ChatPage() {
     try {
       let sessionId = activeThread?.sessionId
       if (!sessionId) {
-        const thread = await createChatSession(userForApi, {
+        const thread = await createChatSession({
           title: 'Новый чат',
           activeBucketId: selectedBucketId,
           modelId: selectedModelId,
@@ -488,7 +486,7 @@ export function ChatPage() {
         sourceType: document?.sourceType ?? stagedDocument.sourceType,
         status: document?.status ?? 'indexing',
       }
-      const savedMessage = await saveChatAttachmentMessage(userForApi, sessionId, {
+      const savedMessage = await saveChatAttachmentMessage(sessionId, {
         documentId: attachment.id,
         fileName: attachment.fileName,
         sourceType: attachment.sourceType,
@@ -496,7 +494,7 @@ export function ChatPage() {
       })
       addAttachmentMessage(attachment, savedMessage.id)
       void queryClient.invalidateQueries({
-        queryKey: ['chat-messages', userForApi.tenantId, userForApi.id, sessionId],
+        queryKey: ['chat-messages', currentUser?.tenantId, currentUser?.id, sessionId],
       })
       void queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
       void queryClient.invalidateQueries({ queryKey: ['documents-available'] })
@@ -617,7 +615,8 @@ export function ChatPage() {
             }
             openBuckets()
           }}
-          onLoginClick={openLoginModal}
+          onLoginClick={() => login()}
+          onLogoutClick={() => { void logout() }}
           selectedApproach={selectedApproach}
           selectedModelId={selectedModelId}
           user={currentUser}
@@ -642,7 +641,7 @@ export function ChatPage() {
             availableDocuments={availableDocuments}
             buckets={buckets}
             canMutateDocuments={hasBackendBuckets}
-            currentUserId={userForApi.id}
+            currentUserId={currentUser!.id}
             documents={documents}
             onCancelStagedDocument={(uploadId) =>
               cancelStagedDocumentMutation.mutateAsync(uploadId)
@@ -678,13 +677,6 @@ export function ChatPage() {
           />
         )}
       </section>
-
-      <MockLoginModal
-        isOpen={isLoginModalOpen}
-        onClose={closeLoginModal}
-        onLogin={loginAsMockUser}
-        user={mockUser}
-      />
     </div>
   )
 }
