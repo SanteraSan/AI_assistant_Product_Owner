@@ -9,10 +9,13 @@ from app.services.rag_service import (
     _extract_excel_exact_terms,
     _extract_exact_numeric_terms,
     _extract_docx_exact_terms,
+    _extract_requested_file_names,
     _filter_sources_by_score,
     _is_narrow_document_scope,
     _looks_like_document_header_question,
     _lower_score_threshold,
+    _missing_requested_file_answer,
+    _missing_requested_file_names,
     _remove_numeric_metric_lines,
     _required_source_types_for_supplement,
     build_rag_prompt,
@@ -151,7 +154,29 @@ def test_rag_prompt_prioritizes_current_context_over_memory_and_product_scope() 
     assert "Слоны не летают" in prompt
 
 
-def test_rag_prompt_includes_document_file_name_in_source_header() -> None:
+def test_missing_requested_file_names_detects_absent_image() -> None:
+    sources = [
+        _source(
+            "docx-image",
+            title="sample-with-images.docx",
+            source_type="docx_image_digest",
+            source_path="/tmp/sample-with-images.docx",
+            metadata={"document_metadata": {"document_file_name": "sample-with-images.docx"}},
+        )
+    ]
+    message = (
+        "Расскажи что ты видишь на картинке moto.jpg в доступных документах, "
+        "если он у тебя там есть"
+    )
+
+    assert _extract_requested_file_names(message) == ["moto.jpg"]
+    assert _missing_requested_file_names(message, sources) == ["moto.jpg"]
+    assert "moto.jpg" in _missing_requested_file_answer(["moto.jpg"])
+    assert _missing_requested_file_names(
+        "Опиши sample-with-images.docx",
+        sources,
+    ) == []
+
     prompt = build_rag_prompt(
         question="О чем написано в файле AGENTS.md?",
         sources=[
@@ -171,7 +196,7 @@ def test_rag_prompt_includes_document_file_name_in_source_header() -> None:
 
     assert "file=AGENTS.md" in prompt
     assert "Не говори, что файл отсутствует" in prompt
-    assert "Не описывай другой файл вместо запрошенного" in prompt
+    assert "не упоминай другие файлы" in prompt
     assert "который отвечает по пользовательским документам" in prompt
 
 
