@@ -18,6 +18,7 @@ from app.services.object_storage import (
     ObjectStorage,
     display_name_from_ref,
 )
+from app.services.metrics import AppMetrics
 from app.services.ollama_client import OllamaClient
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ class DocumentIndexingService:
         image_vision_model: str | None = None,
         event_publisher: IndexingEventPublisher | None = None,
         object_storage: ObjectStorage | None = None,
+        metrics: AppMetrics | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._qdrant_store = qdrant_store
@@ -45,6 +47,7 @@ class DocumentIndexingService:
         self._image_vision_model = image_vision_model
         self._event_publisher = event_publisher
         self._object_storage = object_storage
+        self._metrics = metrics
 
     async def process_jobs(self, job_ids: list[str]) -> None:
         for job_id in job_ids:
@@ -74,6 +77,7 @@ class DocumentIndexingService:
                     tenant_id=job.tenant_id,
                     error="Document asset not found.",
                 )
+                self._observe_indexing("failed")
                 return
             job.status = "running"
             job.attempts += 1
@@ -117,6 +121,7 @@ class DocumentIndexingService:
                 tenant_id=tenant_id,
                 error=str(exc),
             )
+            self._observe_indexing("failed")
             return
 
         async with self._session_factory() as session:
@@ -146,6 +151,11 @@ class DocumentIndexingService:
             tenant_id=tenant_id,
             chunks_indexed=chunks_indexed,
         )
+        self._observe_indexing("completed")
+
+    def _observe_indexing(self, result: str) -> None:
+        if self._metrics is not None:
+            self._metrics.observe_indexing(result=result)
 
     async def _publish_indexed(
         self,

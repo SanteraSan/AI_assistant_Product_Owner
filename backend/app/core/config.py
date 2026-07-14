@@ -86,6 +86,11 @@ class Settings(BaseSettings):
     object_storage_secret_key: str = "minioadmin"
     object_storage_bucket: str = "taskflow-uploads"
     object_storage_region: str = "us-east-1"
+    # E7: indexing worker health HTTP (compose deploy profile).
+    indexing_worker_health_host: str = "0.0.0.0"
+    indexing_worker_health_port: int = 8002
+    # E7: in-process Prometheus-style metrics (/metrics, /metrics/summary).
+    metrics_enabled: bool = True
 
     @field_validator("rag_score_threshold", mode="before")
     @classmethod

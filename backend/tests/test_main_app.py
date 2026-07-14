@@ -430,6 +430,7 @@ def test_rag_chat_passes_targeted_image_source_to_rag(monkeypatch) -> None:
                 file_name="images.jpeg",
                 title="images.jpeg",
                 status="indexed",
+                source_path="/tmp/images.jpeg",
             )
         ]
 

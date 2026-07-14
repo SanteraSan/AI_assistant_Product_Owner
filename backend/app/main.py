@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -51,6 +52,7 @@ from app.services.image_digest_service import build_targeted_image_digest
 from app.services.indexing_event_publisher import IndexingEventPublisher
 from app.services.indexing_job_dispatcher import IndexingJobDispatcher
 from app.services.integration_ingest_service import IntegrationIngestService
+from app.services.metrics import AppMetrics, metrics_http_middleware, prometheus_response
 from app.services.object_storage import build_object_storage, display_name_from_ref, resolve_upload_root
 from app.services.ollama_client import OllamaClient
 from app.services.ollama_load_guard import OllamaLoadGuard, OllamaOverloadedError
@@ -73,6 +75,7 @@ from app.services.tools import ToolExecutor, build_default_tool_registry
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+app_metrics = AppMetrics(enabled=settings.metrics_enabled)
 db_engine = create_engine(settings.postgres_dsn)
 db_session_factory = create_session_factory(db_engine)
 redis_service = RedisService(settings.redis_url) if settings.redis_enabled else None
@@ -200,6 +203,7 @@ document_indexing_service = DocumentIndexingService(
     image_vision_model=settings.image_vision_model,
     event_publisher=indexing_event_publisher,
     object_storage=object_storage,
+    metrics=app_metrics,
 )
 integration_ingest_service = IntegrationIngestService(
     bucket_service=bucket_service,
@@ -280,6 +284,11 @@ async def request_id_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     return response
+
+
+@app.middleware("http")
+async def http_metrics_middleware(request: Request, call_next):
+    return await metrics_http_middleware(request, call_next, app_metrics)
 
 
 @app.exception_handler(HTTPException)
@@ -376,6 +385,20 @@ async def health_ready() -> dict[str, object]:
     if snapshot["status"] != "ready":
         raise HTTPException(status_code=503, detail=snapshot)
     return snapshot
+
+
+@app.get("/metrics")
+async def metrics_prometheus():
+    if not settings.metrics_enabled:
+        raise HTTPException(status_code=404, detail="metrics disabled")
+    return prometheus_response(app_metrics)
+
+
+@app.get("/metrics/summary")
+async def metrics_summary() -> dict[str, object]:
+    if not settings.metrics_enabled:
+        raise HTTPException(status_code=404, detail="metrics disabled")
+    return app_metrics.summary()
 
 
 @app.get("/chat/sessions", response_model=list[ChatSessionResponse])
@@ -546,6 +569,7 @@ async def rag_chat(
 
     try:
         started_at = perf_counter()
+        outcome = "error"
         effective_bucket_ids = _effective_bucket_ids(payload)
         bucket_documents = await _bucket_documents_for_context(
             user=user,
@@ -675,6 +699,7 @@ async def rag_chat(
             )
         except Exception:
             logger.exception("RAG response logging failed")
+        outcome = "success"
         return response
     except httpx.ConnectError as exc:
         raise HTTPException(
@@ -688,6 +713,11 @@ async def rag_chat(
         ) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        app_metrics.observe_rag(
+            outcome=outcome,
+            duration_seconds=perf_counter() - started_at,
+        )
 
 
 def _qdrant_collection_exists() -> bool:
@@ -716,10 +746,20 @@ async def _readiness_snapshot() -> dict[str, object]:
     }
     if settings.redis_enabled and redis_service is not None:
         dependencies["redis_available"] = await redis_service.health()
-    ready = all(dependencies.values())
+    features = {
+        "kafka_enabled": settings.kafka_enabled,
+        "object_storage_enabled": settings.object_storage_enabled,
+        "metrics_enabled": settings.metrics_enabled,
+    }
+    if settings.kafka_enabled:
+        dependencies["kafka_reachable"] = await _kafka_bootstrap_reachable()
+    if settings.object_storage_enabled:
+        dependencies["object_storage_reachable"] = await _object_storage_reachable()
+    ready = all(bool(value) for value in dependencies.values())
     return {
         "status": "ready" if ready else "degraded",
         "dependencies": dependencies,
+        "features": features,
         "models": {
             "default_model": settings.default_model,
             "default_rag_model": settings.default_rag_model,
@@ -730,6 +770,33 @@ async def _readiness_snapshot() -> dict[str, object]:
         "redis_enabled": settings.redis_enabled,
         "rate_limit_enabled": settings.rate_limit_enabled,
     }
+
+
+async def _kafka_bootstrap_reachable() -> bool:
+    try:
+        from aiokafka import AIOKafkaProducer
+
+        producer = AIOKafkaProducer(bootstrap_servers=settings.kafka_bootstrap_servers)
+        await producer.start()
+        await producer.stop()
+        return True
+    except Exception:
+        logger.debug("Kafka bootstrap probe failed", exc_info=True)
+        return False
+
+
+async def _object_storage_reachable() -> bool:
+    try:
+        ref = await asyncio.to_thread(
+            object_storage.put,
+            "__taskflow_health_probe__",
+            b"ok",
+        )
+        await asyncio.to_thread(object_storage.delete, ref)
+        return True
+    except Exception:
+        logger.debug("Object storage probe failed", exc_info=True)
+        return False
 
 
 def _limits_snapshot() -> dict[str, int | float]:
@@ -1327,5 +1394,6 @@ app.include_router(
         save_chat_exchange=_try_save_chat_exchange,
         enforce_rate_limit=_enforce_rate_limit,
         attach_chat_exchange=_attach_chat_exchange,
+        metrics=app_metrics,
     )
 )

@@ -31,6 +31,45 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-15: E7 Slice — Minimal Metrics
+
+Контекст:
+- после deploy/health нужен наблюдаемый baseline без тяжёлого observability stack.
+
+Решение:
+- `AppMetrics` in-process (counters + histograms), Prometheus text **без** `prometheus_client`;
+- API: `GET /metrics`, `GET /metrics/summary`; HTTP middleware + RAG/Agent outcome; indexing jobs;
+- worker `:8002` тоже отдаёт `/metrics` (свой процесс);
+- `METRICS_ENABLED` flag; Grafana/Alertmanager — future hardening.
+
+Проверки:
+- unit: `test_metrics` + worker metrics route + related health → 8 passed;
+- API smoke: `/metrics` + `/metrics/summary` → 200.
+
+Вывод:
+- для demo/smoke достаточно curl summary; scrape-ready формат уже есть;
+- следующий шаг по roadmap: **E6 lab** (LangGraph рядом с Agent).
+
+## 2026-07-15: E7 Slice — Deploy Profile + API/Worker Health
+
+Контекст:
+- после MinIO нужен воспроизводимый deploy path и health для API + indexing worker.
+
+Решение:
+- `backend/Dockerfile` + compose profile `deploy` (`backend-api`, `indexing-worker`, тянет redpanda/minio);
+- worker health HTTP `:8002` (`/health/live`, `/health/ready`);
+- API `/health/ready` дополнен `features` + probes `kafka_reachable` / `object_storage_reachable` когда флаги включены;
+- Ollama через `host.docker.internal` (модель остаётся на хосте).
+
+Проверки:
+- unit: `test_worker_health` + `test_main_app` + `test_object_storage` → 23 passed;
+- local smoke: worker `/health/live` → ok; `/health/ready` отражает postgres/kafka flags;
+- `docker compose --profile deploy config` → backend-api, indexing-worker, minio, redpanda, …
+
+Вывод:
+- можно поднять product-ish stack одной командой и проверить liveness обоих процессов;
+- следующий optional E7: metrics; затем E6 lab.
+
 ## 2026-07-15: E7 Slice — MinIO/S3 Object Storage for Uploads
 
 Контекст:
@@ -45,7 +84,7 @@
 
 Вывод:
 - upload lifecycle готов к S3-compatible backend без переписывания parsers;
-- следующий E7 slice: health/deploy или metrics.
+- следующий E7 slice (сделан): health/deploy; optional next: metrics → E6.
 
 ## 2026-07-15: Roadmap Lock — E5.x → E7 slice → E6 lab
 

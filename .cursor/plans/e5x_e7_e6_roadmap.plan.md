@@ -17,12 +17,15 @@ Status: **implemented (2026-07-15)**
 - keep Postgres job status as source of truth
 - out of scope: OCR-only worker, eval topics, transactional outbox
 
-## E7 slice (next)
+## E7 slice
 
 1. MinIO/S3 for uploads — **done**
-2. Pick one more later: compose/deploy profile + worker health **or** minimal metrics
+2. Compose/deploy profile + worker/API health — **done**
+3. Minimal metrics — **done** (`/metrics`, `/metrics/summary`)
 
-Defer: mega admin UI, audit export suite, full report generation.
+Next: **E6 lab** (LangGraph beside Agent).
+
+Defer: mega admin UI, audit export suite, full report generation, Grafana dashboards.
 
 ## E6 lab (after E7 slice)
 

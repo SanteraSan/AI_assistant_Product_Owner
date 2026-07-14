@@ -1464,6 +1464,54 @@ export OBJECT_STORAGE_ENDPOINT=http://localhost:9000
 
 Seed corpus под `data/raw/*` остаётся на диске; object storage покрывает upload lifecycle.
 
+## E7 Slice: Compose Deploy Profile + Health
+
+Статус: **baseline**.
+
+### Health
+
+| Service | Live | Ready |
+|---------|------|-------|
+| API | `GET /health/live` | `GET /health/ready` (+ kafka/minio probes when enabled) |
+| Indexing worker | `GET :8002/health/live` | `GET :8002/health/ready` |
+
+### Deploy profile
+
+Один профиль поднимает infra extras + API + worker (Ollama остаётся на хосте):
+
+```bash
+docker compose --profile deploy up -d --build
+curl -s http://localhost:8000/health/live
+curl -s http://localhost:8002/health/live
+curl -s http://localhost:8000/health/ready | jq
+```
+
+Сервисы: `backend-api` (:8000), `indexing-worker` (:8002), плюс `redpanda` + `minio` (входят в profile `deploy`).
+
+Локальная разработка без Docker API по-прежнему: `uvicorn` + `python -m scripts.run_indexing_worker`.
+
+## E7 Slice: Minimal Metrics
+
+Статус: **baseline** (без Grafana/Prometheus server — future hardening).
+
+In-process counters/histograms, Prometheus text без внешней зависимости:
+
+| Endpoint | Назначение |
+|----------|------------|
+| `GET /metrics` | Prometheus exposition |
+| `GET /metrics/summary` | компактный JSON для smoke |
+
+Ключевые series: `taskflow_http_*`, `taskflow_rag_*`, `taskflow_agent_*`, `taskflow_indexing_jobs_total`. Worker на `:8002` отдаёт те же `/metrics` (indexing counters своего процесса).
+
+```bash
+curl -s http://localhost:8000/metrics/summary | jq
+curl -s http://localhost:8000/metrics | head
+# worker (если запущен):
+curl -s http://localhost:8002/metrics/summary | jq
+```
+
+Выключается через `METRICS_ENABLED=false`.
+
 ## Seed Corpus And E1 ACL
 
 `scripts/ingest_seed_data.py` индексирует `data/raw` в Qdrant (`bucket_id=taskflow_seed`, path-based chunk ids). После E1 `/rag/chat` режет retrieval по доступным `document_assets`.

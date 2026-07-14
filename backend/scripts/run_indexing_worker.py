@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Kafka/Redpanda consumer: indexing.requested → DocumentIndexingService.process_jobs."""
 
 from __future__ import annotations
@@ -17,10 +16,12 @@ from aiokafka import AIOKafkaConsumer
 
 from app.clients.qdrant_store import QdrantStore
 from app.core.config import get_settings
-from app.db.session import create_engine, create_session_factory
+from app.db.session import create_engine, create_session_factory, database_available
 from app.services.document_indexing_service import DocumentIndexingService
+from app.services.metrics import AppMetrics
 from app.services.ollama_client import OllamaClient
 from app.services.ollama_load_guard import OllamaLoadGuard
+from app.services.worker_health import serve_worker_health
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,6 +58,7 @@ async def run_worker() -> None:
             timeout_seconds=settings.ollama_queue_timeout_seconds,
         ),
     )
+    app_metrics = AppMetrics(enabled=settings.metrics_enabled)
     event_publisher = None
     if settings.kafka_enabled:
         from app.services.indexing_event_publisher import IndexingEventPublisher
@@ -76,23 +78,63 @@ async def run_worker() -> None:
         image_vision_model=settings.image_vision_model,
         event_publisher=event_publisher,
         object_storage=object_storage,
+        metrics=app_metrics,
     )
 
-    consumer = AIOKafkaConsumer(
-        settings.kafka_indexing_topic,
-        bootstrap_servers=settings.kafka_bootstrap_servers,
-        group_id=settings.kafka_consumer_group,
-        enable_auto_commit=False,
-        auto_offset_reset="earliest",
+    consumer_started = False
+    consumer: AIOKafkaConsumer | None = None
+
+    async def ready_probe() -> dict[str, object]:
+        dependencies: dict[str, object] = {
+            "postgres_available": await database_available(engine),
+            "consumer_started": consumer_started,
+            "kafka_enabled": settings.kafka_enabled,
+            "object_storage_enabled": settings.object_storage_enabled,
+        }
+        if settings.kafka_enabled:
+            dependencies["kafka_bootstrap_servers"] = settings.kafka_bootstrap_servers
+        ready = bool(dependencies["postgres_available"]) and (
+            consumer_started if settings.kafka_enabled else True
+        )
+        return {
+            "status": "ready" if ready else "degraded",
+            "service": "indexing-worker",
+            "dependencies": dependencies,
+        }
+
+    health_server = await serve_worker_health(
+        host=settings.indexing_worker_health_host,
+        port=settings.indexing_worker_health_port,
+        ready_probe=ready_probe,
+        metrics=app_metrics,
     )
-    await consumer.start()
-    logger.info(
-        "Indexing worker started topic=%s group=%s bootstrap=%s",
-        settings.kafka_indexing_topic,
-        settings.kafka_consumer_group,
-        settings.kafka_bootstrap_servers,
-    )
+    health_task = asyncio.create_task(health_server.serve(), name="worker-health")
+
+    if settings.kafka_enabled:
+        consumer = AIOKafkaConsumer(
+            settings.kafka_indexing_topic,
+            bootstrap_servers=settings.kafka_bootstrap_servers,
+            group_id=settings.kafka_consumer_group,
+            enable_auto_commit=False,
+            auto_offset_reset="earliest",
+        )
+        await consumer.start()
+        consumer_started = True
+        logger.info(
+            "Indexing worker started topic=%s group=%s bootstrap=%s",
+            settings.kafka_indexing_topic,
+            settings.kafka_consumer_group,
+            settings.kafka_bootstrap_servers,
+        )
+    else:
+        logger.warning(
+            "KAFKA_ENABLED=false: worker health is up, but no Kafka consumer is running"
+        )
+
     try:
+        if consumer is None:
+            await health_task
+            return
         async for message in consumer:
             try:
                 payload = json.loads(message.value.decode("utf-8"))
@@ -116,7 +158,10 @@ async def run_worker() -> None:
             await consumer.commit()
             logger.info("Completed indexing.requested jobs=%s", clean_ids)
     finally:
-        await consumer.stop()
+        health_server.should_exit = True
+        await health_task
+        if consumer is not None:
+            await consumer.stop()
         if event_publisher is not None:
             await event_publisher.stop()
         await ollama_client.aclose()

@@ -94,7 +94,7 @@ services:
 
   # E5: Kafka-compatible broker for durable indexing events (host port 19092)
   redpanda:
-    profiles: ["e5"]
+    profiles: ["e5", "deploy"]
     image: docker.redpanda.com/redpandadata/redpanda:v24.2.4
     container_name: taskflow-redpanda
     command:
@@ -119,7 +119,7 @@ services:
 
   # E7: MinIO S3-compatible object storage for uploads
   minio:
-    profiles: ["e7"]
+    profiles: ["e7", "deploy"]
     image: minio/minio:RELEASE.2024-12-18T13-15-44Z
     container_name: taskflow-minio
     command: ["server", "/data", "--console-address", ":9001"]
@@ -136,6 +136,97 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # E7 deploy: FastAPI backend (uses host Ollama via host.docker.internal)
+  backend-api:
+    profiles: ["deploy"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: taskflow-backend-api
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_DSN: postgresql+asyncpg://po_user:po_password@postgres:5432/po_assistant
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379/0
+      REDIS_ENABLED: "true"
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      RAW_DATA_DIR: /data/raw
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      OBJECT_STORAGE_ENABLED: "true"
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_ACCESS_KEY: minioadmin
+      OBJECT_STORAGE_SECRET_KEY: minioadmin
+      OBJECT_STORAGE_BUCKET: taskflow-uploads
+      DATABASE_AUTO_CREATE_TABLES: "true"
+    volumes:
+      - ./data/raw:/data/raw
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redpanda:
+        condition: service_started
+      minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  indexing-worker:
+    profiles: ["deploy"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: taskflow-indexing-worker
+    command: ["python", "-m", "scripts.run_indexing_worker"]
+    ports:
+      - "8002:8002"
+    environment:
+      POSTGRES_DSN: postgresql+asyncpg://po_user:po_password@postgres:5432/po_assistant
+      QDRANT_URL: http://qdrant:6333
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      RAW_DATA_DIR: /data/raw
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      OBJECT_STORAGE_ENABLED: "true"
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_ACCESS_KEY: minioadmin
+      OBJECT_STORAGE_SECRET_KEY: minioadmin
+      OBJECT_STORAGE_BUCKET: taskflow-uploads
+      INDEXING_WORKER_HEALTH_HOST: 0.0.0.0
+      INDEXING_WORKER_HEALTH_PORT: "8002"
+    volumes:
+      - ./data/raw:/data/raw
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redpanda:
+        condition: service_started
+      minio:
+        condition: service_started
+      backend-api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   postgres_data:
