@@ -1282,9 +1282,46 @@ Compatibility note: PaddlePaddle wheels могут отставать от но�
 
 Итоговое решение по scanned OCR strategy зафиксировано в `research/SCANNED_OCR_STRATEGY.md`: текущий M5 production path остаётся на lightweight baseline, PaddleOCR остаётся optional advanced path/future hardening.
 
+## E1 Auth: Service JWT From BFF
+
+С E1 backend больше **не доверяет** browser headers `X-Tenant-ID` / `X-User-ID` / `X-User-Roles`.
+
+Identity приходит только из signed BFF service JWT:
+
+```bash
+Authorization: Bearer <service-jwt>
+```
+
+Claims: `sub`, `tenant_id`, `roles`, `iss=taskflow-bff`, `aud=taskflow-backend` (HS256, shared `SERVICE_JWT_SECRET`).
+
+`/rag/chat` дополнительно пересекает `document_ids` / bucket scope с `can_read_document` **до** Qdrant retrieval. Пустой scope без bucket резолвится в indexed available documents пользователя, а не во весь tenant corpus.
+
+Для local curl без BFF можно выписать token так:
+
+```bash
+cd backend && source .venv/bin/activate
+python - <<'PY'
+from app.core.config import get_settings
+from app.services.service_jwt import issue_service_jwt
+s = get_settings()
+print(issue_service_jwt(
+    sub="local-user-1",
+    tenant_id=s.default_tenant_id,
+    roles=["admin"],
+    secret=s.service_jwt_secret,
+    issuer=s.service_jwt_issuer,
+    audience=s.service_jwt_audience,
+))
+PY
+```
+
+Health endpoints (`/health/*`) остаются публичными. Product UI ходит через BFF (`:8001`) с httpOnly session cookie.
+
 ## E0 UI Skeleton: Buckets And Document Registry API
 
 Для первого product UI добавлен минимальный API слой для управления buckets и document registry.
+
+> **E1 note:** примеры curl ниже с `X-Tenant-ID` / `X-User-ID` устарели как identity source. Замените их на `Authorization: Bearer <service-jwt>` (см. секцию E1 Auth выше). Metadata headers вроде `X-File-Name` по-прежнему валидны.
 
 Endpoints:
 

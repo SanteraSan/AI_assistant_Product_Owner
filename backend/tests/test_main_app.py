@@ -21,6 +21,7 @@ from app.main import (
     create_app,
 )
 from app.models.chat import ChatRequest, RagChatRequest, RagChatResponse, SourceChunk
+from tests.auth_helpers import auth_headers
 
 
 def test_create_app_returns_fastapi_instance() -> None:
@@ -63,7 +64,7 @@ def test_oversized_chat_request_returns_traceable_error() -> None:
 
     response = client.post(
         "/chat",
-        headers={"X-Request-ID": "limit-test"},
+        headers={**auth_headers(), "X-Request-ID": "limit-test"},
         json={"message": "x" * 8001},
     )
 
@@ -78,7 +79,7 @@ def test_validation_error_returns_traceable_error() -> None:
 
     response = client.post(
         "/rag/chat",
-        headers={"X-Request-ID": "validation-test"},
+        headers={**auth_headers(), "X-Request-ID": "validation-test"},
         json={"message": "ok", "top_k": 0},
     )
 
@@ -116,7 +117,7 @@ def test_chat_sessions_endpoint_returns_user_sessions(monkeypatch) -> None:
 
     response = client.get(
         "/chat/sessions",
-        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+        headers=auth_headers(),
     )
 
     assert response.status_code == 200
@@ -151,7 +152,7 @@ def test_chat_messages_endpoint_returns_session_messages(monkeypatch) -> None:
 
     response = client.get(
         "/chat/sessions/session-1/messages",
-        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+        headers=auth_headers(),
     )
 
     assert response.status_code == 200
@@ -198,7 +199,7 @@ def test_update_chat_session_endpoint_persists_context(monkeypatch) -> None:
 
     response = client.patch(
         "/chat/sessions/session-1",
-        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+        headers=auth_headers(),
         json={
             "active_bucket_id": "",
             "model_id": "qwen3.5:9b",
@@ -262,7 +263,7 @@ def test_create_chat_attachment_message_endpoint(monkeypatch) -> None:
 
     response = client.post(
         "/chat/sessions/session-1/attachments",
-        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+        headers=auth_headers(),
         json={
             "document_id": "doc-1",
             "file_name": "diagram.png",
@@ -287,7 +288,7 @@ def test_create_chat_attachment_message_endpoint_returns_404(monkeypatch) -> Non
 
     response = client.post(
         "/chat/sessions/session-1/attachments",
-        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+        headers=auth_headers(),
         json={
             "document_id": "doc-1",
             "file_name": "diagram.png",
@@ -312,7 +313,7 @@ def test_delete_chat_session_endpoint(monkeypatch) -> None:
 
     response = client.delete(
         "/chat/sessions/session-1",
-        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+        headers=auth_headers(),
     )
 
     assert response.status_code == 204
@@ -416,11 +417,16 @@ def test_rag_chat_passes_targeted_image_source_to_rag(monkeypatch) -> None:
     monkeypatch.setattr(main_module, "rag_service", _FakeRagService())
     monkeypatch.setattr(main_module, "_try_save_chat_exchange", _fake_save_exchange)
     monkeypatch.setattr(main_module, "rag_log_service", _FakeRagLogService())
+
+    async def _fake_resolve_rag_document_ids(**kwargs):
+        return list(kwargs.get("requested_document_ids") or [])
+
+    monkeypatch.setattr(main_module, "resolve_rag_document_ids", _fake_resolve_rag_document_ids)
     client = TestClient(main_module.app)
 
     response = client.post(
         "/rag/chat",
-        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+        headers=auth_headers(),
         json={
             "message": "Повторно проанализируй картинку: какого цвета ствол?",
             "document_ids": ["doc-1"],

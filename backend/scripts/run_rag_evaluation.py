@@ -15,6 +15,7 @@ from app.db.session import (
     init_db,
 )
 from app.services.evaluation_service import EvaluationService
+from app.services.service_jwt import issue_service_jwt
 
 
 @dataclass(frozen=True)
@@ -738,6 +739,23 @@ async def main() -> None:
         )
         print(f"evaluation_run_id={run_id}")
 
+        settings = get_settings()
+        eval_auth_headers = {
+            "Authorization": (
+                "Bearer "
+                + issue_service_jwt(
+                    sub="eval-runner",
+                    tenant_id=settings.default_tenant_id,
+                    roles=["admin"],
+                    secret=settings.service_jwt_secret,
+                    issuer=settings.service_jwt_issuer,
+                    audience=settings.service_jwt_audience,
+                    email="eval@local",
+                    ttl_seconds=3600,
+                )
+            )
+        }
+
         status = "completed"
         async with httpx.AsyncClient(
             base_url=args.base_url,
@@ -751,6 +769,7 @@ async def main() -> None:
                             scenario=scenario,
                             model=model,
                             top_k=args.top_k,
+                            auth_headers=eval_auth_headers,
                         )
                         await evaluation_service.add_result(
                             run_id=run_id,
@@ -847,6 +866,7 @@ async def _run_scenario(
     scenario: EvaluationScenario,
     model: str,
     top_k: int,
+    auth_headers: dict[str, str],
 ) -> dict[str, Any]:
     session_id: str | None = None
     data: dict[str, Any] | None = None
@@ -871,7 +891,7 @@ async def _run_scenario(
             payload["score_threshold"] = scenario.score_threshold
         if session_id:
             payload["session_id"] = session_id
-        response = await client.post("/rag/chat", json=payload)
+        response = await client.post("/rag/chat", json=payload, headers=auth_headers)
         response.raise_for_status()
         data = response.json()
         session_id = data.get("session_id") or session_id

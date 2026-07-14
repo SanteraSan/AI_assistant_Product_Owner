@@ -2,6 +2,7 @@ fastapi
 uvicorn[standard]
 httpx
 pydantic-settings
+PyJWT
 qdrant-client
 pandas
 openpyxl

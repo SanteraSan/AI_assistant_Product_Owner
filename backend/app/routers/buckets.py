@@ -1,9 +1,10 @@
 from urllib.parse import unquote
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import DocumentAsset, KnowledgeBucket, StagedDocumentUpload
+from app.dependencies.auth import get_current_user
 from app.models.bucket import (
     BucketCreateRequest,
     BucketResponse,
@@ -28,26 +29,8 @@ def create_bucket_router(
     document_indexing_service: DocumentIndexingService | None = None,
     default_tenant_id: str,
 ) -> APIRouter:
+    del default_tenant_id  # tenant comes from authenticated service JWT only
     router = APIRouter(tags=["buckets"])
-
-    def tenant_from_header(x_tenant_id: str | None) -> str:
-        return (x_tenant_id or default_tenant_id).strip() or default_tenant_id
-
-    def user_from_header(x_user_id: str | None) -> str | None:
-        normalized = (x_user_id or "").strip()
-        return normalized or None
-
-    def user_context(
-        *,
-        tenant_id: str | None,
-        user_id: str | None,
-        roles: str | None,
-    ) -> UserContext:
-        return UserContext(
-            tenant_id=tenant_from_header(tenant_id),
-            user_id=user_from_header(user_id),
-            roles=parse_roles(roles),
-        )
 
     def normalized_visibility(raw_visibility: str) -> str:
         visibility = raw_visibility.strip().lower()
@@ -62,10 +45,9 @@ def create_bucket_router(
 
     @router.get("/buckets", response_model=list[BucketResponse])
     async def list_buckets(
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user: UserContext = Depends(get_current_user),
     ) -> list[BucketResponse]:
-        normalized_tenant_id = tenant_from_header(tenant_id)
-        buckets = await bucket_service.list_buckets(tenant_id=normalized_tenant_id)
+        buckets = await bucket_service.list_buckets(tenant_id=user.tenant_id)
         return [
             _bucket_response(bucket=bucket, document_count=document_count)
             for bucket, document_count in buckets
@@ -74,15 +56,14 @@ def create_bucket_router(
     @router.post("/buckets", response_model=BucketResponse, status_code=201)
     async def create_bucket(
         payload: BucketCreateRequest,
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        user: UserContext = Depends(get_current_user),
     ) -> BucketResponse:
         try:
             bucket = await bucket_service.create_bucket(
-                tenant_id=tenant_from_header(tenant_id),
+                tenant_id=user.tenant_id,
                 name=payload.name,
                 description=payload.description,
-                owner_user_id=user_from_header(user_id),
+                owner_user_id=user.user_id,
             )
         except IntegrityError as exc:
             raise HTTPException(
@@ -95,10 +76,10 @@ def create_bucket_router(
     async def update_bucket(
         bucket_id: str,
         payload: BucketUpdateRequest,
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user: UserContext = Depends(get_current_user),
     ) -> BucketResponse:
         bucket = await bucket_service.update_bucket(
-            tenant_id=tenant_from_header(tenant_id),
+            tenant_id=user.tenant_id,
             bucket_id=bucket_id,
             name=payload.name,
             description=payload.description,
@@ -110,10 +91,10 @@ def create_bucket_router(
     @router.delete("/buckets/{bucket_id}", status_code=204)
     async def delete_bucket(
         bucket_id: str,
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user: UserContext = Depends(get_current_user),
     ) -> None:
         deleted = await bucket_service.delete_bucket(
-            tenant_id=tenant_from_header(tenant_id),
+            tenant_id=user.tenant_id,
             bucket_id=bucket_id,
         )
         if not deleted:
@@ -122,12 +103,10 @@ def create_bucket_router(
     @router.get("/buckets/{bucket_id}/documents", response_model=list[DocumentResponse])
     async def list_documents(
         bucket_id: str,
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> list[DocumentResponse]:
         documents = await bucket_service.list_documents(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            user=user,
             bucket_id=bucket_id,
         )
         if documents is None:
@@ -139,24 +118,16 @@ def create_bucket_router(
 
     @router.get("/documents/my", response_model=list[DocumentResponse])
     async def list_my_documents(
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> list[DocumentResponse]:
-        documents = await bucket_service.list_my_documents(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
-        )
+        documents = await bucket_service.list_my_documents(user=user)
         return [_document_response(document) for document in documents]
 
     @router.get("/documents/available", response_model=list[DocumentResponse])
     async def list_available_documents(
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> list[DocumentResponse]:
-        documents = await bucket_service.list_available_documents(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
-        )
+        documents = await bucket_service.list_available_documents(user=user)
         return [_document_response(document) for document in documents]
 
     @router.post("/documents/stage", response_model=StagedDocumentResponse, status_code=201)
@@ -164,15 +135,13 @@ def create_bucket_router(
         request: Request,
         file_name: str = Header(default="uploaded-file", alias="X-File-Name"),
         file_name_encoding: str | None = Header(default=None, alias="X-File-Name-Encoding"),
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> StagedDocumentResponse:
         content = await request.body()
         if not content:
             raise HTTPException(status_code=422, detail="Uploaded file is empty.")
         upload = await bucket_service.stage_uploaded_document(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            user=user,
             file_name=decoded_file_name(file_name, file_name_encoding),
             content=content,
             content_type=request.headers.get("content-type"),
@@ -182,12 +151,10 @@ def create_bucket_router(
     @router.delete("/documents/stage/{upload_id}", status_code=204)
     async def cancel_document_upload(
         upload_id: str,
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> None:
         cancelled = await bucket_service.cancel_staged_upload(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            user=user,
             upload_id=upload_id,
         )
         if not cancelled:
@@ -203,17 +170,15 @@ def create_bucket_router(
         request: Request,
         file_name: str = Header(default="uploaded-file", alias="X-File-Name"),
         file_name_encoding: str | None = Header(default=None, alias="X-File-Name-Encoding"),
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
         visibility: str = Header(default="private", alias="X-Document-Visibility"),
         allowed_roles: str | None = Header(default=None, alias="X-Document-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> DocumentResponse:
         content = await request.body()
         if not content:
             raise HTTPException(status_code=422, detail="Uploaded file is empty.")
         document = await bucket_service.save_uploaded_document(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            user=user,
             bucket_id=bucket_id,
             file_name=decoded_file_name(file_name, file_name_encoding),
             content=content,
@@ -230,17 +195,15 @@ def create_bucket_router(
         request: Request,
         file_name: str = Header(default="uploaded-file", alias="X-File-Name"),
         file_name_encoding: str | None = Header(default=None, alias="X-File-Name-Encoding"),
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
         visibility: str = Header(default="private", alias="X-Document-Visibility"),
         allowed_roles: str | None = Header(default=None, alias="X-Document-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> DocumentResponse:
         content = await request.body()
         if not content:
             raise HTTPException(status_code=422, detail="Uploaded file is empty.")
         document = await bucket_service.save_uploaded_document(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            user=user,
             bucket_id=None,
             file_name=decoded_file_name(file_name, file_name_encoding),
             content=content,
@@ -259,12 +222,10 @@ def create_bucket_router(
     async def commit_personal_documents(
         payload: CommitPersonalDocumentsRequest,
         background_tasks: BackgroundTasks,
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> CommitBucketDocumentsResponse:
         documents, indexing_job_ids = await bucket_service.commit_personal_documents(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            user=user,
             staged_upload_ids=payload.staged_upload_ids,
             visibility=payload.visibility,
             allowed_roles=payload.allowed_roles,
@@ -284,12 +245,10 @@ def create_bucket_router(
     async def add_existing_document_to_bucket(
         bucket_id: str,
         document_id: str,
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> DocumentResponse:
         document = await bucket_service.add_document_to_bucket(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            user=user,
             bucket_id=bucket_id,
             document_id=document_id,
         )
@@ -305,12 +264,10 @@ def create_bucket_router(
         bucket_id: str,
         payload: CommitBucketDocumentsRequest,
         background_tasks: BackgroundTasks,
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> CommitBucketDocumentsResponse:
         committed = await bucket_service.commit_bucket_documents(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            user=user,
             bucket_id=bucket_id,
             staged_upload_ids=payload.staged_upload_ids,
             existing_document_ids=payload.existing_document_ids,
@@ -335,12 +292,10 @@ def create_bucket_router(
     async def remove_document_from_bucket(
         bucket_id: str,
         document_id: str,
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> None:
         removed = await bucket_service.remove_document_from_bucket(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            user=user,
             bucket_id=bucket_id,
             document_id=document_id,
         )
@@ -350,12 +305,10 @@ def create_bucket_router(
     @router.delete("/documents/{document_id}", status_code=204)
     async def delete_document(
         document_id: str,
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> None:
         result = await bucket_service.delete_document(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            user=user,
             document_id=document_id,
         )
         if result.not_found:
@@ -382,12 +335,10 @@ def create_bucket_router(
         document_id: str,
         background_tasks: BackgroundTasks,
         bucket_id: str | None = None,
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> CommitBucketDocumentsResponse:
         retried = await bucket_service.retry_document_indexing(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            user=user,
             document_id=document_id,
             bucket_id=bucket_id,
         )
@@ -404,12 +355,10 @@ def create_bucket_router(
     @router.get("/documents/{document_id}/status", response_model=DocumentResponse)
     async def get_document_status(
         document_id: str,
-        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-        user_id: str | None = Header(default=None, alias="X-User-ID"),
-        roles: str | None = Header(default=None, alias="X-User-Roles"),
+        user: UserContext = Depends(get_current_user),
     ) -> DocumentResponse:
         document = await bucket_service.get_document(
-            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            user=user,
             document_id=document_id,
         )
         if document is None:

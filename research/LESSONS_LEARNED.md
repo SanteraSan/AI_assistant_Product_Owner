@@ -31,6 +31,27 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E1.3 Backend Service JWT And RAG Scope
+
+Контекст:
+- BFF уже шлёт `Authorization: Bearer` service JWT и снимает `X-User-*`;
+- backend всё ещё доверял spoofable headers и пропускал unauthorized `document_ids` в Qdrant.
+
+Наблюдение:
+- центральный `Depends(get_current_user)` закрывает chat/bucket/document routes;
+- spoofed `X-User-*` без JWT → 401; valid JWT → 200 на `/chat/sessions`;
+- `resolve_rag_document_ids` пересекает requested IDs с `can_read_document`, иначе fallback на indexed available docs;
+- 42 focused tests green (`test_service_jwt_auth`, bucket router, main app, access_policy).
+
+Решение:
+- добавлены `service_jwt.py`, `dependencies/auth.py`, `rag_scope.py`;
+- eval runner выдаёт admin service JWT;
+- browser headers больше не являются identity source.
+
+Вывод:
+- trust boundary теперь согласована: cookie→BFF, JWT→backend, access_policy→retrieval;
+- следующий шаг — frontend same-origin proxy и отказ от MockLogin/`X-User-*`.
+
 ## 2026-07-14: E1.2 BFF Session And Service JWT
 
 Контекст:

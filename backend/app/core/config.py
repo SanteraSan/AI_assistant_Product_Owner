@@ -51,6 +51,10 @@ class Settings(BaseSettings):
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
+    # Signed BFF→backend identity (must match bff service JWT settings).
+    service_jwt_secret: str = "taskflow-bff-service-jwt-dev-secret"
+    service_jwt_issuer: str = "taskflow-bff"
+    service_jwt_audience: str = "taskflow-backend"
 
     @field_validator("rag_score_threshold", mode="before")
     @classmethod

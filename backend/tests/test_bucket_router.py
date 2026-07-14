@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.routers.buckets import create_bucket_router
 from app.services.bucket_service import DocumentDeleteResult
+from tests.auth_helpers import auth_headers
 
 
 @dataclass
@@ -279,7 +280,7 @@ def _client() -> TestClient:
 def test_list_buckets_uses_tenant_header() -> None:
     client = _client()
 
-    response = client.get("/buckets", headers={"X-Tenant-ID": "tenant-a"})
+    response = client.get("/buckets", headers=auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]))
 
     assert response.status_code == 200
     assert response.json()[0]["id"] == "bucket-1"
@@ -291,7 +292,7 @@ def test_create_bucket_uses_mock_user_header() -> None:
 
     response = client.post(
         "/buckets",
-        headers={"X-Tenant-ID": "tenant-a", "X-User-ID": "user-a"},
+        headers=auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]),
         json={"name": "New bucket", "description": "New description"},
     )
 
@@ -305,12 +306,7 @@ def test_upload_document_accepts_raw_body() -> None:
     response = client.post(
         "/buckets/bucket-1/documents/upload",
         content=b"hello",
-        headers={
-            "Content-Type": "text/plain",
-            "X-File-Name": "notes.txt",
-            "X-Tenant-ID": "tenant-a",
-            "X-User-ID": "user-a",
-        },
+        headers={**auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]), "Content-Type": "text/plain", "X-File-Name": "notes.txt"},
     )
 
     assert response.status_code == 201
@@ -324,22 +320,12 @@ def test_list_available_documents_passes_roles_to_service() -> None:
     client.post(
         "/buckets/bucket-1/documents/upload",
         content=b"hello",
-        headers={
-            "Content-Type": "text/plain",
-            "X-File-Name": "notes.txt",
-            "X-Tenant-ID": "tenant-a",
-            "X-User-ID": "user-a",
-            "X-User-Roles": "analyst",
-        },
+        headers={**auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]), "Content-Type": "text/plain", "X-File-Name": "notes.txt"},
     )
 
     response = client.get(
         "/documents/available",
-        headers={
-            "X-Tenant-ID": "tenant-a",
-            "X-User-ID": "user-a",
-            "X-User-Roles": "analyst",
-        },
+        headers={**auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"])},
     )
 
     assert response.status_code == 200
@@ -351,20 +337,12 @@ def test_add_existing_document_to_bucket() -> None:
     client.post(
         "/buckets/bucket-1/documents/upload",
         content=b"hello",
-        headers={
-            "Content-Type": "text/plain",
-            "X-File-Name": "notes.txt",
-            "X-Tenant-ID": "tenant-a",
-            "X-User-ID": "user-a",
-        },
+        headers={**auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]), "Content-Type": "text/plain", "X-File-Name": "notes.txt"},
     )
 
     response = client.post(
         "/buckets/bucket-1/documents/document-1",
-        headers={
-            "X-Tenant-ID": "tenant-a",
-            "X-User-ID": "user-a",
-        },
+        headers={**auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"])},
     )
 
     assert response.status_code == 201
@@ -377,12 +355,7 @@ def test_stage_document_upload_accepts_raw_body() -> None:
     response = client.post(
         "/documents/stage",
         content=b"hello",
-        headers={
-            "Content-Type": "text/plain",
-            "X-File-Name": "notes.txt",
-            "X-Tenant-ID": "tenant-a",
-            "X-User-ID": "user-a",
-        },
+        headers={**auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]), "Content-Type": "text/plain", "X-File-Name": "notes.txt"},
     )
 
     assert response.status_code == 201
@@ -397,13 +370,7 @@ def test_stage_document_upload_decodes_cyrillic_file_name() -> None:
     response = client.post(
         "/documents/stage",
         content=b"hello",
-        headers={
-            "Content-Type": "text/plain",
-            "X-File-Name": "%D1%82%D0%B5%D1%81%D1%82.txt",
-            "X-File-Name-Encoding": "uri-component",
-            "X-Tenant-ID": "tenant-a",
-            "X-User-ID": "user-a",
-        },
+        headers={**auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]), "Content-Type": "text/plain", "X-File-Name": "%D1%82%D0%B5%D1%81%D1%82.txt", "X-File-Name-Encoding": "uri-component"},
     )
 
     assert response.status_code == 201
@@ -415,20 +382,12 @@ def test_cancel_staged_upload() -> None:
     client.post(
         "/documents/stage",
         content=b"hello",
-        headers={
-            "Content-Type": "text/plain",
-            "X-File-Name": "notes.txt",
-            "X-Tenant-ID": "tenant-a",
-            "X-User-ID": "user-a",
-        },
+        headers={**auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]), "Content-Type": "text/plain", "X-File-Name": "notes.txt"},
     )
 
     response = client.delete(
         "/documents/stage/stage-1",
-        headers={
-            "X-Tenant-ID": "tenant-a",
-            "X-User-ID": "user-a",
-        },
+        headers={**auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"])},
     )
 
     assert response.status_code == 204
@@ -439,10 +398,7 @@ def test_commit_bucket_documents_returns_indexing_job_ids() -> None:
 
     response = client.post(
         "/buckets/bucket-1/documents/-/commit",
-        headers={
-            "X-Tenant-ID": "tenant-a",
-            "X-User-ID": "user-a",
-        },
+        headers={**auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"])},
         json={
             "staged_upload_ids": ["stage-1"],
             "existing_document_ids": [],
@@ -462,10 +418,7 @@ def test_commit_personal_documents_returns_document_without_bucket_id() -> None:
 
     response = client.post(
         "/documents/-/commit-personal",
-        headers={
-            "X-Tenant-ID": "tenant-a",
-            "X-User-ID": "user-a",
-        },
+        headers={**auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"])},
         json={
             "staged_upload_ids": ["stage-1"],
             "visibility": "private",
@@ -501,7 +454,7 @@ def test_delete_personal_document() -> None:
 
     response = client.delete(
         "/documents/document-1",
-        headers={"X-Tenant-ID": "tenant-a", "X-User-ID": "user-a"},
+        headers=auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]),
     )
 
     assert response.status_code == 204
@@ -512,7 +465,7 @@ def test_delete_document_returns_conflict_when_used_in_buckets() -> None:
 
     response = client.delete(
         "/documents/in-use-document",
-        headers={"X-Tenant-ID": "tenant-a", "X-User-ID": "user-a"},
+        headers=auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]),
     )
 
     assert response.status_code == 409
@@ -525,7 +478,7 @@ def test_delete_bucket() -> None:
 
     response = client.delete(
         "/buckets/bucket-1",
-        headers={"X-Tenant-ID": "tenant-a"},
+        headers=auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]),
     )
 
     assert response.status_code == 204
@@ -553,7 +506,7 @@ def test_retry_document_indexing() -> None:
 
     response = client.post(
         "/documents/document-1/retry-indexing",
-        headers={"X-Tenant-ID": "tenant-a", "X-User-ID": "user-a"},
+        headers=auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]),
     )
 
     assert response.status_code == 200

@@ -6,7 +6,7 @@ from time import perf_counter
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -20,6 +20,7 @@ from app.db.session import (
     database_available,
     init_db,
 )
+from app.dependencies.auth import get_current_user
 from app.models.chat import (
     ChatAttachmentCreateRequest,
     ChatMessageResponse,
@@ -33,7 +34,7 @@ from app.models.chat import (
     SourceChunk,
 )
 from app.routers.buckets import create_bucket_router
-from app.services.access_policy import UserContext, parse_roles
+from app.services.access_policy import UserContext
 from app.services.bucket_service import PERSONAL_INDEX_BUCKET_ID, BucketService
 from app.services.chat_history_service import ChatExchangeRecord, ChatHistoryService
 from app.services.conversation_context_service import ConversationContextService
@@ -45,6 +46,7 @@ from app.services.image_digest_service import build_targeted_image_digest
 from app.services.ollama_client import OllamaClient
 from app.services.ollama_load_guard import OllamaLoadGuard, OllamaOverloadedError
 from app.services.query_router import QueryRouter
+from app.services.rag_scope import resolve_rag_document_ids
 from app.services.rate_limiter import RedisRateLimiter
 from app.services.rag_log_service import RagLogService
 from app.services.rag_service import RagService
@@ -277,12 +279,11 @@ async def health_ready() -> dict[str, object]:
 
 @app.get("/chat/sessions", response_model=list[ChatSessionResponse])
 async def list_chat_sessions(
-    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-    user_id: str | None = Header(default=None, alias="X-User-ID"),
+    user: UserContext = Depends(get_current_user),
 ) -> list[ChatSessionResponse]:
     sessions = await chat_history_service.list_sessions(
-        tenant_id=_tenant_from_header(tenant_id),
-        user_id=_user_from_header(user_id),
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
     )
     return [_chat_session_response(session) for session in sessions]
 
@@ -290,12 +291,11 @@ async def list_chat_sessions(
 @app.post("/chat/sessions", response_model=ChatSessionResponse, status_code=201)
 async def create_chat_session(
     payload: ChatSessionCreateRequest,
-    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-    user_id: str | None = Header(default=None, alias="X-User-ID"),
+    user: UserContext = Depends(get_current_user),
 ) -> ChatSessionResponse:
     session = await chat_history_service.create_session(
-        tenant_id=_tenant_from_header(tenant_id),
-        user_id=_user_from_header(user_id),
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
         title=payload.title,
         active_bucket_id=payload.active_bucket_id,
         model_id=payload.model_id,
@@ -309,12 +309,11 @@ async def create_chat_session(
 async def update_chat_session(
     session_id: str,
     payload: ChatSessionUpdateRequest,
-    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-    user_id: str | None = Header(default=None, alias="X-User-ID"),
+    user: UserContext = Depends(get_current_user),
 ) -> ChatSessionResponse:
     session = await chat_history_service.update_session(
-        tenant_id=_tenant_from_header(tenant_id),
-        user_id=_user_from_header(user_id),
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
         session_id=session_id,
         title=payload.title,
         active_bucket_id=payload.active_bucket_id,
@@ -330,12 +329,11 @@ async def update_chat_session(
 @app.delete("/chat/sessions/{session_id}", status_code=204)
 async def delete_chat_session(
     session_id: str,
-    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-    user_id: str | None = Header(default=None, alias="X-User-ID"),
+    user: UserContext = Depends(get_current_user),
 ) -> None:
     deleted = await chat_history_service.delete_session(
-        tenant_id=_tenant_from_header(tenant_id),
-        user_id=_user_from_header(user_id),
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
         session_id=session_id,
     )
     if not deleted:
@@ -345,12 +343,11 @@ async def delete_chat_session(
 @app.get("/chat/sessions/{session_id}/messages", response_model=list[ChatMessageResponse])
 async def list_chat_session_messages(
     session_id: str,
-    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-    user_id: str | None = Header(default=None, alias="X-User-ID"),
+    user: UserContext = Depends(get_current_user),
 ) -> list[ChatMessageResponse]:
     messages = await chat_history_service.list_messages(
-        tenant_id=_tenant_from_header(tenant_id),
-        user_id=_user_from_header(user_id),
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
         session_id=session_id,
     )
     return [_chat_message_response(message) for message in messages]
@@ -364,12 +361,11 @@ async def list_chat_session_messages(
 async def create_chat_attachment_message(
     session_id: str,
     payload: ChatAttachmentCreateRequest,
-    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-    user_id: str | None = Header(default=None, alias="X-User-ID"),
+    user: UserContext = Depends(get_current_user),
 ) -> ChatMessageResponse:
     message = await chat_history_service.save_attachment_message(
-        tenant_id=_tenant_from_header(tenant_id),
-        user_id=_user_from_header(user_id),
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
         session_id=session_id,
         document_id=payload.document_id,
         file_name=payload.file_name,
@@ -385,8 +381,7 @@ async def create_chat_attachment_message(
 async def chat(
     request: Request,
     payload: ChatRequest,
-    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-    user_id: str | None = Header(default=None, alias="X-User-ID"),
+    user: UserContext = Depends(get_current_user),
 ) -> ChatResponse:
     _enforce_chat_request_limits(payload)
     await _enforce_rate_limit(request=request, endpoint="chat")
@@ -421,8 +416,8 @@ async def chat(
     )
     chat_exchange = await _try_save_chat_exchange(
         session_id=payload.session_id,
-        tenant_id=_tenant_from_header(tenant_id),
-        user_id=_user_from_header(user_id),
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
         user_message=payload.message,
         response=response,
         metadata={"endpoint": "/chat", "model_id": model},
@@ -435,9 +430,7 @@ async def chat(
 async def rag_chat(
     request: Request,
     payload: RagChatRequest,
-    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
-    user_id: str | None = Header(default=None, alias="X-User-ID"),
-    roles: str | None = Header(default=None, alias="X-User-Roles"),
+    user: UserContext = Depends(get_current_user),
 ) -> RagChatResponse:
     _enforce_rag_request_limits(payload)
     await _enforce_rate_limit(request=request, endpoint="rag_chat")
@@ -452,18 +445,17 @@ async def rag_chat(
 
     try:
         started_at = perf_counter()
-        normalized_tenant_id = _tenant_from_header(tenant_id)
-        normalized_user_id = _user_from_header(user_id)
         effective_bucket_ids = _effective_bucket_ids(payload)
         bucket_documents = await _bucket_documents_for_context(
-            user=UserContext(
-                tenant_id=normalized_tenant_id,
-                user_id=normalized_user_id,
-                roles=parse_roles(roles),
-            ),
+            user=user,
             bucket_ids=effective_bucket_ids,
         )
-        effective_document_ids = payload.document_ids or _document_ids(bucket_documents)
+        effective_document_ids = await resolve_rag_document_ids(
+            user=user,
+            bucket_service=bucket_service,
+            requested_document_ids=payload.document_ids,
+            bucket_documents=bucket_documents,
+        )
         conversation_context = await _build_conversation_context(
             session_id=payload.session_id,
             message=payload.message,
@@ -479,11 +471,7 @@ async def rag_chat(
         else:
             targeted_image_sources = await _build_targeted_image_sources(
                 message=payload.message,
-                user=UserContext(
-                    tenant_id=normalized_tenant_id,
-                    user_id=normalized_user_id,
-                    roles=parse_roles(roles),
-                ),
+                user=user,
                 document_ids=effective_document_ids,
                 bucket_ids=effective_bucket_ids,
                 bucket_documents=bucket_documents,
@@ -496,7 +484,7 @@ async def rag_chat(
                 ),
                 top_k=payload.top_k,
                 score_threshold=payload.score_threshold,
-                tenant_id=payload.tenant_id or settings.default_tenant_id,
+                tenant_id=user.tenant_id,
                 bucket_ids=effective_bucket_ids,
                 features=payload.features,
                 source_types=payload.source_types,
@@ -511,8 +499,8 @@ async def rag_chat(
         response.conversation_context = conversation_context
         chat_exchange = await _try_save_chat_exchange(
             session_id=payload.session_id,
-            tenant_id=normalized_tenant_id,
-            user_id=normalized_user_id,
+            tenant_id=user.tenant_id,
+            user_id=user.user_id,
             user_message=payload.message,
             response=response,
             metadata={
@@ -1106,15 +1094,6 @@ async def _try_save_chat_exchange(
     except Exception:
         logger.exception("Chat history persistence failed")
         return None
-
-
-def _tenant_from_header(value: str | None) -> str:
-    return (value or settings.default_tenant_id).strip() or settings.default_tenant_id
-
-
-def _user_from_header(value: str | None) -> str | None:
-    normalized = (value or "").strip()
-    return normalized or None
 
 
 def _chat_session_response(session: ChatSession) -> ChatSessionResponse:
