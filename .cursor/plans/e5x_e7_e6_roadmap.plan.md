@@ -35,4 +35,5 @@ Status: **lab baseline implemented (2026-07-15)**
 - thin LangGraph adapter calling existing tools/RBAC — **done**
 - feature flag `AGENT_LANGGRAPH_ENABLED` (default off); handwritten Agent remains primary
 - unit side-by-side parity tests — **done**
-- optional next: live UI smoke + Grafana latency compare handwritten vs langgraph
+- live API smoke handwritten vs langgraph (`qwen3.5:9b`) — **done** (see `research/e6_handwritten_vs_langgraph_smoke.json`)
+- optional next: UI toggle / Grafana label by `provider`

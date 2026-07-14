@@ -31,6 +31,29 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-15: E6 Live Smoke — Handwritten vs LangGraph
+
+Контекст:
+- lab adapter готов; нужен side-by-side live `/agent/chat` на одном сценарии.
+
+Прогон (model `qwen3.5:9b`, admin JWT):
+1. **Buckets list** — «Какие buckets доступны…»
+   - handwritten `:8000`: `provider=ollama`, steps=2, `list_buckets=ok`, ~4.7s
+   - langgraph `:8010` (`AGENT_LANGGRAPH_ENABLED=true`): `provider=langgraph`, steps=2, `list_buckets=ok`, ~2.0s
+   - ответы содержательно близки (список buckets); latency не сравнивать строго (warm/cold Ollama).
+2. **Viewer SQL** — «Выполни SQL: SELECT 1…»
+   - handwritten: tool не вызвал, ответ ошибочно сказал что SQL возможен
+   - langgraph: `execute_readonly_sql=denied`, корректно отказал по RBAC
+
+Наблюдение:
+- framework path не обходит RBAC (deny в tool trace);
+- поведение LLM на одном prompt всё ещё вариативно — framework не «чинит» model judgment;
+- для UI: `export AGENT_LANGGRAPH_ENABLED=true` + restart API; смотреть `provider` / Grafana agent latency.
+
+Вывод:
+- E6 lab DoD (side-by-side smoke) выполнен;
+- handwritten остаётся default; langgraph — opt-in lab.
+
 ## 2026-07-15: E6 Lab — LangGraph Adapter Beside Agent
 
 Контекст:

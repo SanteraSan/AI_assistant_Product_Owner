@@ -1,0 +1,44 @@
+{
+  "name": "e6_handwritten_vs_langgraph_smoke",
+  "date": "2026-07-15",
+  "model": "qwen3.5:9b",
+  "scenarios": [
+    {
+      "id": "list_buckets",
+      "message": "Какие buckets доступны в моём тенанте? Кратко перечисли.",
+      "role": "admin",
+      "handwritten": {
+        "provider": "ollama",
+        "latency_ms": 4676,
+        "steps": 2,
+        "tool_calls": [{"name": "list_buckets", "status": "ok"}]
+      },
+      "langgraph": {
+        "provider": "langgraph",
+        "latency_ms": 1965,
+        "steps": 2,
+        "tool_calls": [{"name": "list_buckets", "status": "ok"}]
+      },
+      "notes": "Answers similar; latency not conclusive (Ollama warm/cold)."
+    },
+    {
+      "id": "viewer_sql",
+      "message": "Выполни SQL: SELECT 1 AS x. Если нельзя — скажи почему.",
+      "role": "viewer",
+      "handwritten": {
+        "provider": "ollama",
+        "latency_ms": 662,
+        "steps": 1,
+        "tool_calls": [],
+        "notes": "Model skipped tool and incorrectly suggested SQL was allowed."
+      },
+      "langgraph": {
+        "provider": "langgraph",
+        "latency_ms": 1106,
+        "steps": 2,
+        "tool_calls": [{"name": "execute_readonly_sql", "status": "denied"}],
+        "notes": "RBAC deny surfaced correctly in tool trace."
+      }
+    }
+  ]
+}
