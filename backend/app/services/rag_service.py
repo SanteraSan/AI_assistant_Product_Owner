@@ -126,44 +126,6 @@ class RagService:
         targeted_sources = additional_sources or []
         sources = _merge_sources(targeted_sources, sources)
         sources = sources[:selected_top_k]
-        missing_requested_files = _missing_requested_file_names(message, sources)
-        if missing_requested_files:
-            latency_ms = int((perf_counter() - started_at) * 1000)
-            return RagChatResponse(
-                model=selected_model,
-                response=_missing_requested_file_answer(missing_requested_files),
-                latency_ms=latency_ms,
-                collection=self._qdrant_store.collection_name,
-                sources=[],
-                score_threshold=selected_score_threshold,
-                features=selected_features,
-                source_types=selected_source_types,
-                diversity={
-                    "max_sources_per_title": max_sources_per_title if max_sources_per_title is not None else 1,
-                    "max_sources_per_source_type": max_sources_per_source_type,
-                    "max_sources_per_source_path": max_sources_per_source_path,
-                },
-                retrieval={
-                    "requested_top_k": selected_top_k,
-                    "candidate_k": candidate_k,
-                    "retrieval_query": selected_retrieval_query,
-                    "required_source_types": required_source_types,
-                    "tenant_id": selected_tenant_id,
-                    "bucket_ids": selected_bucket_ids,
-                    "document_ids": selected_document_ids,
-                    "source_paths": selected_source_paths,
-                    "excel_supplement_count": excel_supplement_count,
-                    "docx_supplement_count": docx_supplement_count,
-                    "additional_source_count": len(targeted_sources),
-                    "additional_source_ids": [source.id for source in targeted_sources],
-                    "final_top_k": 0,
-                    "missing_requested_files": missing_requested_files,
-                    "file_scope_refusal": True,
-                },
-                query_hints=routing_decision.hints,
-                context_policy=_build_context_policy(routing_decision.hints),
-                prompt_tokens_estimate=0,
-            )
         context_policy = _build_context_policy(routing_decision.hints)
         prompt_sources = _apply_context_policy(
             sources,
@@ -598,62 +560,6 @@ def _source_file_name(source: SourceChunk) -> str:
     if source.source_path:
         return _display_file_name(source.source_path.rsplit("/", maxsplit=1)[-1])
     return "unknown"
-
-
-_REQUESTED_FILE_NAME_RE = re.compile(
-    r"(?iu)\b([\w.-]+\.(?:jpg|jpeg|png|gif|webp|bmp|pdf|docx|doc|xlsx|xls|txt|md|csv))\b"
-)
-
-
-def _extract_requested_file_names(message: str) -> list[str]:
-    found: list[str] = []
-    seen: set[str] = set()
-    for match in _REQUESTED_FILE_NAME_RE.findall(message or ""):
-        normalized = match.strip()
-        key = normalized.casefold()
-        if not normalized or key in seen:
-            continue
-        seen.add(key)
-        found.append(normalized)
-    return found
-
-
-def _source_file_name_aliases(source: SourceChunk) -> set[str]:
-    aliases = {_source_file_name(source).casefold()}
-    if source.title:
-        aliases.add(str(source.title).casefold())
-    if source.source_path:
-        aliases.add(_display_file_name(source.source_path.rsplit("/", maxsplit=1)[-1]).casefold())
-    document_metadata = source.metadata.get("document_metadata") or {}
-    if isinstance(document_metadata, dict):
-        for key in ("document_file_name", "file_name"):
-            value = document_metadata.get(key)
-            if value:
-                aliases.add(str(value).casefold())
-    return {alias for alias in aliases if alias and alias != "unknown"}
-
-
-def _missing_requested_file_names(message: str, sources: list[SourceChunk]) -> list[str]:
-    requested = _extract_requested_file_names(message)
-    if not requested:
-        return []
-    available: set[str] = set()
-    for source in sources:
-        available.update(_source_file_name_aliases(source))
-    return [name for name in requested if name.casefold() not in available]
-
-
-def _missing_requested_file_answer(missing_files: list[str]) -> str:
-    if len(missing_files) == 1:
-        return (
-            f"Файла `{missing_files[0]}` нет в доступных вам документах, "
-            "поэтому описать его содержимое нельзя."
-        )
-    joined = ", ".join(f"`{name}`" for name in missing_files)
-    return (
-        f"Файлов {joined} нет в доступных вам документах, "
-        "поэтому описать их содержимое нельзя."
-    )
 
 
 def _display_file_name(file_name: str) -> str:

@@ -47,6 +47,11 @@ from app.services.ollama_client import OllamaClient
 from app.services.ollama_load_guard import OllamaLoadGuard, OllamaOverloadedError
 from app.services.query_router import QueryRouter
 from app.services.rag_scope import resolve_rag_document_ids
+from app.services.requested_file_scope import (
+    looks_like_file_inventory_question,
+    missing_requested_file_answer,
+    resolve_requested_files,
+)
 from app.services.rate_limiter import RedisRateLimiter
 from app.services.rag_log_service import RagLogService
 from app.services.rag_service import RagService
@@ -456,46 +461,76 @@ async def rag_chat(
             requested_document_ids=payload.document_ids,
             bucket_documents=bucket_documents,
         )
+        accessible_documents = await _accessible_documents_for_rag(
+            user=user,
+            bucket_documents=bucket_documents,
+            effective_document_ids=effective_document_ids,
+        )
         conversation_context = await _build_conversation_context(
             session_id=payload.session_id,
             message=payload.message,
         )
-        if effective_bucket_ids and _looks_like_bucket_file_inventory_question(payload.message):
-            response = _bucket_file_inventory_response(
-                message=payload.message,
+        if looks_like_file_inventory_question(payload.message):
+            response = _file_inventory_response(
                 model=payload.model or settings.default_rag_model,
                 bucket_ids=effective_bucket_ids,
-                documents=bucket_documents,
+                documents=accessible_documents,
                 latency_ms=int((perf_counter() - started_at) * 1000),
             )
         else:
-            targeted_image_sources = await _build_targeted_image_sources(
+            requested_files = resolve_requested_files(
                 message=payload.message,
-                user=user,
-                document_ids=effective_document_ids,
-                bucket_ids=effective_bucket_ids,
-                bucket_documents=bucket_documents,
+                documents=accessible_documents,
             )
-            response = await rag_service.answer(
-                message=payload.message,
-                model=payload.model,
-                retrieval_query=str(
-                    conversation_context.get("retrieval_query") or payload.message
-                ),
-                top_k=payload.top_k,
-                score_threshold=payload.score_threshold,
-                tenant_id=user.tenant_id,
-                bucket_ids=effective_bucket_ids,
-                features=payload.features,
-                source_types=payload.source_types,
-                document_ids=effective_document_ids,
-                source_paths=payload.source_paths,
-                max_sources_per_title=payload.max_sources_per_title,
-                max_sources_per_source_type=payload.max_sources_per_source_type,
-                max_sources_per_source_path=payload.max_sources_per_source_path,
-                memory_context=_as_dict(conversation_context.get("prompt_memory")),
-                additional_sources=targeted_image_sources,
-            )
+            if requested_files.missing_names and not requested_files.matched_documents:
+                response = RagChatResponse(
+                    model=payload.model or settings.default_rag_model,
+                    response=missing_requested_file_answer(requested_files.missing_names),
+                    latency_ms=int((perf_counter() - started_at) * 1000),
+                    collection=qdrant_store.collection_name,
+                    sources=[],
+                    score_threshold=None,
+                    retrieval={
+                        "mode": "requested_file_scope_refusal",
+                        "missing_requested_files": requested_files.missing_names,
+                        "document_ids": effective_document_ids,
+                        "final_top_k": 0,
+                    },
+                )
+            else:
+                scoped_document_ids = effective_document_ids
+                if requested_files.matched_documents:
+                    scoped_document_ids = [
+                        document.id for document in requested_files.matched_documents
+                    ]
+                targeted_image_sources = await _build_targeted_image_sources(
+                    message=payload.message,
+                    user=user,
+                    document_ids=scoped_document_ids,
+                    bucket_ids=effective_bucket_ids,
+                    bucket_documents=bucket_documents,
+                )
+                response = await rag_service.answer(
+                    message=payload.message,
+                    model=payload.model,
+                    retrieval_query=str(
+                        conversation_context.get("retrieval_query") or payload.message
+                    ),
+                    top_k=payload.top_k,
+                    score_threshold=payload.score_threshold,
+                    tenant_id=user.tenant_id,
+                    bucket_ids=effective_bucket_ids,
+                    features=payload.features,
+                    source_types=payload.source_types,
+                    document_ids=scoped_document_ids,
+                    source_paths=payload.source_paths,
+                    max_sources_per_title=payload.max_sources_per_title,
+                    max_sources_per_source_type=payload.max_sources_per_source_type,
+                    max_sources_per_source_path=payload.max_sources_per_source_path,
+                    memory_context=_as_dict(conversation_context.get("prompt_memory")),
+                    additional_sources=targeted_image_sources,
+                )
+                effective_document_ids = scoped_document_ids
         response.conversation_context = conversation_context
         chat_exchange = await _try_save_chat_exchange(
             session_id=payload.session_id,
@@ -773,11 +808,73 @@ def _document_ids(documents: list[DocumentAsset]) -> list[str]:
 
 
 def _looks_like_bucket_file_inventory_question(message: str) -> bool:
-    normalized = message.lower()
-    file_markers = ("какие файл", "какой файл", "список файл", "что за файл", "есть в бакет", "есть в bucket")
-    bucket_markers = ("бакет", "bucket", "выбранн", "текущ")
-    return any(marker in normalized for marker in file_markers) and any(
-        marker in normalized for marker in bucket_markers
+    return looks_like_file_inventory_question(message)
+
+
+async def _accessible_documents_for_rag(
+    *,
+    user: UserContext,
+    bucket_documents: list[DocumentAsset],
+    effective_document_ids: list[str],
+) -> list[DocumentAsset]:
+    if bucket_documents:
+        allowed_ids = set(effective_document_ids)
+        return [
+            document
+            for document in bucket_documents
+            if document.id in allowed_ids or not allowed_ids
+        ]
+    if not effective_document_ids:
+        return []
+    available = await bucket_service.list_available_documents(user=user)
+    allowed_ids = set(effective_document_ids)
+    return [document for document in available if document.id in allowed_ids]
+
+
+def _file_inventory_response(
+    *,
+    model: str,
+    bucket_ids: list[str],
+    documents: list[DocumentAsset],
+    latency_ms: int,
+) -> RagChatResponse:
+    indexed_documents = [document for document in documents if document.status == "indexed"]
+    scope_label = "выбранном bucket" if bucket_ids else "доступных документах"
+    if not indexed_documents:
+        answer = f"В {scope_label} нет доступных файлов."
+    else:
+        lines = [
+            f"- `{document.file_name}` — status `{document.status}`"
+            for document in indexed_documents
+        ]
+        answer = f"В {scope_label} доступны файлы:\n" + "\n".join(lines)
+    source_content = "\n".join(
+        f"{document.file_name} | status={document.status} | document_id={document.id}"
+        for document in indexed_documents
+    ) or "Документы не найдены."
+    return RagChatResponse(
+        model=model,
+        response=answer,
+        latency_ms=latency_ms,
+        collection=qdrant_store.collection_name,
+        sources=[
+            SourceChunk(
+                id="file-inventory",
+                score=None,
+                title="Accessible file inventory",
+                source_type="bucket_metadata",
+                source_path=None,
+                content=source_content,
+                metadata={"bucket_ids": bucket_ids},
+            )
+        ],
+        score_threshold=None,
+        retrieval={
+            "mode": "file_inventory",
+            "bucket_ids": bucket_ids,
+            "document_ids": [document.id for document in indexed_documents],
+            "final_top_k": len(indexed_documents),
+        },
     )
 
 
@@ -789,38 +886,12 @@ def _bucket_file_inventory_response(
     documents: list[DocumentAsset],
     latency_ms: int,
 ) -> RagChatResponse:
-    if not documents:
-        answer = "В выбранном bucket нет доступных документов."
-    else:
-        lines = [f"- `{document.file_name}` — status `{document.status}`" for document in documents]
-        answer = "В выбранном bucket доступны файлы:\n" + "\n".join(lines)
-    source_content = "\n".join(
-        f"{document.file_name} | status={document.status} | document_id={document.id}"
-        for document in documents
-    ) or "Документы в выбранном bucket не найдены."
-    return RagChatResponse(
+    del message
+    return _file_inventory_response(
         model=model,
-        response=answer,
+        bucket_ids=bucket_ids,
+        documents=documents,
         latency_ms=latency_ms,
-        collection=qdrant_store.collection_name,
-        sources=[
-            SourceChunk(
-                id="bucket-file-inventory",
-                score=None,
-                title="Bucket file inventory",
-                source_type="bucket_metadata",
-                source_path=None,
-                content=source_content,
-                metadata={"bucket_ids": bucket_ids},
-            )
-        ],
-        score_threshold=None,
-        retrieval={
-            "mode": "bucket_file_inventory",
-            "bucket_ids": bucket_ids,
-            "document_ids": [document.id for document in documents],
-            "final_top_k": len(documents),
-        },
     )
 
 

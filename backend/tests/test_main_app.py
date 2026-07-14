@@ -422,6 +422,22 @@ def test_rag_chat_passes_targeted_image_source_to_rag(monkeypatch) -> None:
         return list(kwargs.get("requested_document_ids") or [])
 
     monkeypatch.setattr(main_module, "resolve_rag_document_ids", _fake_resolve_rag_document_ids)
+
+    async def _fake_accessible_documents_for_rag(**_kwargs):
+        return [
+            SimpleNamespace(
+                id="doc-1",
+                file_name="images.jpeg",
+                title="images.jpeg",
+                status="indexed",
+            )
+        ]
+
+    monkeypatch.setattr(
+        main_module,
+        "_accessible_documents_for_rag",
+        _fake_accessible_documents_for_rag,
+    )
     client = TestClient(main_module.app)
 
     response = client.post(
