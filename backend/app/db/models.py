@@ -398,3 +398,23 @@ class RagSourceLog(Base):
     )
 
     request_log: Mapped[RagRequestLog] = relationship(back_populates="sources")
+
+
+class ToolCallLog(Base):
+    __tablename__ = "tool_call_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    request_id: Mapped[str] = mapped_column(String(64), index=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), index=True)
+    user_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    tool_name: Mapped[str] = mapped_column(String(128), index=True)
+    arguments_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String(32))
+    error_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    result_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )

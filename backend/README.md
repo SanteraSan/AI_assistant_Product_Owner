@@ -1317,6 +1317,24 @@ PY
 
 Health endpoints (`/health/*`) остаются публичными. Product UI ходит через BFF (`:8001`) с httpOnly session cookie.
 
+## E3.1 Tools Foundation
+
+Controlled tools layer (перед agent chat UI в E3.3):
+
+- `app/services/tools/` — registry, executor, role matrix, `ToolResult` (`ok|denied|invalid_input|failed`)
+- Read tools: `get_user_context`, `list_buckets`, `get_document_status`, `rag_search`
+- `rag_search` scopes via `resolve_rag_document_ids` then `RagService.search` (retrieve-only, без generation)
+- Audit: `metadata.tool_calls[]` shape + table `tool_call_logs` (Alembic `20260714_0007`)
+- Portable JSON parse helper: `app/services/agent/tool_loop.py`
+
+Role matrix: read tools — any authenticated; SQL tools (`text_to_sql`, `execute_readonly_sql`) — analyst/admin (E3.2).
+
+```bash
+cd backend && source .venv/bin/activate
+pytest tests/test_tools_foundation.py -q
+alembic upgrade head
+```
+
 ## E0 UI Skeleton: Buckets And Document Registry API
 
 Для первого product UI добавлен минимальный API слой для управления buckets и document registry.

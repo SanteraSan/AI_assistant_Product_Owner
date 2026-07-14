@@ -56,6 +56,7 @@ from app.services.rate_limiter import RedisRateLimiter
 from app.services.rag_log_service import RagLogService
 from app.services.rag_service import RagService
 from app.services.redis_service import RedisService
+from app.services.tools import ToolExecutor, build_default_tool_registry
 
 
 settings = get_settings()
@@ -125,6 +126,14 @@ conversation_summary_service = ConversationSummaryService(
 bucket_service = BucketService(
     session_factory=db_session_factory,
     raw_data_dir=settings.raw_data_dir,
+)
+tool_registry = build_default_tool_registry(
+    bucket_service=bucket_service,
+    rag_service=rag_service,
+)
+tool_executor = ToolExecutor(
+    registry=tool_registry,
+    session_factory=db_session_factory,
 )
 document_indexing_service = DocumentIndexingService(
     session_factory=db_session_factory,

@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass(frozen=True)
+class ParsedToolCall:
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ToolLoopParseResult:
+    tool_calls: list[ParsedToolCall]
+    final_answer: str | None
+    raw_json: dict[str, Any] | None
+    error: str | None = None
+
+
+_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
+
+
+def parse_tool_loop_response(text: str) -> ToolLoopParseResult:
+    """Parse portable JSON tool-loop payload from model output.
+
+    Expected shapes:
+    - {"tool_calls": [{"name": "...", "arguments": {...}}, ...]}
+    - {"final_answer": "..."}
+    - both keys allowed; empty tool_calls + final_answer ends the loop
+    """
+    try:
+        raw = _extract_json_object(text)
+        parsed = json.loads(raw)
+    except (ValueError, json.JSONDecodeError) as exc:
+        return ToolLoopParseResult(
+            tool_calls=[],
+            final_answer=None,
+            raw_json=None,
+            error=f"invalid_json:{exc}",
+        )
+
+    if not isinstance(parsed, dict):
+        return ToolLoopParseResult(
+            tool_calls=[],
+            final_answer=None,
+            raw_json=None,
+            error="json_not_object",
+        )
+
+    tool_calls: list[ParsedToolCall] = []
+    raw_calls = parsed.get("tool_calls")
+    if raw_calls is None:
+        raw_calls = []
+    if not isinstance(raw_calls, list):
+        return ToolLoopParseResult(
+            tool_calls=[],
+            final_answer=None,
+            raw_json=parsed,
+            error="tool_calls_not_list",
+        )
+
+    for item in raw_calls:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        arguments = item.get("arguments")
+        if arguments is None:
+            arguments = item.get("args") or {}
+        if not isinstance(arguments, dict):
+            arguments = {}
+        tool_calls.append(ParsedToolCall(name=name, arguments=arguments))
+
+    final_answer = parsed.get("final_answer")
+    if final_answer is not None:
+        final_answer = str(final_answer).strip() or None
+
+    return ToolLoopParseResult(
+        tool_calls=tool_calls,
+        final_answer=final_answer,
+        raw_json=parsed,
+        error=None,
+    )
+
+
+def _extract_json_object(text: str) -> str:
+    stripped = text.strip()
+    fence = _FENCE_RE.search(stripped)
+    if fence:
+        stripped = fence.group(1).strip()
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start < 0 or end < start:
+        raise ValueError("response did not contain a JSON object")
+    return stripped[start : end + 1]

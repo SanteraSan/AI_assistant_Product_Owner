@@ -31,6 +31,23 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E3.1 Tools Foundation
+
+Контекст:
+- E2 blocked (VPN); нужен enterprise tool seam без пустого model gateway;
+- RAG ACL и BucketService уже есть — tools должны их оборачивать, не дублировать.
+
+Решение:
+- `ToolRegistry` + `ToolExecutor` + явная role matrix + единый `ToolResult`;
+- read tools: `get_user_context`, `list_buckets`, `get_document_status`, `rag_search`;
+- `RagService.search` — retrieve-only path для tools;
+- audit schema `metadata.tool_calls` + `tool_call_logs`;
+- unit tests в `tests/test_tools_foundation.py`.
+
+Вывод:
+- permission deny до side effects через executor — правильный seam для agent loop;
+- memory остаётся в orchestrator (E3.3), tools чистые.
+
 ## 2026-07-14: E2 Blocked (VPN) → Start E3 Tools/Agents
 
 Контекст:

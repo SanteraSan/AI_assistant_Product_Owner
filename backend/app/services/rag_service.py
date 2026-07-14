@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass
 from time import perf_counter
 
 from app.clients.qdrant_store import QdrantStore
@@ -6,6 +7,17 @@ from app.models.chat import RagChatResponse, SourceChunk
 from app.services.feature_extractor import FeatureExtractor
 from app.services.ollama_client import OllamaClient
 from app.services.query_router import QueryRouter
+
+
+@dataclass(frozen=True)
+class RagSearchResult:
+    sources: list[SourceChunk]
+    features: list[str]
+    source_types: list[str]
+    score_threshold: float | None
+    retrieval: dict[str, object]
+    query_hints: dict[str, object]
+    latency_ms: int
 
 
 class RagService:
@@ -42,6 +54,101 @@ class RagService:
         self._excel_supplement_scroll_limit = excel_supplement_scroll_limit
         self._docx_supplement_scroll_limit = docx_supplement_scroll_limit
 
+    async def search(
+        self,
+        *,
+        query: str,
+        top_k: int | None = None,
+        score_threshold: float | None = None,
+        tenant_id: str | None = None,
+        bucket_ids: list[str] | None = None,
+        features: list[str] | None = None,
+        source_types: list[str] | None = None,
+        document_ids: list[str] | None = None,
+        source_paths: list[str] | None = None,
+        max_sources_per_title: int | None = None,
+        max_sources_per_source_type: int | None = None,
+        max_sources_per_source_path: int | None = None,
+    ) -> RagSearchResult:
+        """Retrieve evidence chunks without LLM generation (for tools/agents)."""
+        selected_top_k = top_k or self._default_top_k
+        selected_score_threshold = (
+            score_threshold if score_threshold is not None else self._default_score_threshold
+        )
+        candidate_k = selected_top_k * self._candidate_multiplier
+        selected_tenant_id = tenant_id.strip() if tenant_id else None
+        selected_bucket_ids = _normalize_values(bucket_ids or [])
+        selected_features = _normalize_features(features or [])
+        selected_source_types = _normalize_values(source_types or [])
+        selected_document_ids = _normalize_values(document_ids or [])
+        selected_source_paths = _normalize_values(source_paths or [])
+        has_document_filter = bool(selected_document_ids or selected_source_paths)
+        if not selected_features and not has_document_filter:
+            selected_features = self._feature_extractor.extract(query)
+        routing_decision = self._query_router.route(
+            message=query,
+            source_types=selected_source_types,
+            score_threshold=selected_score_threshold,
+            user_provided_source_types=bool(source_types),
+            user_provided_score_threshold=score_threshold is not None,
+        )
+        selected_source_types = routing_decision.source_types
+        selected_score_threshold = routing_decision.score_threshold
+        if score_threshold is None and _is_narrow_document_scope(
+            bucket_ids=selected_bucket_ids,
+            document_ids=selected_document_ids,
+            source_paths=selected_source_paths,
+        ):
+            selected_score_threshold = _lower_score_threshold(selected_score_threshold, 0.45)
+
+        started_at = perf_counter()
+        query_vector = await self._ollama_client.embed(self._embedding_model, query)
+        sources, required_source_types, excel_supplement_count, docx_supplement_count = (
+            self._retrieve_sources(
+                query_vector=query_vector,
+                message=query,
+                candidate_k=candidate_k,
+                selected_top_k=selected_top_k,
+                selected_score_threshold=selected_score_threshold,
+                selected_tenant_id=selected_tenant_id,
+                selected_bucket_ids=selected_bucket_ids,
+                selected_features=selected_features,
+                selected_source_types=selected_source_types,
+                selected_document_ids=selected_document_ids,
+                selected_source_paths=selected_source_paths,
+                routing_hints=routing_decision.hints,
+            )
+        )
+        sources = _apply_source_diversity(
+            sources,
+            max_sources_per_title=max_sources_per_title if max_sources_per_title is not None else 1,
+            max_sources_per_source_type=max_sources_per_source_type,
+            max_sources_per_source_path=max_sources_per_source_path,
+        )
+        sources = sources[:selected_top_k]
+        latency_ms = int((perf_counter() - started_at) * 1000)
+        return RagSearchResult(
+            sources=sources,
+            features=selected_features,
+            source_types=selected_source_types,
+            score_threshold=selected_score_threshold,
+            retrieval={
+                "requested_top_k": selected_top_k,
+                "candidate_k": candidate_k,
+                "retrieval_query": query,
+                "required_source_types": required_source_types,
+                "tenant_id": selected_tenant_id,
+                "bucket_ids": selected_bucket_ids,
+                "document_ids": selected_document_ids,
+                "source_paths": selected_source_paths,
+                "excel_supplement_count": excel_supplement_count,
+                "docx_supplement_count": docx_supplement_count,
+                "final_top_k": len(sources),
+            },
+            query_hints=routing_decision.hints,
+            latency_ms=latency_ms,
+        )
+
     async def answer(
         self,
         message: str,
@@ -62,76 +169,32 @@ class RagService:
         additional_sources: list[SourceChunk] | None = None,
     ) -> RagChatResponse:
         selected_model = model or self._default_model
-        selected_top_k = top_k or self._default_top_k
         selected_retrieval_query = retrieval_query or message
-        selected_score_threshold = (
-            score_threshold if score_threshold is not None else self._default_score_threshold
-        )
-        candidate_k = selected_top_k * self._candidate_multiplier
-        selected_tenant_id = tenant_id.strip() if tenant_id else None
-        selected_bucket_ids = _normalize_values(bucket_ids or [])
-        selected_features = _normalize_features(features or [])
-        selected_source_types = _normalize_values(source_types or [])
-        selected_document_ids = _normalize_values(document_ids or [])
-        selected_source_paths = _normalize_values(source_paths or [])
-        has_document_filter = bool(selected_document_ids or selected_source_paths)
-        if not selected_features and not has_document_filter:
-            selected_features = self._feature_extractor.extract(selected_retrieval_query)
-        routing_decision = self._query_router.route(
-            message=selected_retrieval_query,
-            source_types=selected_source_types,
-            score_threshold=selected_score_threshold,
-            user_provided_source_types=bool(source_types),
-            user_provided_score_threshold=score_threshold is not None,
-        )
-        selected_source_types = routing_decision.source_types
-        selected_score_threshold = routing_decision.score_threshold
-        if score_threshold is None and _is_narrow_document_scope(
-            bucket_ids=selected_bucket_ids,
-            document_ids=selected_document_ids,
-            source_paths=selected_source_paths,
-        ):
-            selected_score_threshold = _lower_score_threshold(selected_score_threshold, 0.45)
         started_at = perf_counter()
-
-        query_vector = await self._ollama_client.embed(
-            self._embedding_model,
-            selected_retrieval_query,
-        )
-        sources, required_source_types, excel_supplement_count, docx_supplement_count = self._retrieve_sources(
-            query_vector=query_vector,
-            message=selected_retrieval_query,
-            candidate_k=candidate_k,
-            selected_top_k=selected_top_k,
-            selected_score_threshold=selected_score_threshold,
-            selected_tenant_id=selected_tenant_id,
-            selected_bucket_ids=selected_bucket_ids,
-            selected_features=selected_features,
-            selected_source_types=selected_source_types,
-            selected_document_ids=selected_document_ids,
-            selected_source_paths=selected_source_paths,
-            routing_hints=routing_decision.hints,
-        )
-        diversity = {
-            "max_sources_per_title": max_sources_per_title if max_sources_per_title is not None else 1,
-            "max_sources_per_source_type": max_sources_per_source_type,
-            "max_sources_per_source_path": max_sources_per_source_path,
-        }
-        sources = _apply_source_diversity(
-            sources,
-            max_sources_per_title=diversity["max_sources_per_title"],
-            max_sources_per_source_type=diversity["max_sources_per_source_type"],
-            max_sources_per_source_path=diversity["max_sources_per_source_path"],
+        search = await self.search(
+            query=selected_retrieval_query,
+            top_k=top_k,
+            score_threshold=score_threshold,
+            tenant_id=tenant_id,
+            bucket_ids=bucket_ids,
+            features=features,
+            source_types=source_types,
+            document_ids=document_ids,
+            source_paths=source_paths,
+            max_sources_per_title=max_sources_per_title,
+            max_sources_per_source_type=max_sources_per_source_type,
+            max_sources_per_source_path=max_sources_per_source_path,
         )
         targeted_sources = additional_sources or []
-        sources = _merge_sources(targeted_sources, sources)
+        sources = _merge_sources(targeted_sources, search.sources)
+        selected_top_k = top_k or self._default_top_k
         sources = sources[:selected_top_k]
-        context_policy = _build_context_policy(routing_decision.hints)
+        context_policy = _build_context_policy(search.query_hints)
         prompt_sources = _apply_context_policy(
             sources,
             context_policy=context_policy,
         )
-        extra_prompt_rules = _build_extra_prompt_rules(routing_decision.hints)
+        extra_prompt_rules = _build_extra_prompt_rules(search.query_hints)
         prompt = build_rag_prompt(
             question=message,
             sources=prompt_sources,
@@ -150,6 +213,17 @@ class RagService:
         )
 
         latency_ms = int((perf_counter() - started_at) * 1000)
+        diversity = {
+            "max_sources_per_title": max_sources_per_title if max_sources_per_title is not None else 1,
+            "max_sources_per_source_type": max_sources_per_source_type,
+            "max_sources_per_source_path": max_sources_per_source_path,
+        }
+        retrieval = {
+            **search.retrieval,
+            "additional_source_count": len(targeted_sources),
+            "additional_source_ids": [source.id for source in targeted_sources],
+            "final_top_k": len(sources),
+        }
 
         return RagChatResponse(
             model=selected_model,
@@ -157,26 +231,12 @@ class RagService:
             latency_ms=latency_ms,
             collection=self._qdrant_store.collection_name,
             sources=sources,
-            score_threshold=selected_score_threshold,
-            features=selected_features,
-            source_types=selected_source_types,
+            score_threshold=search.score_threshold,
+            features=search.features,
+            source_types=search.source_types,
             diversity=diversity,
-            retrieval={
-                "requested_top_k": selected_top_k,
-                "candidate_k": candidate_k,
-                "retrieval_query": selected_retrieval_query,
-                "required_source_types": required_source_types,
-                "tenant_id": selected_tenant_id,
-                "bucket_ids": selected_bucket_ids,
-                "document_ids": selected_document_ids,
-                "source_paths": selected_source_paths,
-                "excel_supplement_count": excel_supplement_count,
-                "docx_supplement_count": docx_supplement_count,
-                "additional_source_count": len(targeted_sources),
-                "additional_source_ids": [source.id for source in targeted_sources],
-                "final_top_k": len(sources),
-            },
-            query_hints=routing_decision.hints,
+            retrieval=retrieval,
+            query_hints=search.query_hints,
             context_policy=context_policy,
             prompt_tokens_estimate=_estimate_tokens(prompt),
         )
