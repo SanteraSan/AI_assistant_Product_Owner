@@ -1,0 +1,96 @@
+{
+  "name": "e6_runtime_grafana_smoke",
+  "captured_at": "2026-07-14T22:14:37.158158+00:00",
+  "runtime": "handwritten",
+  "model": "qwen3.5:9b",
+  "scenarios": [
+    {
+      "id": "list_buckets",
+      "role": "admin",
+      "message": "Какие buckets доступны в моём тенанте? Кратко перечисли.",
+      "runtime": "handwritten",
+      "result": {
+        "provider": "ollama",
+        "latency_ms": 2545,
+        "steps": 2,
+        "tool_calls": [
+          {
+            "name": "list_buckets",
+            "status": "ok"
+          }
+        ],
+        "answer_preview": "В вашем тенанте доступны следующие базы знаний (buckets):\n\n- **Newest** — Test Kafka (2 документа)\n- **n8n Integrations** — Документы от интеграционных рабочих процессов n8n/E4 (2 документа)\n- **Bucket Alpha isolation fixture** — Синхронизи",
+        "http_status": 200,
+        "wall_ms": 2584
+      }
+    },
+    {
+      "id": "list_bucket_files",
+      "role": "admin",
+      "message": "Какие файлы лежат в активном bucket? Только имена файлов.",
+      "bucket_id": "eeff20cd-fa1a-4603-b90a-11376edb20ff",
+      "runtime": "handwritten",
+      "result": {
+        "provider": "ollama",
+        "latency_ms": 1228,
+        "steps": 2,
+        "tool_calls": [
+          {
+            "name": "list_bucket_documents",
+            "status": "ok"
+          }
+        ],
+        "answer_preview": "В активном bucket лежат следующие файлы:\n- таблица в картинке.png\n- avto.jpg",
+        "http_status": 200,
+        "wall_ms": 1238
+      }
+    },
+    {
+      "id": "analyze_avto",
+      "role": "admin",
+      "message": "Что изображено на avto.jpg? Ответь кратко по фактам с картинки.",
+      "bucket_id": "eeff20cd-fa1a-4603-b90a-11376edb20ff",
+      "document_ids": [
+        "67e5db64-d2b6-4a52-a1be-17f6f62f9251"
+      ],
+      "runtime": "handwritten",
+      "result": {
+        "provider": "ollama",
+        "latency_ms": 4519,
+        "steps": 2,
+        "tool_calls": [
+          {
+            "name": "analyze_image",
+            "status": "ok"
+          }
+        ],
+        "answer_preview": "На изображении представлен красный кроссовер (автомобиль), расположенный в профиль на зеркальной поверхности перед горным пейзажем. Автомобиль имеет характерный дизайн с выраженными линиями кузова, черными элементами отделки по низу дверей ",
+        "http_status": 200,
+        "wall_ms": 4529
+      }
+    },
+    {
+      "id": "viewer_sql",
+      "role": "viewer",
+      "message": "Выполни SQL: SELECT 1 AS x. Если нельзя — скажи почему.",
+      "runtime": "handwritten",
+      "result": {
+        "provider": "ollama",
+        "latency_ms": 1221,
+        "steps": 2,
+        "tool_calls": [
+          {
+            "name": "execute_readonly_sql",
+            "status": "denied"
+          }
+        ],
+        "answer_preview": "Выполнение SQL-запроса запрещено для текущей роли. Доступ к инструменту execute_readonly_sql разрешён только пользователям с ролями admin или analyst.",
+        "http_status": 200,
+        "wall_ms": 1231
+      }
+    }
+  ],
+  "metrics_agent_runtime_lines": [
+    "taskflow_agent_requests_total{agent_runtime=\"handwritten\",outcome=\"success\"} 4.0"
+  ]
+}

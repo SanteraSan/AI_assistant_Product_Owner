@@ -70,14 +70,14 @@
     },
     {
       "id": 6,
-      "title": "Agent requests by outcome",
+      "title": "Agent requests by outcome + agent_runtime",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "sum by (outcome) (rate(taskflow_agent_requests_total[5m]))",
-          "legendFormat": "{{outcome}}",
+          "expr": "sum by (outcome, agent_runtime) (rate(taskflow_agent_requests_total[5m]))",
+          "legendFormat": "{{agent_runtime}} / {{outcome}}",
           "refId": "A"
         }
       ]
@@ -101,16 +101,52 @@
       ]
     },
     {
+      "id": 11,
+      "title": "Agent requests by agent_runtime",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps" },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (agent_runtime) (rate(taskflow_agent_requests_total[5m]))",
+          "legendFormat": "{{agent_runtime}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "Agent p95 latency by agent_runtime",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "s" },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, agent_runtime) (rate(taskflow_agent_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{agent_runtime}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "type": "row",
       "title": "Indexing",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
       "id": 8
     },
     {
       "id": 9,
       "title": "Indexing jobs by result",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
@@ -124,7 +160,7 @@
       "id": 10,
       "title": "Indexing jobs total (counter)",
       "type": "stat",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 27 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
@@ -144,5 +180,5 @@
   "timezone": "browser",
   "title": "TaskFlow Overview",
   "uid": "taskflow-overview",
-  "version": 1
+  "version": 2
 }

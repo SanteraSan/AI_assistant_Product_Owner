@@ -1,0 +1,154 @@
+{
+  "name": "e6_runtime_grafana_smoke",
+  "date": "2026-07-15",
+  "model": "qwen3.5:9b",
+  "metrics_label": "agent_runtime",
+  "note": "Label is agent_runtime (not runtime) to avoid clash with Prometheus scrape label runtime=host|compose.",
+  "grafana_panels": [
+    "Agent requests by outcome + agent_runtime",
+    "Agent requests by agent_runtime",
+    "Agent p95 latency by agent_runtime"
+  ],
+  "prometheus_observation": {
+    "query": "sum by (agent_runtime) (taskflow_agent_requests_total)",
+    "seen_series": [
+      "handwritten",
+      "langgraph"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "list_buckets",
+      "message": "Какие buckets доступны в моём тенанте? Кратко перечисли.",
+      "role": "admin",
+      "handwritten": {
+        "provider": "ollama",
+        "latency_ms": 2217,
+        "steps": 2,
+        "tool_calls": [
+          {
+            "name": "list_buckets",
+            "status": "ok"
+          }
+        ],
+        "answer_preview": "В вашем тенанте доступны следующие buckets:\n\n- **Newest** (Test Kafka) — 2 документа.\n- **n8n Integrations** (Documents delivered by n8n / integration workflows) — 2 документа.\n- **Bucket Alpha isolation fixture** — 1 документ.\n- **Bucket B",
+        "http_status": 200,
+        "wall_ms": 2248
+      },
+      "langgraph": {
+        "provider": "langgraph",
+        "latency_ms": 2656,
+        "steps": 2,
+        "tool_calls": [
+          {
+            "name": "list_buckets",
+            "status": "ok"
+          }
+        ],
+        "answer_preview": "В вашем тенанте доступны следующие buckets:\n\n- **Newest** (Test Kafka) — 2 документа.\n- **n8n Integrations** — документы от интеграционных рабочих процессов n8n — 2 документа.\n- **Bucket Alpha isolation fixture** — синхронизировано из Qdran",
+        "http_status": 200,
+        "wall_ms": 2685
+      }
+    },
+    {
+      "id": "list_bucket_files",
+      "message": "Какие файлы лежат в активном bucket? Только имена файлов.",
+      "role": "admin",
+      "handwritten": {
+        "provider": "ollama",
+        "latency_ms": 1302,
+        "steps": 2,
+        "tool_calls": [
+          {
+            "name": "list_bucket_documents",
+            "status": "ok"
+          }
+        ],
+        "answer_preview": "В активном бакете лежат два файла:\n- таблица в картинке.png\n- avto.jpg",
+        "http_status": 200,
+        "wall_ms": 1315
+      },
+      "langgraph": {
+        "provider": "langgraph",
+        "latency_ms": 1225,
+        "steps": 2,
+        "tool_calls": [
+          {
+            "name": "list_bucket_documents",
+            "status": "ok"
+          }
+        ],
+        "answer_preview": "В активном bucket лежат следующие файлы:\n- таблица в картинке.png\n- avto.jpg",
+        "http_status": 200,
+        "wall_ms": 1236
+      }
+    },
+    {
+      "id": "analyze_avto",
+      "message": "Что изображено на avto.jpg? Ответь кратко по фактам с картинки.",
+      "role": "admin",
+      "handwritten": {
+        "provider": "ollama",
+        "latency_ms": 3366,
+        "steps": 2,
+        "tool_calls": [
+          {
+            "name": "analyze_image",
+            "status": "ok"
+          }
+        ],
+        "answer_preview": "На изображении представлен красный кроссовер (SUV) в профиль. Автомобиль имеет современный дизайн с выраженными линиями кузова и характерными колесными дисками. Машина стоит на идеально гладкой поверхности, в которой отражается ее нижняя ча",
+        "http_status": 200,
+        "wall_ms": 3375
+      },
+      "langgraph": {
+        "provider": "langgraph",
+        "latency_ms": 7521,
+        "steps": 2,
+        "tool_calls": [
+          {
+            "name": "analyze_image",
+            "status": "ok"
+          }
+        ],
+        "answer_preview": "На изображении представлен красный кроссовер Mitsubishi Eclipse Cross, расположенный в профиль на отражающей поверхности. На заднем плане видны горные хребты под небом с мягкими тонами заката.",
+        "http_status": 200,
+        "wall_ms": 7533
+      }
+    },
+    {
+      "id": "viewer_sql",
+      "message": "Выполни SQL: SELECT 1 AS x. Если нельзя — скажи почему.",
+      "role": "viewer",
+      "handwritten": {
+        "provider": "ollama",
+        "latency_ms": 1176,
+        "steps": 2,
+        "tool_calls": [
+          {
+            "name": "execute_readonly_sql",
+            "status": "denied"
+          }
+        ],
+        "answer_preview": "Выполнение SQL-запроса запрещено для текущей роли. Для использования инструмента execute_readonly_sql требуется роль admin или analyst.",
+        "http_status": 200,
+        "wall_ms": 1184
+      },
+      "langgraph": {
+        "provider": "langgraph",
+        "latency_ms": 1196,
+        "steps": 2,
+        "tool_calls": [
+          {
+            "name": "execute_readonly_sql",
+            "status": "denied"
+          }
+        ],
+        "answer_preview": "Выполнение SQL-запроса запрещено для текущей роли. Доступ к инструменту execute_readonly_sql разрешен только пользователям с ролями admin или analyst.",
+        "http_status": 200,
+        "wall_ms": 1203
+      }
+    }
+  ],
+  "captured_at": "2026-07-14T22:11:33.770700+00:00"
+}

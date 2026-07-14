@@ -24,16 +24,19 @@ Status: **implemented (2026-07-15)**
 3. Minimal metrics — **done** (`/metrics`, `/metrics/summary`)
 4. Prometheus + Grafana ops UI + admin deep-link — **done**
 
-Next: **E6 lab** (LangGraph beside Agent).
+Next: **E6 lab closed** — discuss next enterprise/hardening slice.
 
 Defer: mega admin UI, audit export suite, full report generation, in-app product charts.
 
 ## E6 lab
 
-Status: **lab baseline implemented (2026-07-15)**
+Status: **closed (2026-07-15)** — lab done; product keeps handwritten Agent.
 
 - thin LangGraph adapter calling existing tools/RBAC — **done**
-- feature flag `AGENT_LANGGRAPH_ENABLED` (default off); handwritten Agent remains primary
+- feature flag `AGENT_LANGGRAPH_ENABLED` (default **off**); handwritten Agent remains primary
 - unit side-by-side parity tests — **done**
 - live API smoke handwritten vs langgraph (`qwen3.5:9b`) — **done** (see `research/e6_handwritten_vs_langgraph_smoke.json`)
-- optional next: UI toggle / Grafana label by `provider`
+- Grafana split by `agent_runtime` label + 4-scenario smoke — **done** (`research/e6_runtime_grafana_smoke.json`)
+- **Product decision:** do **not** switch default to LangGraph; linear few-step agent does not need graph complexity. Adapter stays as opt-in/educational path. No UI runtime toggle planned.
+
+Next discussion: what comes after E5.x + E7 slice + E6 lab close (remaining enterprise backlog / hardening).

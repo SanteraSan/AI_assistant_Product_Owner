@@ -127,10 +127,16 @@ class AppMetrics:
         self.rag_requests.inc(labels)
         self.rag_duration.observe(labels, duration_seconds)
 
-    def observe_agent(self, *, outcome: str, duration_seconds: float) -> None:
+    def observe_agent(
+        self,
+        *,
+        outcome: str,
+        duration_seconds: float,
+        agent_runtime: str = "handwritten",
+    ) -> None:
         if not self.enabled:
             return
-        labels = {"outcome": outcome}
+        labels = {"outcome": outcome, "agent_runtime": agent_runtime}
         self.agent_requests.inc(labels)
         self.agent_duration.observe(labels, duration_seconds)
 
@@ -168,13 +174,13 @@ class AppMetrics:
         _append_counter(
             lines,
             name="taskflow_agent_requests_total",
-            help_text="Agent chat requests by outcome",
+            help_text="Agent chat requests by outcome and agent_runtime",
             counter=self.agent_requests,
         )
         _append_histogram(
             lines,
             name="taskflow_agent_request_duration_seconds",
-            help_text="Agent chat latency in seconds",
+            help_text="Agent chat latency in seconds by outcome and agent_runtime",
             histogram=self.agent_duration,
         )
         _append_counter(

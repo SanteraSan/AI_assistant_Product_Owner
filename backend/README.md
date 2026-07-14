@@ -1369,7 +1369,7 @@ pytest tests/test_agent_orchestrator.py tests/test_agent_scope_tools.py tests/te
 
 ## E6 Lab: LangGraph Adapter (beside handwritten Agent)
 
-Статус: **lab baseline**. `AgentOrchestrator` остаётся default path.
+Статус: **lab closed**. Product default — `AgentOrchestrator` (`AGENT_LANGGRAPH_ENABLED=false`). LangGraph adapter оставлен как opt-in/учебный путь: шаги агента линейные и короткие, граф сейчас не нужен.
 
 ```bash
 export AGENT_LANGGRAPH_ENABLED=true
@@ -1378,10 +1378,10 @@ export AGENT_LANGGRAPH_ENABLED=true
 
 - `LangGraphAgentAdapter` — StateGraph (`call_model` → `execute_tools` → `finalize`) поверх тех же tools/RBAC/prompt;
 - response `provider=langgraph`; chat metadata `agent_runtime=langgraph|handwritten`;
-- цель: side-by-side trade-offs, не rewrite core.
+- metrics label `agent_runtime` (Grafana TaskFlow Overview); smoke `research/e6_runtime_grafana_smoke.json`.
 
 ```bash
-pytest tests/test_agent_orchestrator.py tests/test_langgraph_adapter.py -q
+pytest tests/test_agent_orchestrator.py tests/test_langgraph_adapter.py tests/test_metrics.py -q
 ```
 
 ## E3.4 Package V5 LoRA → Ollama Tag
@@ -1521,6 +1521,8 @@ In-process counters/histograms, Prometheus text без внешней завис
 | `GET /metrics/summary` | компактный JSON для smoke |
 
 Ключевые series: `taskflow_http_*`, `taskflow_rag_*`, `taskflow_agent_*`, `taskflow_indexing_jobs_total`. Worker на `:8002` отдаёт те же `/metrics` (indexing counters своего процесса).
+
+Agent series несут label `agent_runtime=handwritten|langgraph` (не `runtime` — тот уже занят Prometheus scrape label `host|compose`). Grafana dashboard **TaskFlow Overview** группирует Agent rate/p95 по `agent_runtime`.
 
 ```bash
 curl -s http://localhost:8000/metrics/summary | jq

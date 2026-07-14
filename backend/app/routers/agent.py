@@ -129,6 +129,7 @@ def create_agent_router(
                 metrics.observe_agent(
                     outcome=outcome,
                     duration_seconds=perf_counter() - started_at,
+                    agent_runtime=runtime,
                 )
 
     return router

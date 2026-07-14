@@ -417,7 +417,7 @@ Definition of done:
 
 ## Этап E6: Framework Adapters
 
-Статус: **lab baseline done (2026-07-15)** — LangGraph adapter beside handwritten Agent. См. `.cursor/plans/e5x_e7_e6_roadmap.plan.md`.
+Статус: **lab closed (2026-07-15)** — LangGraph попробовали side-by-side; **product default = handwritten `AgentOrchestrator`**. Adapter остаётся opt-in (`AGENT_LANGGRAPH_ENABLED`). См. `.cursor/plans/e5x_e7_e6_roadmap.plan.md` и `research/LESSONS_LEARNED.md` (E6 Decision).
 
 Цель:
 
@@ -435,13 +435,20 @@ Definition of done:
 
 - `LangGraphAgentAdapter` + `AGENT_LANGGRAPH_ENABLED`;
 - те же tools/RBAC; `provider=langgraph`;
-- unit parity vs handwritten orchestrator.
+- unit parity vs handwritten orchestrator;
+- live smoke + Grafana label `agent_runtime` (`research/e6_runtime_grafana_smoke.json`).
+
+Product decision:
+
+- оставляем самописный Agent: шаги линейные и их мало, граф сейчас — лишнее усложнение;
+- учебная цель lab выполнена; LangGraph выгоден в крупных проектах при ветвистой оркестрации, state/resume, step-level observability и едином паттерне нескольких workflow — при RBAC/tools на backend.
 
 Definition of done:
 
 - framework integration вызывает текущие backend services, а не заменяет их — **yes**;
-- evaluation scenarios подтверждают, что framework layer не обходит access controls — **unit deny case**;
-- side-by-side smoke: handwritten Agent vs adapter на одном сценарии — **unit done**; optional live UI next.
+- evaluation scenarios подтверждают, что framework layer не обходит access controls — **unit + live viewer SQL deny**;
+- side-by-side smoke: handwritten Agent vs adapter — **done** (live API + Grafana panels);
+- explicit keep-handwritten decision documented — **yes**.
 
 ## Этап E7: Product Hardening
 
@@ -475,7 +482,7 @@ Definition of done:
 5. E4 n8n integrations (disk + external DB slice) — **E4.1 done**; email/Jira later.
 6. E5.1 Kafka indexing — **done**; **E5.x** lifecycle events + Qdrant compat — **done (2026-07-15)**.
 7. **E7 slice** — MinIO + deploy/health + metrics + Grafana **done**.
-8. **E6** lab framework adapter beside Agent — **lab baseline done**; optional live UI smoke.
-9. E7 remainder + E4.x connectors as needed.
+8. **E6** lab framework adapter beside Agent — **closed**: lab + Grafana done; **handwritten remains default** (no UI toggle).
+9. E7 remainder + E4.x connectors / unblocked E2 as needed.
 
 Порядок после E5.1 согласован 2026-07-15: сначала укрепить platform (E5.x + узкий E7), затем лабораторный E6 для сравнения с рукописным Agent.

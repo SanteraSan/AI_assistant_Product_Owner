@@ -31,6 +31,49 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-15: E6 Decision — Handwritten Primary, LangGraph Lab Kept
+
+Контекст:
+- LangGraph lab + Grafana `agent_runtime` smoke пройдены; нужно зафиксировать product choice.
+
+Решение (product):
+- **оставляем самописный `AgentOrchestrator` как default** (`AGENT_LANGGRAPH_ENABLED=false`);
+- `LangGraphAgentAdapter` остаётся в репозитории как opt-in lab / учебный артефакт, без UI toggle;
+- усложнение графом сейчас не нужно: шаги линейные и их мало.
+
+Вывод (когда LangGraph выгоден в крупном проекте):
+- LangGraph выгоден, когда нужна **сложная ветвистая оркестрация**, **сохранение/продолжение state**, **step-level наблюдаемость** длинных цепочек и **единый паттерн** для нескольких agent-workflow в команде — при том, что доступ и tools остаются на стороне backend;
+- это не «сборка ответа красивее» и не автодетектор галлюцинаций: framework крутит workflow, а RBAC/evaluators/checks — по-прежнему наши;
+- для TaskFlow учебных целей lab достаточно: плюсы понятны, default path не усложняем.
+
+## 2026-07-15: Grafana Agent Runtime Split (handwritten vs LangGraph)
+
+Контекст:
+- после E6 lab нужны видимые в Grafana различия handwritten / LangGraph без второго порта.
+
+Решение:
+- `observe_agent(..., agent_runtime=handwritten|langgraph)` → label на `taskflow_agent_*`;
+- label назван `agent_runtime`, не `runtime`: в Prometheus scrape уже есть `runtime=host|compose`, иначе metric label уезжал в `exported_runtime`;
+- dashboard TaskFlow Overview: panels by `agent_runtime` + p95 latency;
+- smoke: `research/e6_runtime_grafana_smoke.json` (4 сценария, `qwen3.5:9b`).
+
+Прогон (оба runtime, один API `:8000`, flip `AGENT_LANGGRAPH_ENABLED` + restart):
+| scenario | handwritten tools | langgraph tools |
+|---|---|---|
+| list_buckets | list_buckets ok | list_buckets ok |
+| list_bucket_files (Newest) | list_bucket_documents ok | list_bucket_documents ok |
+| analyze_avto | analyze_image ok | analyze_image ok |
+| viewer_sql | execute_readonly_sql denied | execute_readonly_sql denied |
+
+Наблюдение:
+- `--reload` подхватывает код; **env flag** требует restart процесса;
+- Prometheus range уже видит series `agent_runtime=handwritten` и `langgraph`;
+- latency на analyze_avto: hw ~3.4s vs lg ~7.5s (не делать строгий вывод — Ollama variance).
+
+Вывод:
+- ops-сравнение runtime в Grafana готово;
+- product decision: handwritten primary (см. запись «E6 Decision»).
+
 ## 2026-07-15: Agent Scope Tools — list_bucket_documents + analyze_image
 
 Контекст:

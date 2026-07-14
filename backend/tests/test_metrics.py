@@ -10,7 +10,7 @@ def test_metrics_prometheus_contains_counters_after_observe() -> None:
         duration_seconds=0.12,
     )
     metrics.observe_rag(outcome="success", duration_seconds=1.5)
-    metrics.observe_agent(outcome="error", duration_seconds=0.4)
+    metrics.observe_agent(outcome="error", duration_seconds=0.4, agent_runtime="langgraph")
     metrics.observe_indexing(result="completed")
 
     text = metrics.render_prometheus().decode("utf-8")
@@ -20,6 +20,8 @@ def test_metrics_prometheus_contains_counters_after_observe() -> None:
     assert "taskflow_rag_requests_total" in text
     assert 'outcome="success"' in text
     assert "taskflow_agent_requests_total" in text
+    assert 'outcome="error"' in text
+    assert 'agent_runtime="langgraph"' in text
     assert "taskflow_indexing_jobs_total" in text
     assert 'result="completed"' in text
     assert "taskflow_http_request_duration_seconds_bucket" in text
