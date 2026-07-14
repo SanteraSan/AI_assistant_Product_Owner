@@ -1512,6 +1512,24 @@ curl -s http://localhost:8002/metrics/summary | jq
 
 Выключается через `METRICS_ENABLED=false`.
 
+## E7 Slice: Prometheus + Grafana (ops UI)
+
+Статус: **baseline**.
+
+Отдельный ops stack (не вкладка продукта):
+
+```bash
+docker compose --profile observability up -d
+# UI: http://localhost:3000  (admin/admin; anonymous Viewer enabled for lab)
+# Prometheus: http://localhost:9090
+```
+
+- scrape: `host.docker.internal:8000/8002` (локальный uvicorn/worker) и `backend-api` / `indexing-worker` (profile `deploy`);
+- dashboard: **TaskFlow Overview** (HTTP, RAG, Agent, indexing);
+- в product UI кнопка **Observability** только для роли `admin` → открывает Grafana (`VITE_GRAFANA_URL`, default `http://localhost:3000`).
+
+Profile `observability` также входит в `deploy`. Product charts во внутреннем UI — later.
+
 ## Seed Corpus And E1 ACL
 
 `scripts/ingest_seed_data.py` индексирует `data/raw` в Qdrant (`bucket_id=taskflow_seed`, path-based chunk ids). После E1 `/rag/chat` режет retrieval по доступным `document_assets`.

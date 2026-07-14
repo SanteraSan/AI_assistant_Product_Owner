@@ -34,6 +34,7 @@ import { BucketWorkspace } from '../../widgets/bucket-workspace/BucketWorkspace'
 import { ChatSidebar } from '../../widgets/chat-sidebar/ChatSidebar'
 import { ChatWorkspace } from '../../widgets/chat-workspace/ChatWorkspace'
 import { TopBar } from '../../widgets/top-bar/TopBar'
+import { GRAFANA_URL } from '../../shared/config/env'
 
 export function ChatPage() {
   const queryClient = useQueryClient()
@@ -647,6 +648,7 @@ export function ChatPage() {
           activeBucketId={selectedBucketId}
           activeView={activeView}
           buckets={buckets}
+          grafanaUrl={GRAFANA_URL}
           models={localModels}
           onChangeApproach={handleChangeApproach}
           onChangeChatMode={handleChangeChatMode}
@@ -661,6 +663,9 @@ export function ChatPage() {
           }}
           onLoginClick={() => login()}
           onLogoutClick={() => { void logout() }}
+          onOpenObservability={() => {
+            window.open(GRAFANA_URL, '_blank', 'noopener,noreferrer')
+          }}
           selectedApproach={selectedApproach}
           selectedChatMode={selectedChatMode}
           selectedModelId={selectedModelId}

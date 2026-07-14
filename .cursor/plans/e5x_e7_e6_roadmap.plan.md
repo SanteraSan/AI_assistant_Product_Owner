@@ -22,10 +22,11 @@ Status: **implemented (2026-07-15)**
 1. MinIO/S3 for uploads — **done**
 2. Compose/deploy profile + worker/API health — **done**
 3. Minimal metrics — **done** (`/metrics`, `/metrics/summary`)
+4. Prometheus + Grafana ops UI + admin deep-link — **done**
 
 Next: **E6 lab** (LangGraph beside Agent).
 
-Defer: mega admin UI, audit export suite, full report generation, Grafana dashboards.
+Defer: mega admin UI, audit export suite, full report generation, in-app product charts.
 
 ## E6 lab (after E7 slice)
 

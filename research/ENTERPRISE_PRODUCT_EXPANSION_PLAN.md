@@ -439,7 +439,7 @@ Definition of done:
 
 ## Этап E7: Product Hardening
 
-Статус: **E7 slice done** (MinIO + deploy/health + metrics); next **E6 lab**.
+Статус: **E7 slice done** (MinIO + deploy/health + metrics + Grafana ops); next **E6 lab**.
 
 Цель:
 
@@ -449,7 +449,8 @@ Definition of done:
 
 1. **MinIO/S3 for uploads** — **done (2026-07-15)**
 2. **Compose/deploy profile + health worker/API** — **done (2026-07-15)** (`--profile deploy`, worker `:8002`)
-3. **Minimal metrics** — **done (2026-07-15)** (`/metrics`, `/metrics/summary`; no Grafana yet)
+3. **Minimal metrics** — **done (2026-07-15)** (`/metrics`, `/metrics/summary`)
+4. **Prometheus + Grafana** — **done (2026-07-15)** (profile `observability`, admin deep-link; not in-app charts)
 
 ### Full E7 backlog (later)
 
@@ -467,7 +468,7 @@ Definition of done:
 4. E3 Tool-use/agents — **done** (2026-07-14).
 5. E4 n8n integrations (disk + external DB slice) — **E4.1 done**; email/Jira later.
 6. E5.1 Kafka indexing — **done**; **E5.x** lifecycle events + Qdrant compat — **done (2026-07-15)**.
-7. **E7 slice** — MinIO + deploy/health + metrics **done**; next **E6**.
+7. **E7 slice** — MinIO + deploy/health + metrics + Grafana **done**; next **E6**.
 8. **E6** lab framework adapter beside Agent.
 9. E7 remainder + E4.x connectors as needed.
 

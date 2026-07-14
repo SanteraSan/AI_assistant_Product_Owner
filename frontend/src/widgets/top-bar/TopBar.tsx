@@ -19,6 +19,7 @@ type TopBarProps = {
   selectedChatMode: ChatMode
   selectedModelId: string
   user: User | null
+  grafanaUrl?: string | null
   onChangeApproach: (approach: ModelApproach) => void
   onChangeChatMode: (mode: ChatMode) => void
   onChangeBucket: (bucketId: string) => void
@@ -26,12 +27,14 @@ type TopBarProps = {
   onChangeView: (view: 'chat' | 'buckets') => void
   onLoginClick: () => void
   onLogoutClick?: () => void
+  onOpenObservability?: () => void
 }
 
 export function TopBar({
   activeBucketId,
   activeView,
   buckets,
+  grafanaUrl,
   models,
   onChangeApproach,
   onChangeChatMode,
@@ -40,11 +43,15 @@ export function TopBar({
   onChangeView,
   onLoginClick,
   onLogoutClick,
+  onOpenObservability,
   selectedApproach,
   selectedChatMode,
   selectedModelId,
   user,
 }: TopBarProps) {
+  const showObservability =
+    Boolean(grafanaUrl) && Boolean(user?.roles.includes('admin')) && Boolean(onOpenObservability)
+
   return (
     <header className="flex min-h-20 items-center justify-between gap-4 border-b border-slate-200 bg-white px-6">
       <div className="flex items-center gap-3">
@@ -60,6 +67,11 @@ export function TopBar({
         >
           База знаний
         </Button>
+        {showObservability ? (
+          <Button onClick={onOpenObservability} variant="secondary">
+            Observability
+          </Button>
+        ) : null}
       </div>
 
       <div className="flex flex-1 items-center justify-end gap-3">

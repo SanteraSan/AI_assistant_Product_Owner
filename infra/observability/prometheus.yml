@@ -1,0 +1,41 @@
+# Prometheus scrape config for TaskFlow local lab.
+# Targets:
+# - host.docker.internal → uvicorn / worker on the host
+# - backend-api / indexing-worker → compose --profile deploy
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: taskflow-api-host
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+        labels:
+          service: api
+          runtime: host
+
+  - job_name: taskflow-worker-host
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8002"]
+        labels:
+          service: indexing-worker
+          runtime: host
+
+  - job_name: taskflow-api-compose
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend-api:8000"]
+        labels:
+          service: api
+          runtime: compose
+
+  - job_name: taskflow-worker-compose
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["indexing-worker:8002"]
+        labels:
+          service: indexing-worker
+          runtime: compose

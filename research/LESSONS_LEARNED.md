@@ -31,6 +31,26 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-15: E7 Slice — Prometheus + Grafana Ops UI
+
+Контекст:
+- metrics scrape-ready; для enterprise-демо и будущего E6 сравнения нужен ops dashboard вне product chat UI.
+
+Решение:
+- compose profile `observability` (+ в `deploy`): Prometheus `:9090`, Grafana `:3000`;
+- provisioning: datasource + dashboard **TaskFlow Overview**;
+- scrape host (`host.docker.internal:8000/8002`) и compose API/worker;
+- frontend: admin-only deep-link **Observability** → `VITE_GRAFANA_URL` (не вкладка как Чат);
+- in-app product charts — later / отдельно.
+
+Проверки:
+- `docker compose --profile observability up -d` → Grafana `:3000` 200, Prometheus `:9090` ready;
+- dashboard **TaskFlow Overview** provisioned; scrape `taskflow-api-host` up when uvicorn on host.
+
+Вывод:
+- ops остаётся снаружи продукта; PO UI не засоряется;
+- следующий шаг: **E6 lab**.
+
 ## 2026-07-15: E7 Slice — Minimal Metrics
 
 Контекст:
@@ -48,7 +68,7 @@
 
 Вывод:
 - для demo/smoke достаточно curl summary; scrape-ready формат уже есть;
-- следующий шаг по roadmap: **E6 lab** (LangGraph рядом с Agent).
+- следующий шаг: Prometheus + Grafana ops UI, затем **E6 lab**.
 
 ## 2026-07-15: E7 Slice — Deploy Profile + API/Worker Health
 
