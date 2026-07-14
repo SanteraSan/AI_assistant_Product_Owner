@@ -64,6 +64,7 @@ def create_agent_router(
             )
             memory = conversation_context.get("prompt_memory")
             memory_context = memory if isinstance(memory, dict) else None
+            retrieval_scope = _agent_retrieval_scope(payload)
 
             try:
                 result = await runner.run(
@@ -72,6 +73,7 @@ def create_agent_router(
                     request_id=request_id,
                     model=payload.model,
                     memory_context=memory_context,
+                    retrieval_scope=retrieval_scope,
                 )
             except OllamaOverloadedError as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -111,6 +113,7 @@ def create_agent_router(
                     "active_bucket_id": payload.active_bucket_id,
                     "bucket_ids": payload.bucket_ids,
                     "document_ids": payload.document_ids,
+                    "retrieval_scope": retrieval_scope,
                     "tool_calls": result.tool_calls,
                     "sources": result.sources,
                     "steps": result.steps,
@@ -129,3 +132,19 @@ def create_agent_router(
                 )
 
     return router
+
+
+def _agent_retrieval_scope(payload: AgentChatRequest) -> dict[str, object]:
+    bucket_ids = [item.strip() for item in payload.bucket_ids if item and item.strip()]
+    document_ids = [item.strip() for item in payload.document_ids if item and item.strip()]
+    active = (payload.active_bucket_id or "").strip() or None
+    if active and active not in bucket_ids:
+        bucket_ids = [active, *bucket_ids]
+    scope: dict[str, object] = {}
+    if active:
+        scope["active_bucket_id"] = active
+    if bucket_ids:
+        scope["bucket_ids"] = bucket_ids
+    if document_ids:
+        scope["document_ids"] = document_ids
+    return scope

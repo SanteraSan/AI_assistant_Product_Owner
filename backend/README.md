@@ -1357,12 +1357,14 @@ pytest tests/test_sql_tools.py -q
 
 - `POST /agent/chat` — thin router + `AgentOrchestrator` (portable JSON tool loop)
 - Memory (`prompt_memory`) входит в agent prompt, не в tools
+- UI scope (`active_bucket_id` / `bucket_ids` / `document_ids`) прокидывается в tools via `extras`
+- Tools: + `list_bucket_documents`, + `analyze_image` (vision digest)
 - Response: `response`, `tool_calls[]`, `sources[]`, `steps`
 - Frontend: режим **Agent** в TopBar; правая панель Tool trace
 
 ```bash
-pytest tests/test_agent_orchestrator.py -q
-# UI: Режим → Agent → вопрос вроде «какие у меня права?» / «какие buckets есть?»
+pytest tests/test_agent_orchestrator.py tests/test_agent_scope_tools.py tests/test_analyze_image_tool.py -q
+# UI: Режим → Agent → «какие файлы в бакете?» / «что на картинке?»
 ```
 
 ## E6 Lab: LangGraph Adapter (beside handwritten Agent)

@@ -205,6 +205,10 @@ async def test_rag_search_uses_scoped_document_ids(monkeypatch: pytest.MonkeyPat
             del user, bucket_id
             return None
 
+        async def list_available_documents(self, *, user: UserContext):
+            del user
+            return []
+
     class _SearchResult:
         sources = [
             SourceChunk(

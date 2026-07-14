@@ -21,7 +21,9 @@ class ToolPermission:
 TOOL_PERMISSIONS: dict[str, ToolPermission] = {
     "get_user_context": ToolPermission(any_authenticated=True),
     "list_buckets": ToolPermission(any_authenticated=True),
+    "list_bucket_documents": ToolPermission(any_authenticated=True),
     "get_document_status": ToolPermission(any_authenticated=True),
+    "analyze_image": ToolPermission(any_authenticated=True),
     "rag_search": ToolPermission(any_authenticated=True),
     "text_to_sql": ToolPermission(roles=frozenset({"analyst", "admin"})),
     "execute_readonly_sql": ToolPermission(roles=frozenset({"analyst", "admin"})),

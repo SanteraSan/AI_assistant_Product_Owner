@@ -48,6 +48,7 @@ class AgentOrchestrator:
         request_id: str | None = None,
         model: str | None = None,
         memory_context: dict[str, object] | None = None,
+        retrieval_scope: dict[str, object] | None = None,
     ) -> AgentRunResult:
         started = perf_counter()
         selected_model = (model or self._default_model).strip()
@@ -55,11 +56,13 @@ class AgentOrchestrator:
         tool_calls_audit: list[dict[str, Any]] = []
         sources: list[dict[str, Any]] = []
         transcript: list[dict[str, Any]] = [{"role": "user", "content": message}]
+        tool_extras = dict(retrieval_scope or {})
 
         for step in range(1, self._max_steps + 1):
             prompt = _build_agent_prompt(
                 tool_specs=self._tool_registry.list_specs(),
                 memory_context=memory_context,
+                retrieval_scope=retrieval_scope,
                 transcript=transcript,
             )
             raw = await self._ollama_client.generate(
@@ -102,6 +105,7 @@ class AgentOrchestrator:
                         arguments=call.arguments,
                         user=user,
                         request_id=req_id,
+                        extras=tool_extras,
                     )
                     tool_calls_audit.append(execution.audit_entry)
                     _collect_sources(execution.result.data, sources)
@@ -165,6 +169,7 @@ def _build_agent_prompt(
     *,
     tool_specs: list[dict[str, Any]],
     memory_context: dict[str, object] | None,
+    retrieval_scope: dict[str, object] | None,
     transcript: list[dict[str, Any]],
 ) -> str:
     tools_json = json.dumps(tool_specs, ensure_ascii=False, indent=2)
@@ -173,6 +178,12 @@ def _build_agent_prompt(
         memory_block = (
             "\nConversation memory (context, not evidence):\n"
             f"{json.dumps(memory_context, ensure_ascii=False)}\n"
+        )
+    scope_block = ""
+    if retrieval_scope:
+        scope_block = (
+            "\nUI retrieval scope (prefer for tools; not evidence by itself):\n"
+            f"{json.dumps(retrieval_scope, ensure_ascii=False)}\n"
         )
     transcript_text = "\n".join(
         f"{item['role'].upper()}: {item['content']}" for item in transcript
@@ -183,16 +194,19 @@ def _build_agent_prompt(
 - Отвечай ТОЛЬКО одним JSON-объектом.
 - Чтобы вызвать tools: {{"tool_calls":[{{"name":"...","arguments":{{...}}}}]}}
 - Чтобы закончить: {{"final_answer":"...","tool_calls":[]}}
-- Evidence только из tool results (особенно rag_search / SQL). Memory — не evidence.
-- Не выдумывай документы или SQL-результаты.
+- Evidence только из tool results (особенно rag_search / analyze_image / SQL). Memory — не evidence.
+- Не выдумывай документы, SQL-результаты или содержимое картинок.
 - Если tool вернул denied/invalid_input — объясни ограничение или попробуй другой tool.
+- Вопросы про список файлов в бакете: list_bucket_documents (не list_buckets).
+- Вопросы «что на картинке / какого цвета / что изображено»: analyze_image.
 - Вопросы про статус/доступность файла по имени (moto.jpg, AGENTS.md): вызывай
   get_document_status с arguments.file_name. Не проси UUID, если имя файла уже известно.
 - document_id передавай только когда пользователь дал UUID.
+- Если UI scope задаёт bucket_ids/document_ids — используй их (или оставь пустыми, tools подставят scope).
 
 Доступные tools:
 {tools_json}
-{memory_block}
+{memory_block}{scope_block}
 Диалог:
 {transcript_text}
 

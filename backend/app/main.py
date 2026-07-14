@@ -174,6 +174,10 @@ tool_registry = build_default_tool_registry(
     sql_execution_service=sql_execution_service,
     text_to_sql_service=text_to_sql_service,
     sql_tools_enabled=settings.sql_tool_enabled,
+    ollama_client=ollama_client,
+    object_storage=object_storage,
+    image_vision_enabled=settings.image_vision_enabled,
+    image_vision_model=settings.image_vision_model,
 )
 tool_executor = ToolExecutor(
     registry=tool_registry,

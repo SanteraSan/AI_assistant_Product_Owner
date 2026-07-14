@@ -31,6 +31,24 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-15: Agent Scope Tools — list_bucket_documents + analyze_image
+
+Контекст:
+- live Agent QA: «что на картинке» → каталог corpus paths; «файлы в бакете» → list_buckets.
+
+Решение:
+- UI `active_bucket_id`/`bucket_ids`/`document_ids` → `retrieval_scope` → tool `extras`;
+- tool `list_bucket_documents` (inventory файлов bucket);
+- tool `analyze_image` (targeted vision digest, без обхода ACL);
+- prompt: явное различие list_buckets vs list_bucket_documents vs analyze_image;
+- `rag_search` подставляет UI scope, если args пустые.
+
+Проверки:
+- unit: scope tools + analyze_image + orchestrator/langgraph regression.
+
+Вывод:
+- Agent перестаёт «угадывать» inventory/vision через нерелевантный rag corpus dump.
+
 ## 2026-07-15: E6 Live Smoke — Handwritten vs LangGraph
 
 Контекст:

@@ -34,6 +34,7 @@ class AgentGraphState(TypedDict, total=False):
     request_id: str
     model: str
     memory_context: dict[str, object] | None
+    retrieval_scope: dict[str, object] | None
     transcript: list[dict[str, Any]]
     tool_calls_audit: list[dict[str, Any]]
     sources: list[dict[str, Any]]
@@ -102,6 +103,7 @@ class LangGraphAgentAdapter:
         request_id: str | None = None,
         model: str | None = None,
         memory_context: dict[str, object] | None = None,
+        retrieval_scope: dict[str, object] | None = None,
     ) -> AgentRunResult:
         started = perf_counter()
         selected_model = (model or self._default_model).strip()
@@ -112,6 +114,7 @@ class LangGraphAgentAdapter:
             "request_id": req_id,
             "model": selected_model,
             "memory_context": memory_context,
+            "retrieval_scope": retrieval_scope,
             "transcript": [{"role": "user", "content": message}],
             "tool_calls_audit": [],
             "sources": [],
@@ -154,6 +157,7 @@ class LangGraphAgentAdapter:
         prompt = _build_agent_prompt(
             tool_specs=self._tool_registry.list_specs(),
             memory_context=state.get("memory_context"),
+            retrieval_scope=state.get("retrieval_scope"),
             transcript=transcript,
         )
         raw = await self._ollama_client.generate(
@@ -227,6 +231,7 @@ class LangGraphAgentAdapter:
                 arguments=dict(call.get("arguments") or {}),
                 user=user,
                 request_id=req_id,
+                extras=dict(state.get("retrieval_scope") or {}),
             )
             tool_calls_audit.append(execution.audit_entry)
             _collect_sources(execution.result.data, sources)
