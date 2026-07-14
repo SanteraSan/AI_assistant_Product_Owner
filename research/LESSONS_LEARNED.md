@@ -31,6 +31,24 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-15: E7 Closed — Grafana UI Smoke Confirmed
+
+Контекст:
+- после Prometheus/Grafana нужна пользовательская проверка, что дашборды реально двигаются.
+
+Наблюдение:
+- upload картинки + вопрос по ней → двигаются HTTP / RAG (и связанные) панели;
+- **Indexing jobs by result** остаётся ~0 при chat/vision: метрика считает только `process_job` completed/failed, не RAG;
+- flat zero line в Grafana — живой scrape rate=0, не «сломанный» график.
+
+Решение / статус:
+- E7 slice (MinIO, deploy/health, metrics, Grafana+admin deep-link) **закрыт**;
+- commits: `d0bc47c`, `65ace4c`.
+
+Вывод:
+- ops UI полезен для обучения и будущего E6 сравнения;
+- следующий шаг: **E6 lab** (LangGraph adapter beside handwritten Agent).
+
 ## 2026-07-15: E7 Slice — Prometheus + Grafana Ops UI
 
 Контекст:
