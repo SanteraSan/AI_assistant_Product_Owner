@@ -55,6 +55,15 @@ class Settings(BaseSettings):
     service_jwt_secret: str = "taskflow-bff-service-jwt-dev-secret"
     service_jwt_issuer: str = "taskflow-bff"
     service_jwt_audience: str = "taskflow-backend"
+    # E3.2 Text-to-SQL / readonly SQL tools
+    sql_tool_enabled: bool = True
+    sql_tool_row_limit: int = 200
+    sql_tool_timeout_seconds: float = 10.0
+    # Preferred Ollama tag for LoRA adapter (create via Modelfile); falls back if missing.
+    text_to_sql_model: str = "qwen2_5_coder_7b_v5_projection_steps400"
+    text_to_sql_fallback_model: str = "qwen2.5-coder:7b"
+    # Comma-separated override; empty → DEFAULT_SQL_TOOL_ALLOWED_TABLES
+    sql_tool_allowed_tables: str = ""
 
     @field_validator("rag_score_threshold", mode="before")
     @classmethod
@@ -79,6 +88,8 @@ class Settings(BaseSettings):
         "rate_limit_window_seconds",
         "ollama_max_concurrency",
         "ollama_queue_timeout_seconds",
+        "sql_tool_row_limit",
+        "sql_tool_timeout_seconds",
     )
     @classmethod
     def _positive_number(cls, value: int | float) -> int | float:
@@ -113,6 +124,8 @@ class Settings(BaseSettings):
         "postgres_dsn",
         "default_tenant_id",
         "default_bucket_id",
+        "text_to_sql_model",
+        "text_to_sql_fallback_model",
     )
     @classmethod
     def _non_empty_string(cls, value: str) -> str:

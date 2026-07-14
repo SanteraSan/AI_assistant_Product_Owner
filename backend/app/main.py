@@ -56,6 +56,9 @@ from app.services.rate_limiter import RedisRateLimiter
 from app.services.rag_log_service import RagLogService
 from app.services.rag_service import RagService
 from app.services.redis_service import RedisService
+from app.services.sql_execution_service import SqlExecutionService
+from app.services.sql_schema_card import parse_allowed_tables
+from app.services.text_to_sql_service import TextToSqlService
 from app.services.tools import ToolExecutor, build_default_tool_registry
 
 
@@ -127,9 +130,26 @@ bucket_service = BucketService(
     session_factory=db_session_factory,
     raw_data_dir=settings.raw_data_dir,
 )
+_sql_allowed_tables = parse_allowed_tables(settings.sql_tool_allowed_tables)
+sql_execution_service = SqlExecutionService(
+    postgres_dsn=settings.postgres_dsn,
+    allowed_tables=_sql_allowed_tables,
+    row_limit=settings.sql_tool_row_limit,
+    timeout_seconds=settings.sql_tool_timeout_seconds,
+)
+text_to_sql_service = TextToSqlService(
+    ollama_client=ollama_client,
+    sql_execution_service=sql_execution_service,
+    preferred_model=settings.text_to_sql_model,
+    fallback_model=settings.text_to_sql_fallback_model,
+    allowed_tables=_sql_allowed_tables,
+)
 tool_registry = build_default_tool_registry(
     bucket_service=bucket_service,
     rag_service=rag_service,
+    sql_execution_service=sql_execution_service,
+    text_to_sql_service=text_to_sql_service,
+    sql_tools_enabled=settings.sql_tool_enabled,
 )
 tool_executor = ToolExecutor(
     registry=tool_registry,

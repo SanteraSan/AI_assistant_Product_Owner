@@ -1335,6 +1335,23 @@ pytest tests/test_tools_foundation.py -q
 alembic upgrade head
 ```
 
+## E3.2 Text-to-SQL Tools
+
+Readonly SQL path for agents:
+
+- `SqlExecutionService` — validate (`sql_validator` + allowlist) → `asyncpg` readonly transaction + row limit wrap
+- `TextToSqlService` — schema card + LLM generate; preferred model `TEXT_TO_SQL_MODEL` (LoRA Ollama tag) with fallback `TEXT_TO_SQL_FALLBACK_MODEL`
+- Tools: `text_to_sql` (generate+validate), `execute_readonly_sql` (validate+execute)
+- Allowlist: analytics tables only (`sql_schema_card.DEFAULT_SQL_TOOL_ALLOWED_TABLES`); override via `SQL_TOOL_ALLOWED_TABLES`
+
+Config keys: `SQL_TOOL_ENABLED`, `SQL_TOOL_ROW_LIMIT`, `SQL_TOOL_TIMEOUT_SECONDS`, `TEXT_TO_SQL_MODEL`, `TEXT_TO_SQL_FALLBACK_MODEL`.
+
+```bash
+pytest tests/test_sql_tools.py -q
+```
+
+Чтобы использовать LoRA как Ollama model, создайте tag из adapter/Modelfile с именем `qwen2_5_coder_7b_v5_projection_steps400` (или задайте `TEXT_TO_SQL_MODEL`). Если tag отсутствует — автоматический fallback на `qwen2.5-coder:7b` + warning в tool result.
+
 ## E0 UI Skeleton: Buckets And Document Registry API
 
 Для первого product UI добавлен минимальный API слой для управления buckets и document registry.

@@ -31,6 +31,22 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E3.2 Text-to-SQL Controlled Tools
+
+Контекст:
+- после E3.1 нужны SQL tools без открытия всего ORM schema;
+- LoRA adapter уже обучен, но может не быть поднят как Ollama tag.
+
+Решение:
+- allowlist analytics tables + schema card;
+- `SqlExecutionService` readonly + row limit;
+- `text_to_sql` / `execute_readonly_sql` с RBAC analyst/admin;
+- preferred LoRA model name + fallback на `qwen2.5-coder:7b` при 404/400.
+
+Вывод:
+- validator+allowlist остаются обязательны даже с LoRA;
+- fallback делает tool usable без ручного Modelfile на каждой машине.
+
 ## 2026-07-14: E3.1 Tools Foundation
 
 Контекст:
