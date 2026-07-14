@@ -171,6 +171,9 @@ async def test_agent_orchestrator_ignores_premature_final_answer_with_tools() ->
     assert result.answer != "[]"
     assert result.steps == 2
 
+
+@pytest.mark.anyio
+async def test_agent_orchestrator_direct_final_answer() -> None:
     registry = ToolRegistry()
     registry.register(_ListBucketsTool())
     executor = ToolExecutor(registry=registry)
