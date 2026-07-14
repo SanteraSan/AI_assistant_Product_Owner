@@ -177,7 +177,7 @@ Definition of done:
 
 ## Этап E1: Keycloak, BFF And RBAC
 
-Статус: **in progress** — E1.1 Keycloak local baseline готов (2026-07-14).
+Статус: **in progress** — E1.1 Keycloak + E1.2 BFF session/proxy готовы (2026-07-14). Следующий шаг — backend service JWT auth + RBAC filters.
 
 Цель:
 

@@ -31,6 +31,27 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E1.2 BFF Session And Service JWT
+
+Контекст:
+- после local Keycloak нужен session edge: SPA не должна владеть identity headers;
+- BFF должен завершать OIDC login и проксировать API с signed identity.
+
+Наблюдение:
+- FastAPI BFF на `:8001` с Redis session store достаточно для local baseline;
+- PKCE + httpOnly cookie + CSRF на mutating methods закрывают browser attack surface без SPA PKCE;
+- unit tests (6) покрывают PKCE, service JWT, login redirect, callback→`/auth/me`, proxy 401/403;
+- live smoke: `/health/live`, `/auth/me`→401, `/auth/login`→Keycloak 302, login state в Redis `bff:login:*`.
+
+Решение:
+- добавлен сервис `bff/` (auth routes + `/api` proxy);
+- BFF→backend identity = short-lived HS256 service JWT (`iss=taskflow-bff`, `aud=taskflow-backend`);
+- client `X-User-*` headers снимаются на proxy и не доверяются.
+
+Вывод:
+- E1.2 даёт правильную trust boundary: browser→BFF cookie, BFF→backend signed JWT;
+- следующий шаг — backend принимает только service JWT и авторизует scope до RAG prompt.
+
 ## 2026-07-14: E1.1 Local Keycloak Baseline
 
 Контекст:
