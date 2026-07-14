@@ -31,6 +31,22 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: Agent Smoke — Text-to-SQL LoRA Tag
+
+Контекст:
+- E3.4 поднял Ollama tag `qwen2_5_coder_7b_v5_projection_steps400`;
+- нужен end-to-end agent path: tool choice → `text_to_sql` (LoRA) → `execute_readonly_sql` + RBAC deny для viewer.
+
+Наблюдение:
+- analyst + agent model `gemma4:12b`: вопрос про count `evaluation_runs` / `status=completed`;
+- `text_to_sql` → `model_used=qwen2_5_coder_7b_v5_projection_steps400`, `fallback_used=False`, SQL валиден;
+- `execute_readonly_sql` → `rows=[{'count': 109}]`, ответ агента grounded в tool result;
+- viewer: `text_to_sql` → `denied`, агент честно сообщает про роли admin/analyst.
+
+Вывод:
+- LoRA tag реально участвует в agent loop, не только в прямом `TextToSqlService` smoke;
+- orchestrator model (`gemma4`) и SQL model (LoRA) — разные слои; tool-choice и SQL generation стоит оценивать раздельно.
+
 ## 2026-07-14: Seed ACL Bridge + Three-Model RAG Regression
 
 Контекст:
