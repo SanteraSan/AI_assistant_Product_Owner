@@ -367,11 +367,21 @@ n8n: файл с диска + строки из внешней/синтетич�
 
 ## Этап E5: Kafka And Event-Driven Ingestion
 
+Статус: **E5.1 done + UI confirmed (2026-07-15)** — Redpanda + worker; image vision indexing via Kafka path. Детали: `.cursor/plans/e5_kafka_indexing.plan.md`, deps: `research/E5_DEPENDENCIES.md`.
+
 Цель:
 
-- поддержать high-volume document и evaluation workloads через durable event streams.
+- поддержать durable async document indexing через event stream (не «миллионы чатов»).
 
-Candidate events:
+### E5.1 scope
+
+- event `indexing.requested` (`job_ids`) при commit / ingest / retry;
+- Redpanda (Kafka API) profile `e5`, host `localhost:19092`;
+- worker `python -m scripts.run_indexing_worker`;
+- `KAFKA_ENABLED=false` → прежний `BackgroundTasks` fallback;
+- Postgres `document_indexing_jobs` остаётся source of truth.
+
+Candidate events (позже):
 
 - `document.uploaded`;
 - `document.parsed`;
@@ -384,7 +394,7 @@ Candidate events:
 
 Consumers:
 
-- ingestion worker;
+- ingestion worker (E5.1);
 - OCR/vision worker;
 - embedding worker;
 - evaluation worker;
@@ -396,6 +406,8 @@ Definition of done:
 - processing state остаётся persisted в PostgreSQL;
 - failed events можно retry-ить или inspect-ить;
 - Kafka используется для durable workflow events, а Redis остаётся полезен для rate limits и lightweight coordination.
+
+**Проверено в UI (2026-07-15):** upload картинки → worker `indexing.requested` (vision generate + embeddings + Qdrant) → RAG `qwen3.5:9b` grounded по bucket.
 
 ## Этап E6: Framework Adapters
 
@@ -438,7 +450,7 @@ Scope:
 3. E2 Model Gateway и external providers — **blocked** (VPN / Gemini unreachable; kickoff сохранён).
 4. E3 Tool-use/agents — **done** (2026-07-14).
 5. E4 n8n integrations (disk + external DB slice) — **E4.1 done**; email/Jira later.
-6. E5 Kafka event backbone.
+6. E5 Kafka event backbone — **E5.1 done** (`indexing.requested` + worker); multi-stage topics later.
 7. E6 framework adapters.
 8. E7 product hardening.
 

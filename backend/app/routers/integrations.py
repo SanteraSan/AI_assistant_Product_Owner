@@ -7,6 +7,7 @@ from app.models.integrations import ExternalDbSyncResponse, IntegrationIngestRes
 from app.services.access_policy import UserContext
 from app.services.document_indexing_service import DocumentIndexingService
 from app.services.external_db_sync_service import ExternalDbSyncService
+from app.services.indexing_job_dispatcher import IndexingJobDispatcher
 from app.services.integration_ingest_service import IntegrationIngestService
 
 
@@ -18,6 +19,7 @@ def create_integrations_router(
     integration_ingest_service: IntegrationIngestService,
     external_db_sync_service: ExternalDbSyncService,
     document_indexing_service: DocumentIndexingService | None = None,
+    indexing_job_dispatcher: IndexingJobDispatcher | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/integrations", tags=["integrations"])
 
@@ -70,7 +72,14 @@ def create_integrations_router(
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        if document_indexing_service is not None and indexing_job_ids:
+        if indexing_job_dispatcher is not None:
+            await indexing_job_dispatcher.dispatch(
+                job_ids=indexing_job_ids,
+                background_tasks=background_tasks,
+                tenant_id=user.tenant_id,
+                request_id=request.headers.get("x-request-id"),
+            )
+        elif document_indexing_service is not None and indexing_job_ids:
             background_tasks.add_task(document_indexing_service.process_jobs, indexing_job_ids)
 
         return IntegrationIngestResponse(

@@ -31,6 +31,49 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-15: E5.1 UI — Kafka Indexing + Vision Image Confirmed
+
+Контекст:
+- E5.1 код и curl-smoke уже были; пользователь проверил product UI с картинкой при живом worker.
+
+Наблюдение (UI + worker logs):
+- upload image → `indexing.requested` job `2a26601c-…` / event `ee0ce4d2-…`;
+- worker: `api/generate` ×2 (vision digest) → embeddings → Qdrant upsert → `Completed`;
+- RAG (`qwen3.5:9b`, bucket scope): grounded описание красного кроссовера на фоне гор/воды — без «файла нет»;
+- предупреждение `qdrant_client 1.18` vs server `1.12` — шум совместимости, на smoke не повлияло.
+
+Достижение:
+- E5.1 DoD закрыт end-to-end: durable async indexing + multimodal evidence + RAG в UI;
+- portfolio narrative: «API принимает → Kafka → worker (в т.ч. vision) → searchable → chat».
+
+Future hardening:
+- выровнять версии Qdrant client/server;
+- multi-stage topics / отдельный OCR worker;
+- transactional outbox если нужен stronger publish guarantee.
+
+## 2026-07-15: E5.1 Kickoff — Durable Indexing via Redpanda
+
+Контекст:
+- E4.1 UI-confirmed; следующий слой — async ingestion backbone;
+- цель E5 не «миллионы чатов», а durable обработка indexing jobs.
+
+Решение (E5.1 MVP):
+- Redpanda (Kafka API) profile `e5`, bootstrap `localhost:19092`;
+- event `indexing.requested` с `job_ids`;
+- `IndexingJobDispatcher`: Kafka publish **или** BackgroundTasks fallback;
+- worker `scripts/run_indexing_worker.py` → существующий `DocumentIndexingService`;
+- skip already-`completed` jobs для идемпотентности replay.
+
+Smoke (2026-07-15):
+- ingest `e5_kafka_smoke.txt` → job `0b63d19c-…` published;
+- worker received `indexing.requested` event_id `4963c64f-…`, embedded + Qdrant upsert;
+- `/documents/{id}/status` → `indexed` (poll 2).
+- UI image confirmation: см. запись выше.
+
+Вывод:
+- API принимает документ и публикует событие; статус живёт в Postgres;
+- полный multi-stage pipeline (parse/chunk/embed topics) — later hardening.
+
 ## 2026-07-15: E4.1 UI Chat — Удачная Интеграция Подтверждена
 
 Контекст:

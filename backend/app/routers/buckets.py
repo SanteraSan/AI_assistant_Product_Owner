@@ -18,6 +18,7 @@ from app.models.bucket import (
 from app.services.access_policy import UserContext, parse_roles
 from app.services.bucket_service import BucketService
 from app.services.document_indexing_service import DocumentIndexingService
+from app.services.indexing_job_dispatcher import IndexingJobDispatcher
 
 
 DOCUMENT_VISIBILITIES = {"private", "role", "tenant", "team", "public"}
@@ -27,10 +28,33 @@ def create_bucket_router(
     *,
     bucket_service: BucketService,
     document_indexing_service: DocumentIndexingService | None = None,
+    indexing_job_dispatcher: IndexingJobDispatcher | None = None,
     default_tenant_id: str,
 ) -> APIRouter:
     del default_tenant_id  # tenant comes from authenticated service JWT only
     router = APIRouter(tags=["buckets"])
+
+    async def _dispatch_indexing(
+        *,
+        job_ids: list[str],
+        background_tasks: BackgroundTasks,
+        user: UserContext,
+        request: Request | None = None,
+    ) -> None:
+        if indexing_job_dispatcher is not None:
+            await indexing_job_dispatcher.dispatch(
+                job_ids=job_ids,
+                background_tasks=background_tasks,
+                tenant_id=user.tenant_id,
+                request_id=(
+                    request.headers.get("x-request-id")
+                    if request is not None
+                    else None
+                ),
+            )
+            return
+        if document_indexing_service is not None and job_ids:
+            background_tasks.add_task(document_indexing_service.process_jobs, job_ids)
 
     def normalized_visibility(raw_visibility: str) -> str:
         visibility = raw_visibility.strip().lower()
@@ -222,6 +246,7 @@ def create_bucket_router(
     async def commit_personal_documents(
         payload: CommitPersonalDocumentsRequest,
         background_tasks: BackgroundTasks,
+        request: Request,
         user: UserContext = Depends(get_current_user),
     ) -> CommitBucketDocumentsResponse:
         documents, indexing_job_ids = await bucket_service.commit_personal_documents(
@@ -230,8 +255,12 @@ def create_bucket_router(
             visibility=payload.visibility,
             allowed_roles=payload.allowed_roles,
         )
-        if document_indexing_service is not None and indexing_job_ids:
-            background_tasks.add_task(document_indexing_service.process_jobs, indexing_job_ids)
+        await _dispatch_indexing(
+            job_ids=indexing_job_ids,
+            background_tasks=background_tasks,
+            user=user,
+            request=request,
+        )
         return CommitBucketDocumentsResponse(
             documents=[_document_response(document) for document in documents],
             indexing_job_ids=indexing_job_ids,
@@ -264,6 +293,7 @@ def create_bucket_router(
         bucket_id: str,
         payload: CommitBucketDocumentsRequest,
         background_tasks: BackgroundTasks,
+        request: Request,
         user: UserContext = Depends(get_current_user),
     ) -> CommitBucketDocumentsResponse:
         committed = await bucket_service.commit_bucket_documents(
@@ -278,8 +308,12 @@ def create_bucket_router(
         if committed is None:
             raise HTTPException(status_code=404, detail="Bucket not found.")
         documents, indexing_job_ids = committed
-        if document_indexing_service is not None and indexing_job_ids:
-            background_tasks.add_task(document_indexing_service.process_jobs, indexing_job_ids)
+        await _dispatch_indexing(
+            job_ids=indexing_job_ids,
+            background_tasks=background_tasks,
+            user=user,
+            request=request,
+        )
         return CommitBucketDocumentsResponse(
             documents=[
                 _document_response(document, bucket_id=bucket_id)
@@ -334,6 +368,7 @@ def create_bucket_router(
     async def retry_document_indexing(
         document_id: str,
         background_tasks: BackgroundTasks,
+        request: Request,
         bucket_id: str | None = None,
         user: UserContext = Depends(get_current_user),
     ) -> CommitBucketDocumentsResponse:
@@ -345,8 +380,12 @@ def create_bucket_router(
         if retried is None:
             raise HTTPException(status_code=404, detail="Document not found.")
         document, indexing_job_id = retried
-        if document_indexing_service is not None:
-            background_tasks.add_task(document_indexing_service.process_jobs, [indexing_job_id])
+        await _dispatch_indexing(
+            job_ids=[indexing_job_id],
+            background_tasks=background_tasks,
+            user=user,
+            request=request,
+        )
         return CommitBucketDocumentsResponse(
             documents=[_document_response(document, bucket_id=bucket_id)],
             indexing_job_ids=[indexing_job_id],

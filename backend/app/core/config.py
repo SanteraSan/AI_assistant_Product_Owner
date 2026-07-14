@@ -71,6 +71,11 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://external_user:external_password@localhost:5433/external_demo"
     )
     integrations_default_bucket_name: str = "n8n Integrations"
+    # E5: durable indexing via Kafka/Redpanda. When false → FastAPI BackgroundTasks.
+    kafka_enabled: bool = False
+    kafka_bootstrap_servers: str = "localhost:19092"
+    kafka_indexing_topic: str = "taskflow.indexing.requested"
+    kafka_consumer_group: str = "taskflow-indexing-workers"
 
     @field_validator("rag_score_threshold", mode="before")
     @classmethod

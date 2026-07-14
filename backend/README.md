@@ -1422,6 +1422,28 @@ Compose profile `e4`: `docker compose --profile e4 up -d postgres-external n8n` 
 
 Out of scope: email OAuth, Jira, прямой agent→foreign DB, Kafka.
 
+## E5.1: Kafka / Redpanda Indexing Worker
+
+Статус: **MVP**. Durable indexing path рядом с in-process fallback.
+
+- `KAFKA_ENABLED=false` (default) → `BackgroundTasks` как раньше
+- `KAFKA_ENABLED=true` → API публикует `indexing.requested`, worker вызывает `DocumentIndexingService.process_jobs`
+- Broker: Redpanda (`docker compose --profile e5 up -d redpanda`), host `localhost:19092`
+- Worker: `python -m scripts.run_indexing_worker`
+- Deps: [research/E5_DEPENDENCIES.md](../research/E5_DEPENDENCIES.md), план: `.cursor/plans/e5_kafka_indexing.plan.md`
+
+```bash
+docker compose --profile e5 up -d redpanda
+export KAFKA_ENABLED=true
+export KAFKA_BOOTSTRAP_SERVERS=localhost:19092
+# terminal A
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# terminal B
+python -m scripts.run_indexing_worker
+```
+
+Postgres `document_indexing_jobs` остаётся source of truth. Redis по-прежнему для rate limits.
+
 ## Seed Corpus And E1 ACL
 
 `scripts/ingest_seed_data.py` индексирует `data/raw` в Qdrant (`bucket_id=taskflow_seed`, path-based chunk ids). После E1 `/rag/chat` режет retrieval по доступным `document_assets`.

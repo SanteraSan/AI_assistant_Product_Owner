@@ -46,6 +46,8 @@ class DocumentIndexingService:
             )
             if job is None:
                 return
+            if job.status == "completed":
+                return
             update_document_status = _should_update_document_status(job)
             document = await session.scalar(
                 select(DocumentAsset).where(DocumentAsset.id == job.document_id)

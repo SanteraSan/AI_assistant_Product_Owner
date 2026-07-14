@@ -54,6 +54,8 @@ python -m scripts.run_rag_evaluation \
 
 E4.1 smoke (интеграции): после `POST /integrations/ingest` + `sync-external-db` Agent должен видеть fixture `external_integrations_brief.txt` (RAG) и SQL по `external_support_tickets` / `external_customers`. Это не checklist regression, а integration smoke — см. `backend/README.md` § E4.1.
 
+E5.1 smoke (Kafka indexing): при `KAFKA_ENABLED=true` + worker upload/commit должен дать `indexing.requested` в логах worker и `indexed` в UI; multimodal (image) тоже через тот же path. Не checklist regression — см. `backend/README.md` § E5.1.
+
 Важно: автоматические `quality_flags` являются быстрыми эвристиками, а не заменой ручной оценки. Они помогают найти очевидные регрессии: пустой ответ, неправильный router intent, отсутствие expected source type или нарушение простого negative constraint.
 
 ## Базовые Критерии

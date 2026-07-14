@@ -47,6 +47,8 @@ from app.services.document_indexing_service import IMAGE_SOURCE_TYPES, DocumentI
 from app.services.external_db_sync_service import ExternalDbSyncService
 from app.services.feature_extractor import FeatureExtractor
 from app.services.image_digest_service import build_targeted_image_digest
+from app.services.indexing_event_publisher import IndexingEventPublisher
+from app.services.indexing_job_dispatcher import IndexingJobDispatcher
 from app.services.integration_ingest_service import IntegrationIngestService
 from app.services.ollama_client import OllamaClient
 from app.services.ollama_load_guard import OllamaLoadGuard, OllamaOverloadedError
@@ -183,6 +185,19 @@ external_db_sync_service = ExternalDbSyncService(
     session_factory=db_session_factory,
     external_postgres_dsn=settings.external_postgres_dsn,
 )
+indexing_event_publisher = (
+    IndexingEventPublisher(
+        bootstrap_servers=settings.kafka_bootstrap_servers,
+        topic=settings.kafka_indexing_topic,
+    )
+    if settings.kafka_enabled
+    else None
+)
+indexing_job_dispatcher = IndexingJobDispatcher(
+    kafka_enabled=settings.kafka_enabled,
+    document_indexing_service=document_indexing_service,
+    indexing_event_publisher=indexing_event_publisher,
+)
 
 
 @asynccontextmanager
@@ -194,9 +209,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         )
     except Exception:
         logger.exception("PostgreSQL initialization failed")
+    if indexing_event_publisher is not None:
+        try:
+            await indexing_event_publisher.start()
+        except Exception:
+            logger.exception("Kafka indexing producer failed to start")
     try:
         yield
     finally:
+        if indexing_event_publisher is not None:
+            await indexing_event_publisher.stop()
         await ollama_client.aclose()
         if redis_service is not None:
             await redis_service.aclose()
@@ -221,6 +243,7 @@ app.include_router(
     create_bucket_router(
         bucket_service=bucket_service,
         document_indexing_service=document_indexing_service,
+        indexing_job_dispatcher=indexing_job_dispatcher,
         default_tenant_id=settings.default_tenant_id,
     )
 )
@@ -229,6 +252,7 @@ app.include_router(
         integration_ingest_service=integration_ingest_service,
         external_db_sync_service=external_db_sync_service,
         document_indexing_service=document_indexing_service,
+        indexing_job_dispatcher=indexing_job_dispatcher,
     )
 )
 
