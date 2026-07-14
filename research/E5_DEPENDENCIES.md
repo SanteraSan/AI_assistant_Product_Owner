@@ -25,7 +25,9 @@ pip install aiokafka
 export KAFKA_ENABLED=true
 export KAFKA_BOOTSTRAP_SERVERS=localhost:19092
 export KAFKA_INDEXING_TOPIC=taskflow.indexing.requested
+export KAFKA_DOCUMENT_EVENTS_TOPIC=taskflow.document.events
 export KAFKA_CONSUMER_GROUP=taskflow-indexing-workers
+export QDRANT_CHECK_COMPATIBILITY=false
 ```
 
 Или строки в `backend/.env` (см. `.env.example`).

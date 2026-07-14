@@ -1,3 +1,4 @@
+import logging
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -12,8 +13,10 @@ from app.db.models import BucketDocument, DocumentAsset, DocumentIndexingJob
 from app.services.chunking import DocumentChunk, chunk_documents
 from app.services.document_loader import RawDocument, load_raw_documents
 from app.services.image_digest_service import load_image_digest_documents
+from app.services.indexing_event_publisher import IndexingEventPublisher
 from app.services.ollama_client import OllamaClient
 
+logger = logging.getLogger(__name__)
 IMAGE_SOURCE_TYPES = {"png", "jpg", "jpeg"}
 
 
@@ -27,6 +30,7 @@ class DocumentIndexingService:
         embedding_model: str,
         image_vision_enabled: bool = False,
         image_vision_model: str | None = None,
+        event_publisher: IndexingEventPublisher | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._qdrant_store = qdrant_store
@@ -34,6 +38,7 @@ class DocumentIndexingService:
         self._embedding_model = embedding_model
         self._image_vision_enabled = image_vision_enabled
         self._image_vision_model = image_vision_model
+        self._event_publisher = event_publisher
 
     async def process_jobs(self, job_ids: list[str]) -> None:
         for job_id in job_ids:
@@ -56,6 +61,13 @@ class DocumentIndexingService:
                 job.status = "failed"
                 job.error = "Document asset not found."
                 await session.commit()
+                await self._publish_failed(
+                    job_id=job_id,
+                    document_id=None,
+                    bucket_id=job.bucket_id,
+                    tenant_id=job.tenant_id,
+                    error="Document asset not found.",
+                )
                 return
             job.status = "running"
             job.attempts += 1
@@ -66,9 +78,12 @@ class DocumentIndexingService:
                 bucket_link.indexing_status = "indexing"
                 bucket_link.indexing_error = None
             await session.commit()
+            tenant_id = job.tenant_id
+            bucket_id = job.bucket_id
+            document_id = document.id
 
         try:
-            chunks_indexed = await self._index_document(document=document, bucket_id=job.bucket_id)
+            chunks_indexed = await self._index_document(document=document, bucket_id=bucket_id)
         except Exception as exc:
             async with self._session_factory() as session:
                 failed_job = await session.scalar(
@@ -89,6 +104,13 @@ class DocumentIndexingService:
                         failed_link.indexing_status = "index_failed"
                         failed_link.indexing_error = str(exc)
                 await session.commit()
+            await self._publish_failed(
+                job_id=job_id,
+                document_id=document_id,
+                bucket_id=bucket_id,
+                tenant_id=tenant_id,
+                error=str(exc),
+            )
             return
 
         async with self._session_factory() as session:
@@ -111,6 +133,57 @@ class DocumentIndexingService:
                     completed_link.indexing_status = "indexed"
                     completed_link.indexing_error = None
             await session.commit()
+        await self._publish_indexed(
+            job_id=job_id,
+            document_id=document_id,
+            bucket_id=bucket_id,
+            tenant_id=tenant_id,
+            chunks_indexed=chunks_indexed,
+        )
+
+    async def _publish_indexed(
+        self,
+        *,
+        job_id: str,
+        document_id: str,
+        bucket_id: str,
+        tenant_id: str,
+        chunks_indexed: int,
+    ) -> None:
+        if self._event_publisher is None:
+            return
+        try:
+            await self._event_publisher.publish_document_indexed(
+                job_id=job_id,
+                document_id=document_id,
+                bucket_id=bucket_id,
+                tenant_id=tenant_id,
+                chunks_indexed=chunks_indexed,
+            )
+        except Exception:
+            logger.exception("Failed to publish document.indexed for job=%s", job_id)
+
+    async def _publish_failed(
+        self,
+        *,
+        job_id: str,
+        document_id: str | None,
+        bucket_id: str | None,
+        tenant_id: str | None,
+        error: str,
+    ) -> None:
+        if self._event_publisher is None:
+            return
+        try:
+            await self._event_publisher.publish_document_index_failed(
+                job_id=job_id,
+                document_id=document_id,
+                bucket_id=bucket_id,
+                tenant_id=tenant_id,
+                error=error,
+            )
+        except Exception:
+            logger.exception("Failed to publish document.index_failed for job=%s", job_id)
 
     async def _index_document(self, *, document: DocumentAsset, bucket_id: str) -> int:
         raw_documents = _load_raw_documents_for_asset(document=document, bucket_id=bucket_id)

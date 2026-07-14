@@ -1424,13 +1424,15 @@ Out of scope: email OAuth, Jira, прямой agent→foreign DB, Kafka.
 
 ## E5.1: Kafka / Redpanda Indexing Worker
 
-Статус: **MVP**. Durable indexing path рядом с in-process fallback.
+Статус: **done**; **E5.x** добавляет lifecycle events.
 
 - `KAFKA_ENABLED=false` (default) → `BackgroundTasks` как раньше
 - `KAFKA_ENABLED=true` → API публикует `indexing.requested`, worker вызывает `DocumentIndexingService.process_jobs`
+- E5.x: worker публикует `document.indexed` / `document.index_failed` в `KAFKA_DOCUMENT_EVENTS_TOPIC` (default `taskflow.document.events`)
+- `QDRANT_CHECK_COMPATIBILITY=false` по умолчанию — без warning client 1.18 vs server 1.12
 - Broker: Redpanda (`docker compose --profile e5 up -d redpanda`), host `localhost:19092`
 - Worker: `python -m scripts.run_indexing_worker`
-- Deps: [research/E5_DEPENDENCIES.md](../research/E5_DEPENDENCIES.md), план: `.cursor/plans/e5_kafka_indexing.plan.md`
+- Deps: [research/E5_DEPENDENCIES.md](../research/E5_DEPENDENCIES.md), roadmap: `.cursor/plans/e5x_e7_e6_roadmap.plan.md`
 
 ```bash
 docker compose --profile e5 up -d redpanda

@@ -7,8 +7,14 @@ from app.models.chat import SourceChunk
 
 
 class QdrantStore:
-    def __init__(self, url: str, collection_name: str) -> None:
-        self._client = QdrantClient(url=url)
+    def __init__(
+        self,
+        url: str,
+        collection_name: str,
+        *,
+        check_compatibility: bool = True,
+    ) -> None:
+        self._client = QdrantClient(url=url, check_compatibility=check_compatibility)
         self._collection_name = collection_name
 
     @property

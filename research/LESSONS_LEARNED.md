@@ -31,6 +31,19 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-15: Roadmap Lock — E5.x → E7 slice → E6 lab
+
+Контекст:
+- после E5.1 UI (Kafka + vision) согласовали порядок без «framework ради framework первым».
+
+Решение:
+- **E5.x** сейчас: `document.indexed` / `document.index_failed` + quiet Qdrant compat;
+- **E7 slice** потом: 1–2 пункта (MinIO / deploy profile / metrics), не весь E7;
+- **E6** после: LangGraph (или аналог) **рядом** с `AgentOrchestrator`, side-by-side smoke;
+- E2 остаётся blocked; E4.x Jira — optional later.
+
+План: `.cursor/plans/e5x_e7_e6_roadmap.plan.md`.
+
 ## 2026-07-15: E5.1 UI — Kafka Indexing + Vision Image Confirmed
 
 Контекст:

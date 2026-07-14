@@ -367,7 +367,7 @@ n8n: файл с диска + строки из внешней/синтетич�
 
 ## Этап E5: Kafka And Event-Driven Ingestion
 
-Статус: **E5.1 done + UI confirmed (2026-07-15)** — Redpanda + worker; image vision indexing via Kafka path. Детали: `.cursor/plans/e5_kafka_indexing.plan.md`, deps: `research/E5_DEPENDENCIES.md`.
+Статус: **E5.1 done + UI confirmed**; **E5.x done (2026-07-15)** — lifecycle events + Qdrant compat. Далее: E7 slice → E6 lab. См. `.cursor/plans/e5x_e7_e6_roadmap.plan.md`.
 
 Цель:
 
@@ -381,13 +381,19 @@ n8n: файл с диска + строки из внешней/синтетич�
 - `KAFKA_ENABLED=false` → прежний `BackgroundTasks` fallback;
 - Postgres `document_indexing_jobs` остаётся source of truth.
 
-Candidate events (позже):
+### E5.x scope (agreed)
+
+- publish `document.indexed` / `document.index_failed` после `process_job`;
+- убрать шум Qdrant client↔server version warning для local 1.12;
+- **не** тащить OCR-only worker / eval topics / outbox в этом шаге.
+
+Candidate events (позже / E5.x+):
 
 - `document.uploaded`;
 - `document.parsed`;
 - `document.chunked`;
 - `document.embedded`;
-- `document.indexed`;
+- `document.indexed` / `document.index_failed` (E5.x);
 - `evaluation.requested`;
 - `evaluation.completed`;
 - `report.generated`.
@@ -411,9 +417,12 @@ Definition of done:
 
 ## Этап E6: Framework Adapters
 
+Статус: **planned after E7 slice** (lab adapter beside handwritten Agent). См. `.cursor/plans/e5x_e7_e6_roadmap.plan.md`.
+
 Цель:
 
-- точечно использовать LangGraph/LangChain/LlamaIndex/CrewAI там, где они дают ценность.
+- точечно использовать LangGraph/LangChain/LlamaIndex/CrewAI там, где они дают ценность;
+- **не** заменять `AgentOrchestrator` — сравнить framework рядом и зафиксировать плюсы/минусы.
 
 Рекомендуемый подход:
 
@@ -425,18 +434,26 @@ Definition of done:
 Definition of done:
 
 - framework integration вызывает текущие backend services, а не заменяет их;
-- evaluation scenarios подтверждают, что framework layer не обходит access controls.
+- evaluation scenarios подтверждают, что framework layer не обходит access controls;
+- side-by-side smoke: handwritten Agent vs adapter на одном сценарии.
 
 ## Этап E7: Product Hardening
+
+Статус: **E7 slice next after E5.x** (не весь E7 сразу).
 
 Цель:
 
 - сделать приложение demoable как продукт, а не как набор backend scripts.
 
-Scope:
+### E7 slice (agreed first cut)
 
-- deployment profiles;
-- object storage для uploaded files;
+Выбрать 1–2 пункта:
+- MinIO/S3 для uploaded files **или**
+- compose/deploy profile + worker health **или**
+- минимальные metrics для API/worker.
+
+### Full E7 backlog (later)
+
 - более сильное admin/tenant management;
 - observability dashboards;
 - audit export;
@@ -450,8 +467,9 @@ Scope:
 3. E2 Model Gateway и external providers — **blocked** (VPN / Gemini unreachable; kickoff сохранён).
 4. E3 Tool-use/agents — **done** (2026-07-14).
 5. E4 n8n integrations (disk + external DB slice) — **E4.1 done**; email/Jira later.
-6. E5 Kafka event backbone — **E5.1 done** (`indexing.requested` + worker); multi-stage topics later.
-7. E6 framework adapters.
-8. E7 product hardening.
+6. E5.1 Kafka indexing — **done**; **E5.x** lifecycle events + Qdrant compat — **done (2026-07-15)**.
+7. **E7 slice** (MinIO / deploy profile / metrics — 1–2 пункта) — **next**.
+8. **E6** lab framework adapter beside Agent.
+9. E7 remainder + E4.x connectors as needed.
 
-Такой порядок сначала даёт видимую product surface, а затем постепенно заменяет mocks enterprise-grade инфраструктурой.
+Порядок после E5.1 согласован 2026-07-15: сначала укрепить platform (E5.x + узкий E7), затем лабораторный E6 для сравнения с рукописным Agent.

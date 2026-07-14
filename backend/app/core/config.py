@@ -75,7 +75,10 @@ class Settings(BaseSettings):
     kafka_enabled: bool = False
     kafka_bootstrap_servers: str = "localhost:19092"
     kafka_indexing_topic: str = "taskflow.indexing.requested"
+    kafka_document_events_topic: str = "taskflow.document.events"
     kafka_consumer_group: str = "taskflow-indexing-workers"
+    # Local Qdrant server may lag client package; silence noisy mismatch warning.
+    qdrant_check_compatibility: bool = False
 
     @field_validator("rag_score_threshold", mode="before")
     @classmethod

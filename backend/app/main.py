@@ -96,6 +96,7 @@ ollama_client = OllamaClient(
 qdrant_store = QdrantStore(
     url=settings.qdrant_url,
     collection_name=settings.qdrant_collection,
+    check_compatibility=settings.qdrant_check_compatibility,
 )
 feature_extractor = FeatureExtractor()
 query_router = QueryRouter()
@@ -169,6 +170,15 @@ agent_orchestrator = AgentOrchestrator(
     default_model=settings.agent_default_model or settings.default_rag_model,
     max_steps=settings.agent_max_steps,
 )
+indexing_event_publisher = (
+    IndexingEventPublisher(
+        bootstrap_servers=settings.kafka_bootstrap_servers,
+        topic=settings.kafka_indexing_topic,
+        document_events_topic=settings.kafka_document_events_topic,
+    )
+    if settings.kafka_enabled
+    else None
+)
 document_indexing_service = DocumentIndexingService(
     session_factory=db_session_factory,
     qdrant_store=qdrant_store,
@@ -176,6 +186,7 @@ document_indexing_service = DocumentIndexingService(
     embedding_model=settings.embedding_model,
     image_vision_enabled=settings.image_vision_enabled,
     image_vision_model=settings.image_vision_model,
+    event_publisher=indexing_event_publisher,
 )
 integration_ingest_service = IntegrationIngestService(
     bucket_service=bucket_service,
@@ -184,14 +195,6 @@ integration_ingest_service = IntegrationIngestService(
 external_db_sync_service = ExternalDbSyncService(
     session_factory=db_session_factory,
     external_postgres_dsn=settings.external_postgres_dsn,
-)
-indexing_event_publisher = (
-    IndexingEventPublisher(
-        bootstrap_servers=settings.kafka_bootstrap_servers,
-        topic=settings.kafka_indexing_topic,
-    )
-    if settings.kafka_enabled
-    else None
 )
 indexing_job_dispatcher = IndexingJobDispatcher(
     kafka_enabled=settings.kafka_enabled,

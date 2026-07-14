@@ -36,6 +36,7 @@ async def run_worker() -> None:
     qdrant_store = QdrantStore(
         url=settings.qdrant_url,
         collection_name=settings.qdrant_collection,
+        check_compatibility=settings.qdrant_check_compatibility,
     )
     ollama_client = OllamaClient(
         base_url=settings.ollama_base_url,
@@ -45,6 +46,16 @@ async def run_worker() -> None:
             timeout_seconds=settings.ollama_queue_timeout_seconds,
         ),
     )
+    event_publisher = None
+    if settings.kafka_enabled:
+        from app.services.indexing_event_publisher import IndexingEventPublisher
+
+        event_publisher = IndexingEventPublisher(
+            bootstrap_servers=settings.kafka_bootstrap_servers,
+            topic=settings.kafka_indexing_topic,
+            document_events_topic=settings.kafka_document_events_topic,
+        )
+        await event_publisher.start()
     indexing_service = DocumentIndexingService(
         session_factory=session_factory,
         qdrant_store=qdrant_store,
@@ -52,6 +63,7 @@ async def run_worker() -> None:
         embedding_model=settings.embedding_model,
         image_vision_enabled=settings.image_vision_enabled,
         image_vision_model=settings.image_vision_model,
+        event_publisher=event_publisher,
     )
 
     consumer = AIOKafkaConsumer(
@@ -93,6 +105,8 @@ async def run_worker() -> None:
             logger.info("Completed indexing.requested jobs=%s", clean_ids)
     finally:
         await consumer.stop()
+        if event_publisher is not None:
+            await event_publisher.stop()
         await ollama_client.aclose()
         await engine.dispose()
 
