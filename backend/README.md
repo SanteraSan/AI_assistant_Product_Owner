@@ -1388,6 +1388,18 @@ python3 -m venv .venv-lora-pack
 
 Артефакты пишутся в `models/text_to_sql_lora/..._ollama/` (каталог `/models/` в `.gitignore`). После `ollama create` tag `qwen2_5_coder_7b_v5_projection_steps400` должен появиться в `ollama list`.
 
+## Seed Corpus And E1 ACL
+
+`scripts/ingest_seed_data.py` индексирует `data/raw` в Qdrant (`bucket_id=taskflow_seed`, path-based chunk ids). После E1 `/rag/chat` режет retrieval по доступным `document_assets`.
+
+После seed ingest (или если eval даёт `sources=0` на известных fixtures) синхронизируйте registry:
+
+```bash
+PYTHONPATH=/home/santera/Projects/backend ./.venv/bin/python scripts/sync_seed_document_registry.py
+```
+
+RAG ACL scope: `document_id` (upload UUID) **или** `source_path` из allowlist (`allowed_source_paths`). Явный user `source_paths` остаётся AND-сужением.
+
 ## E0 UI Skeleton: Buckets And Document Registry API
 
 Для первого product UI добавлен минимальный API слой для управления buckets и document registry.

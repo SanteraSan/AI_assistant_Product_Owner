@@ -562,6 +562,15 @@ async def rag_chat(
                     source_types=payload.source_types,
                     document_ids=scoped_document_ids,
                     source_paths=payload.source_paths,
+                    allowed_source_paths=[
+                        document.source_path
+                        for document in accessible_documents
+                        if document.source_path
+                        and (
+                            not scoped_document_ids
+                            or document.id in set(scoped_document_ids)
+                        )
+                    ],
                     max_sources_per_title=payload.max_sources_per_title,
                     max_sources_per_source_type=payload.max_sources_per_source_type,
                     max_sources_per_source_path=payload.max_sources_per_source_path,

@@ -287,6 +287,10 @@ Delivered:
 - E3.3 `POST /agent/chat` + AgentOrchestrator + UI mode Agent + tool-trace panel;
 - E3.4 V5 LoRA packaged as Ollama tag `qwen2_5_coder_7b_v5_projection_steps400` (adapter GGUF path; smoke без fallback).
 
+Post-E3 ops note:
+
+- seed Qdrant + document registry sync (`scripts/sync_seed_document_registry.py`) + ACL `allowed_source_paths` — иначе RAG eval после E1 даёт `sources=0`.
+
 Later / out of scope сейчас:
 
 - `ingest_document`;

@@ -82,6 +82,19 @@ Expected end state:
 Ingestion complete.
 ```
 
+## 3.1 Sync Seed Into Document Registry (required after E1 ACL)
+
+`ingest_seed_data.py` writes Qdrant only. RAG ACL needs Postgres `document_assets` + bucket links and matches seed chunks via `source_path`.
+
+Run after every seed reindex (and once on a machine where Stage A returns `sources=0` for all models):
+
+```bash
+cd /home/santera/Projects/backend
+PYTHONPATH=/home/santera/Projects/backend ./.venv/bin/python scripts/sync_seed_document_registry.py
+```
+
+Then restart/reload backend if it was already running.
+
 ## 4. Notes
 
 - Run evaluator commands from `/home/santera/Projects/backend`.

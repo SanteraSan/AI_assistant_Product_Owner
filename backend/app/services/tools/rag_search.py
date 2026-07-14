@@ -55,6 +55,19 @@ class RagSearchTool:
             requested_document_ids=args.document_ids or None,
             bucket_documents=bucket_documents,
         )
+        if bucket_documents:
+            scoped_docs = [
+                document
+                for document in bucket_documents
+                if document.id in set(scoped_document_ids)
+            ]
+        else:
+            available = await self._bucket_service.list_available_documents(user=ctx.user)
+            scoped_docs = [
+                document
+                for document in available
+                if document.id in set(scoped_document_ids)
+            ]
 
         search = await self._rag_service.search(
             query=args.query,
@@ -62,6 +75,11 @@ class RagSearchTool:
             tenant_id=ctx.user.tenant_id,
             bucket_ids=args.bucket_ids or None,
             document_ids=scoped_document_ids,
+            allowed_source_paths=[
+                document.source_path
+                for document in scoped_docs
+                if document.source_path
+            ],
         )
 
         sources = [

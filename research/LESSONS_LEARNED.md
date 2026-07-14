@@ -31,6 +31,30 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: Seed ACL Bridge + Three-Model RAG Regression
+
+Контекст:
+- после E1 RAG ACL фильтрует Qdrant по `document_assets` UUID;
+- `ingest_seed_data.py` пишет seed в Qdrant с path-based `document_id` и **не** регистрирует файлы в Postgres;
+- первый Stage A / document-only run после E3.4 дал `sources=0` у всех моделей — сравнение было невалидным.
+
+Наблюдение:
+- overlap UUID↔seed path ids ≈ 0 для `metric_row` и fixture corpus;
+- после `sync_seed_document_registry.py` + ACL `document_id OR source_path` (`allowed_source_paths`) retrieval вернулся;
+- валидные runs: Stage A `415f57a8-4e1c-4009-9ddd-6c0bc6994c26`, document-only `64e85eda-67d5-4ee8-8298-d5757e54c5cb`;
+- Stage A: `qwen3.5:9b` / `qwen3:14b` — `failed_flags=0`; `gemma4:12b` — 1 (маркер на bucket_beta);
+- document-only: `qwen3:14b` лучше по flags (1), затем `qwen3.5:9b` (2), `gemma4:12b` (6);
+- fail’ы document-only в основном хрупкие маркеры / неполнота формулировок (пропуск `3500`, нет английского `notifications`), не галлюцинации цифр.
+
+Решение:
+- скрипт `backend/scripts/sync_seed_document_registry.py` (buckets `taskflow_seed` / `bucket_alpha` / `bucket_beta` + DocumentAsset по `source_path`);
+- Qdrant/RAG: `allowed_source_paths` в ACL scope (OR с `document_id`); wiring в `main.py`, `RagService`, `rag_search` tool.
+
+Вывод:
+- seed ingest и document registry должны жить вместе; иначе ACL «правильно» прячет весь corpus;
+- для model comparison сначала проверять `avg_sources` / zero_sources, потом failed_flags;
+- brittle markers не ослаблять вслепую — сначала читать ответ глазами.
+
 ## 2026-07-14: E3.4 LoRA → Ollama Tag (adapter GGUF)
 
 Контекст:

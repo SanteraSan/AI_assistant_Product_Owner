@@ -54,6 +54,7 @@ class QdrantStore:
         source_types: list[str] | None = None,
         document_ids: list[str] | None = None,
         source_paths: list[str] | None = None,
+        allowed_source_paths: list[str] | None = None,
     ) -> list[SourceChunk]:
         result = self._client.query_points(
             collection_name=self._collection_name,
@@ -65,6 +66,7 @@ class QdrantStore:
                 source_types=source_types or [],
                 document_ids=document_ids or [],
                 source_paths=source_paths or [],
+                allowed_source_paths=allowed_source_paths or [],
             ),
             limit=limit,
             with_payload=True,
@@ -86,6 +88,7 @@ class QdrantStore:
         source_types: list[str] | None = None,
         document_ids: list[str] | None = None,
         source_paths: list[str] | None = None,
+        allowed_source_paths: list[str] | None = None,
     ) -> list[SourceChunk]:
         records, _ = self._client.scroll(
             collection_name=self._collection_name,
@@ -96,6 +99,7 @@ class QdrantStore:
                 source_types=source_types or [],
                 document_ids=document_ids or [],
                 source_paths=source_paths or [],
+                allowed_source_paths=allowed_source_paths or [],
             ),
             limit=limit,
             with_payload=True,
@@ -152,12 +156,13 @@ def _payload_filter(
     source_types: list[str],
     document_ids: list[str],
     source_paths: list[str],
+    allowed_source_paths: list[str] | None = None,
 ) -> models.Filter | None:
-    conditions: list[models.FieldCondition] = []
+    must: list[models.Condition] = []
 
     normalized_tenant_id = tenant_id.strip() if tenant_id else ""
     if normalized_tenant_id:
-        conditions.append(
+        must.append(
             models.FieldCondition(
                 key="tenant_id",
                 match=models.MatchValue(value=normalized_tenant_id),
@@ -166,7 +171,7 @@ def _payload_filter(
 
     normalized_bucket_ids = [bucket_id.strip() for bucket_id in bucket_ids if bucket_id.strip()]
     if normalized_bucket_ids:
-        conditions.append(
+        must.append(
             models.FieldCondition(
                 key="bucket_id",
                 match=models.MatchAny(any=normalized_bucket_ids),
@@ -175,7 +180,7 @@ def _payload_filter(
 
     normalized = [feature.strip() for feature in features if feature.strip()]
     if normalized:
-        conditions.append(
+        must.append(
             models.FieldCondition(
                 key="feature",
                 match=models.MatchAny(any=normalized),
@@ -184,31 +189,52 @@ def _payload_filter(
 
     normalized_source_types = [source_type.strip() for source_type in source_types if source_type.strip()]
     if normalized_source_types:
-        conditions.append(
+        must.append(
             models.FieldCondition(
                 key="source_type",
                 match=models.MatchAny(any=normalized_source_types),
             )
         )
 
+    # ACL document scope: UUID document_id (uploads) OR source_path (seed corpus).
     normalized_document_ids = [document_id.strip() for document_id in document_ids if document_id.strip()]
+    normalized_allowed_paths = [
+        path.strip() for path in (allowed_source_paths or []) if path.strip()
+    ]
+    scope_should: list[models.FieldCondition] = []
     if normalized_document_ids:
-        conditions.append(
+        scope_should.append(
             models.FieldCondition(
                 key="document_id",
                 match=models.MatchAny(any=normalized_document_ids),
             )
         )
+    if normalized_allowed_paths:
+        scope_should.append(
+            models.FieldCondition(
+                key="source_path",
+                match=models.MatchAny(any=normalized_allowed_paths),
+            )
+        )
+    if len(scope_should) == 1:
+        must.append(scope_should[0])
+    elif len(scope_should) > 1:
+        must.append(
+            models.Filter(
+                min_should=models.MinShould(conditions=scope_should, min_count=1)
+            )
+        )
 
+    # Explicit user narrowing by source_path stays AND.
     normalized_source_paths = [source_path.strip() for source_path in source_paths if source_path.strip()]
     if normalized_source_paths:
-        conditions.append(
+        must.append(
             models.FieldCondition(
                 key="source_path",
                 match=models.MatchAny(any=normalized_source_paths),
             )
         )
 
-    if not conditions:
+    if not must:
         return None
-    return models.Filter(must=conditions)
+    return models.Filter(must=must)
