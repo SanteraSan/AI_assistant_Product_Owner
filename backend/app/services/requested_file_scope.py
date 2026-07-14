@@ -76,6 +76,19 @@ def resolve_requested_files(
     )
 
 
+def find_accessible_document_by_name(
+    *,
+    file_name: str,
+    documents: list[DocumentAsset],
+) -> DocumentAsset | None:
+    """Match a user-facing file name against already ACL-filtered documents."""
+    requested = " ".join(file_name.split()).strip()
+    if not requested:
+        return None
+    available = [(document, _document_file_name(document).casefold()) for document in documents]
+    return _best_document_match(requested.casefold(), available)
+
+
 def missing_requested_file_answer(missing_files: list[str]) -> str:
     if len(missing_files) == 1:
         return (

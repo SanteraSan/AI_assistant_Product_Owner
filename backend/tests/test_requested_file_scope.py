@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from app.services.requested_file_scope import (
     extract_requested_file_names,
+    find_accessible_document_by_name,
     looks_like_file_inventory_question,
     missing_requested_file_answer,
     resolve_requested_files,
@@ -37,6 +38,19 @@ def test_resolve_requested_files_refuses_inaccessible_name() -> None:
     assert resolution.matched_documents == []
     assert resolution.missing_names == ["moto.jpg"]
     assert "moto.jpg" in missing_requested_file_answer(resolution.missing_names)
+
+
+def test_find_accessible_document_by_name_exact() -> None:
+    documents = [
+        SimpleNamespace(id="doc-1", file_name="AGENTS.md", title="AGENTS.md"),
+        SimpleNamespace(id="doc-2", file_name="moto.jpg", title="moto.jpg"),
+    ]
+    hit = find_accessible_document_by_name(
+        file_name="agents.md",
+        documents=documents,  # type: ignore[arg-type]
+    )
+    assert hit is not None
+    assert hit.id == "doc-1"
 
 
 def test_looks_like_file_inventory_question() -> None:

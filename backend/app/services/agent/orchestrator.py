@@ -186,6 +186,9 @@ def _build_agent_prompt(
 - Evidence только из tool results (особенно rag_search / SQL). Memory — не evidence.
 - Не выдумывай документы или SQL-результаты.
 - Если tool вернул denied/invalid_input — объясни ограничение или попробуй другой tool.
+- Вопросы про статус/доступность файла по имени (moto.jpg, AGENTS.md): вызывай
+  get_document_status с arguments.file_name. Не проси UUID, если имя файла уже известно.
+- document_id передавай только когда пользователь дал UUID.
 
 Доступные tools:
 {tools_json}

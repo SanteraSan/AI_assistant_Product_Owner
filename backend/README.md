@@ -1323,6 +1323,7 @@ Controlled tools layer (перед agent chat UI в E3.3):
 
 - `app/services/tools/` — registry, executor, role matrix, `ToolResult` (`ok|denied|invalid_input|failed`)
 - Read tools: `get_user_context`, `list_buckets`, `get_document_status`, `rag_search`
+- `get_document_status` принимает `document_id` **или** `file_name` (ACL через `list_available_documents`)
 - `rag_search` scopes via `resolve_rag_document_ids` then `RagService.search` (retrieve-only, без generation)
 - Audit: `metadata.tool_calls[]` shape + table `tool_call_logs` (Alembic `20260714_0007`)
 - Portable JSON parse helper: `app/services/agent/tool_loop.py`

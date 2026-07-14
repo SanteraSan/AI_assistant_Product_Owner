@@ -130,6 +130,52 @@ async def test_get_document_status_no_leak() -> None:
 
 
 @pytest.mark.anyio
+async def test_get_document_status_by_file_name() -> None:
+    class _Doc:
+        id = "doc-1"
+        file_name = "moto.jpg"
+        title = "moto.jpg"
+        status = "indexed"
+        visibility = "tenant"
+        source_type = "jpg"
+        size_bytes = 10
+        error = None
+
+    class _BucketService:
+        async def list_available_documents(self, *, user: UserContext):
+            assert user.tenant_id == "tenant-a"
+            return [_Doc()]
+
+        async def get_document(self, *, user: UserContext, document_id: str):
+            raise AssertionError("should resolve by file_name")
+
+    tool = GetDocumentStatusTool(bucket_service=_BucketService())  # type: ignore[arg-type]
+    result = await tool.run(
+        ToolContext(user=_user(roles={"viewer"}), request_id="req-name"),
+        tool.args_model(file_name="moto.jpg"),
+    )
+    assert result.ok
+    assert result.data["document_id"] == "doc-1"
+    assert result.data["file_name"] == "moto.jpg"
+
+
+@pytest.mark.anyio
+async def test_get_document_status_by_file_name_missing() -> None:
+    class _BucketService:
+        async def list_available_documents(self, *, user: UserContext):
+            del user
+            return []
+
+    tool = GetDocumentStatusTool(bucket_service=_BucketService())  # type: ignore[arg-type]
+    result = await tool.run(
+        ToolContext(user=_user(roles={"viewer"}), request_id="req-missing-name"),
+        tool.args_model(file_name="AGENTS.md"),
+    )
+    assert result.status == "denied"
+    assert result.error_code == "document_not_found_by_name"
+
+
+@pytest.mark.anyio
 async def test_list_buckets_tenant_scoped() -> None:
     class _Bucket:
         id = "b1"

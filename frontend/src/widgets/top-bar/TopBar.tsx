@@ -97,7 +97,7 @@ export function TopBar({
           value={activeBucketId}
         />
         <Button onClick={user ? onLogoutClick ?? onLoginClick : onLoginClick} variant="ghost">
-          {user ? 'Выйти' : 'Войти'}
+          {user ? `${user.displayName || user.email} · Выйти` : 'Войти'}
         </Button>
       </div>
     </header>
