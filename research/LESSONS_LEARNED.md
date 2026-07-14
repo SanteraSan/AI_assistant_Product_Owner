@@ -31,6 +31,25 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: Model Comparison — Grounded No-Answer On Missing Diagram File
+
+Контекст:
+- один и тот же agent/RAG smoke-вопрос: «есть ли в доступных файл с диаграммой о качестве производства или что-то подобное?»
+- нужного файла нет; в corpus есть visual evidence (`moto.jpg`, image digest из docx).
+
+Наблюдение:
+- слабая модель: иногда ломала portable tool JSON (`{"rag_search":{...}}` вместо `tool_calls`) → сырой JSON в чат;
+- `gemma4:12b`: нашла ближайшие visual docs, явно сказала что это не диаграмма качества производства, предложила уточнить — осторожный grounded ответ;
+- `qwen3:14b`: строгий grounded no-answer — «в доступном контексте нет таких файлов», без подтягивания похожих картинок как кандидатов.
+
+Решение:
+- `qwen3:14b` добавлен в frontend model selector для comparison smoke;
+- для agent UX держать в виду trio: fast (`qwen3.5:9b`) / cautious-with-near-miss (`gemma4:12b`) / strict no-answer (`qwen3:14b`).
+
+Вывод:
+- при одинаковом backend/RBAC качество «отказа» сильно зависит от модели;
+- strict no-answer и near-miss explanation — разные полезные стили; оба валидны, выбирать по сценарию demo/eval.
+
 ## 2026-07-14: E3 Agent Smoke — Accessible Docs And Model Quality
 
 Контекст:
