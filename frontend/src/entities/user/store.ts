@@ -33,10 +33,14 @@ export const useAuthStore = create<AuthStore>((set) => ({
     window.location.href = buildLoginUrl()
   },
   logout: async () => {
+    let logoutUrl: string | undefined
     try {
-      await logoutAuth()
+      const result = await logoutAuth()
+      logoutUrl = result.logoutUrl
     } finally {
       set({ currentUser: null, csrfToken: null, status: 'anonymous' })
     }
+    // End Keycloak SSO so the next login can switch users cleanly.
+    window.location.href = logoutUrl || buildLoginUrl()
   },
 }))

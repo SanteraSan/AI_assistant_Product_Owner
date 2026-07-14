@@ -31,6 +31,25 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E1 User Switch And Demo Document Visibility
+
+Контекст:
+- admin login через Keycloak прошёл;
+- повторный вход под `analyst@local` в браузере казался broken ("неверный пароль");
+- password-grant для всех трёх users на самом деле 200.
+
+Наблюдение:
+- BFF logout очищал только Redis session/cookie, но не Keycloak SSO;
+- все документы были `private` + `owner=local-user-1` (mock era), поэтому analyst/viewer читали 0 docs, admin — все через `is_admin`.
+
+Решение:
+- logout возвращает Keycloak `end_session` URL (`id_token_hint`) и frontend делает redirect;
+- login передаёт `prompt=login` для явного выбора пользователя;
+- local demo visibility: 9 tenant / 3 analyst-role / 9 private.
+
+Вывод:
+- credentials были корректны; ломал UX logout/SSO и dataset visibility, не Keycloak users.
+
 ## 2026-07-14: E1.4 Frontend Same-Origin Auth Via BFF
 
 Контекст:

@@ -14,8 +14,8 @@ export async function fetchAuthMe(): Promise<AuthMeResponse> {
   return apiRequest<AuthMeResponse>('/auth/me')
 }
 
-export async function logoutAuth(): Promise<void> {
-  await apiRequest<{ ok: boolean }>('/auth/logout', { method: 'POST' })
+export async function logoutAuth(): Promise<{ ok: boolean; logoutUrl?: string }> {
+  return apiRequest<{ ok: boolean; logoutUrl?: string }>('/auth/logout', { method: 'POST' })
 }
 
 export function userFromAuthMe(payload: AuthMeResponse): User {
@@ -28,8 +28,14 @@ export function userFromAuthMe(payload: AuthMeResponse): User {
   }
 }
 
-export function buildLoginUrl(returnTo: string = window.location.pathname || '/'): string {
+export function buildLoginUrl(
+  returnTo: string = window.location.pathname || '/',
+  options: { prompt?: 'login' | null } = { prompt: 'login' },
+): string {
   const params = new URLSearchParams({ return_to: returnTo })
+  if (options.prompt) {
+    params.set('prompt', options.prompt)
+  }
   return `/auth/login?${params.toString()}`
 }
 

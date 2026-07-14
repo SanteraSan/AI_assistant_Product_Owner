@@ -29,11 +29,16 @@ def create_auth_router(
             request.query_params.get("return_to"),
             frontend_base_url=settings.frontend_base_url,
         )
+        prompt = (request.query_params.get("prompt") or "").strip() or None
         await session_store.save_login_state(
             LoginState(state=state, code_verifier=code_verifier, return_to=return_to)
         )
         return RedirectResponse(
-            url=oidc_client.build_authorization_url(state=state, code_verifier=code_verifier),
+            url=oidc_client.build_authorization_url(
+                state=state,
+                code_verifier=code_verifier,
+                prompt=prompt,
+            ),
             status_code=302,
         )
 
@@ -101,6 +106,10 @@ def create_auth_router(
     @router.post("/auth/logout")
     async def logout(request: Request) -> Response:
         session = await _session_from_request(request, settings=settings, session_store=session_store)
+        logout_url = oidc_client.build_end_session_url(
+            id_token=session.id_token if session is not None else None,
+            post_logout_redirect_uri=settings.frontend_base_url.rstrip("/") + "/",
+        )
         if session is not None:
             require_csrf(request, session_csrf_token=session.csrf_token)
             await session_store.delete_session(session.session_id)
@@ -110,7 +119,7 @@ def create_auth_router(
                 except Exception:
                     # Best-effort revoke; local session is already cleared.
                     pass
-        response = JSONResponse({"ok": True})
+        response = JSONResponse({"ok": True, "logoutUrl": logout_url})
         response.delete_cookie(settings.session_cookie_name, path="/")
         return response
 

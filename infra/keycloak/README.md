@@ -40,10 +40,15 @@ Password for all local users: `ChangeMe123!`
 | `analyst@local` | `analyst` | `local_demo` |
 | `viewer@local` | `viewer` | `local_demo` |
 
-Token claims include:
+To switch users in the browser, use product **Выйти** (it ends Keycloak SSO via `end_session`).  
+If Keycloak still shows the previous account, open a private window or clear cookies for `localhost:8080`.
 
-- `tenant_id`
-- `roles` (realm roles)
+Document access is enforced by backend `access_policy` (not by Keycloak alone):
+
+- `admin` — all tenant documents
+- `analyst` — `visibility=tenant` + `visibility=role` with role `analyst`
+- `viewer` — only `visibility=tenant`
+- `private` docs owned by another user remain invisible to non-admins
 
 ## Smoke Checks
 

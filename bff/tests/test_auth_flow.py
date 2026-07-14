@@ -100,13 +100,14 @@ async def test_login_redirects_to_keycloak_with_pkce() -> None:
     )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/auth/login", follow_redirects=False)
+        response = await client.get("/auth/login", params={"prompt": "login"}, follow_redirects=False)
     await http_client.aclose()
     assert response.status_code == 302
     location = response.headers["location"]
     assert location.startswith("http://localhost:8080/realms/taskflow/protocol/openid-connect/auth?")
     assert "code_challenge_method=S256" in location
     assert "client_id=taskflow-bff" in location
+    assert "prompt=login" in location
 
 
 @pytest.mark.asyncio
