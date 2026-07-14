@@ -31,6 +31,26 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E1.1 Local Keycloak Baseline
+
+Контекст:
+- перед BFF/RBAC нужен воспроизводимый local OIDC provider;
+- mock headers больше не должны быть источником identity.
+
+Наблюдение:
+- `quay.io/keycloak/keycloak:26.2` + `start-dev --import-realm` достаточно для local baseline;
+- realm `taskflow` импортируется с confidential client `taskflow-bff`, roles и тремя test users;
+- password-grant smoke подтвердил `tenant_id=local_demo` и realm roles в access token.
+
+Решение:
+- Keycloak добавлен в `docker-compose.yml`;
+- realm export лежит в `infra/keycloak/realm-taskflow.json`;
+- local secrets и passwords задокументированы только для dev.
+
+Вывод:
+- E1.1 даёт настоящий OIDC surface без переписывания backend;
+- следующий шаг — BFF session cookie + signed service JWT, а не public SPA client.
+
 ## 2026-07-14: E0.3 Chat Attachment Status And Clean Answers
 
 Контекст:

@@ -39,6 +39,21 @@ services:
       timeout: 5s
       retries: 5
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2
+    container_name: taskflow-keycloak
+    command:
+      - start-dev
+      - --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: 8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infra/keycloak/realm-taskflow.json:/opt/keycloak/data/import/realm-taskflow.json:ro
+
 volumes:
   postgres_data:
   qdrant_data:

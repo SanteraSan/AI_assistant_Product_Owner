@@ -1,0 +1,169 @@
+{
+  "realm": "taskflow",
+  "enabled": true,
+  "displayName": "TaskFlow AI",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "sslRequired": "external",
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "Full tenant administration"
+      },
+      {
+        "name": "analyst",
+        "description": "Read and analyze documents/buckets"
+      },
+      {
+        "name": "viewer",
+        "description": "Read-only access"
+      },
+      {
+        "name": "ingestion_manager",
+        "description": "Upload and manage document ingestion"
+      },
+      {
+        "name": "model_manager",
+        "description": "Select and manage model providers"
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "admin@local",
+      "enabled": true,
+      "email": "admin@local",
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "Local",
+      "attributes": {
+        "tenant_id": ["local_demo"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ChangeMe123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "admin",
+        "analyst",
+        "ingestion_manager",
+        "model_manager"
+      ]
+    },
+    {
+      "username": "analyst@local",
+      "enabled": true,
+      "email": "analyst@local",
+      "emailVerified": true,
+      "firstName": "Analyst",
+      "lastName": "Local",
+      "attributes": {
+        "tenant_id": ["local_demo"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ChangeMe123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "analyst"
+      ]
+    },
+    {
+      "username": "viewer@local",
+      "enabled": true,
+      "email": "viewer@local",
+      "emailVerified": true,
+      "firstName": "Viewer",
+      "lastName": "Local",
+      "attributes": {
+        "tenant_id": ["local_demo"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ChangeMe123!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "viewer"
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "taskflow-bff",
+      "name": "TaskFlow BFF",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "taskflow-bff-dev-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "http://localhost:8001/auth/callback",
+        "http://127.0.0.1:8001/auth/callback",
+        "http://localhost:5173/auth/callback",
+        "http://127.0.0.1:5173/auth/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8001",
+        "http://127.0.0.1:8001"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/*##http://127.0.0.1:5173/*##http://localhost:8001/*##http://127.0.0.1:8001/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "tenant_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "browserSecurityHeaders": {
+    "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'self'; object-src 'none';"
+  }
+}

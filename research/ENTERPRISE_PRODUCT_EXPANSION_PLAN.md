@@ -177,6 +177,8 @@ Definition of done:
 
 ## Этап E1: Keycloak, BFF And RBAC
 
+Статус: **in progress** — E1.1 Keycloak local baseline готов (2026-07-14).
+
 Цель:
 
 - заменить mock auth на настоящий OIDC/OAuth2 и role-based access control.
