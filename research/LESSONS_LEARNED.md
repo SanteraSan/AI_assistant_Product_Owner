@@ -31,6 +31,42 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E2 Kickoff — Gemini Chat Baseline
+
+Контекст:
+- E1 auth/RBAC закрыт; нужен model gateway без ломки local RAG pipeline;
+- бесплатного официального OpenAI key нет.
+
+Решение (kickoff):
+- baseline external provider = Google AI Studio Gemini (OpenAI-compatible endpoint);
+- E2.1 выносит наружу только chat/RAG generation;
+- embeddings, vision, conversation summary остаются на Ollama;
+- `approach`: `local_only` / `openapi` / `hybrid` (Ollama→Gemini fallback).
+
+Вывод:
+- один `OpenAICompatibleProvider` покрывает Gemini сейчас и Groq/OpenRouter позже;
+- ключ: `GEMINI_API_KEY` из AI Studio, не shared OpenAI keys.
+
+## 2026-07-14: E1 Named-File Scope And Inventory Groundedness
+
+Контекст:
+- после RBAC smoke модель подменяла отсутствующий `moto.jpg` соседним docx;
+- затем false refusal на `1000 документов.txt` и «какие файлы доступны?» отвечал одним semantic hit.
+
+Наблюдение:
+- prompt-only отказ недостаточен;
+- short-circuit по retrieved chunks ломал доступные файлы с пробелами в имени;
+- inventory-вопросы нельзя решать через semantic top-k.
+
+Решение:
+- `requested_file_scope`: парсинг имён (в т.ч. с пробелами), match по accessible docs;
+- missing → refusal без LLM; matched → force `document_ids`;
+- inventory → список accessible indexed files;
+- browser smoke подтвердил корректное поведение.
+
+Вывод:
+- access scope и answer grounding — разные слои; оба нужны до LLM.
+
 ## 2026-07-14: E1 Browser Smoke Confirmed
 
 Контекст:

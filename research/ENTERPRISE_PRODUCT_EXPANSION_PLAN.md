@@ -201,19 +201,54 @@ Definition of done:
 
 ## Этап E2: Model Gateway And External Providers
 
+Статус: **planned** (2026-07-14) — kickoff decisions зафиксированы, реализация ещё не начата.
+
 Цель:
 
 - поддержать local Ollama и OpenAI-compatible external models за одним provider interface.
 
-Scope:
+### Решения kickoff (2026-07-14)
 
-- abstraction `LLMProvider`;
-- `OllamaProvider`;
-- `OpenAICompatibleProvider`;
-- model registry с capabilities: chat, embeddings, vision, JSON mode, tool calling;
-- provider fallback policy;
-- per-tenant model allowlist;
-- cost/latency/audit metadata.
+Baseline external provider:
+
+- **Google AI Studio / Gemini** через OpenAI-compatible endpoint  
+  (`https://generativelanguage.googleapis.com/v1beta/openai/`);
+- env: `GEMINI_API_KEY` (бесплатный ключ из [Google AI Studio](https://aistudio.google.com/apikey));
+- внешний chat model baseline: `gemini-2.5-flash` (или актуальный free Flash из AI Studio на момент реализации).
+
+Что идёт наружу в E2.1:
+
+- **только chat / RAG generation** (user-selected model + `approach=openapi|hybrid`);
+- **embeddings** остаются на Ollama (`nomic-embed-text`) — иначе ломается размерность Qdrant;
+- **vision / image digest / targeted vision** остаются на Ollama;
+- **conversation summary** остаётся на Ollama.
+
+Routing `approach` (уже есть во frontend, backend начнёт использовать):
+
+| Approach | Chat generation | Embeddings / vision / summary |
+|----------|-----------------|-------------------------------|
+| `local_only` | Ollama | Ollama |
+| `openapi` | Gemini | Ollama |
+| `hybrid` | Ollama primary, fallback на Gemini при outage/overload | Ollama |
+
+Официального free OpenAI key нет — для pet/portfolio baseline берём Gemini free tier, не shared/leaked OpenAI keys.
+
+Future hardening (не E2.1):
+
+- OpenRouter / Groq как дополнительные OpenAI-compatible backends;
+- external vision/embeddings;
+- per-tenant model allowlist в DB;
+- cost accounting.
+
+Scope E2.1:
+
+- abstraction `LLMProvider` (`generate`, `embed`, `health`);
+- `OllamaProvider` (wrap текущего `OllamaClient`);
+- `OpenAICompatibleProvider` (Gemini baseline);
+- `ModelGateway` / registry: resolve `(model_id, approach, tenant)` → provider + concrete model;
+- wiring в `POST /chat` и `POST /rag/chat`;
+- audit: реальный `provider` в chat metadata / logs;
+- unit tests + smoke с `GEMINI_API_KEY`.
 
 Заметки по fine-tuning:
 
@@ -221,11 +256,12 @@ Scope:
 - closed external models обычно нельзя дообучать через LoRA, потому что weights недоступны;
 - external fine-tuning provider-specific и должен идти через отдельный provider adapter.
 
-Definition of done:
+Definition of done (E2.1):
 
-- пользователь или backend policy может выбрать local/external model;
-- при outage local model возможен fallback на external provider, если policy это разрешает;
-- все model calls логируются с provider/model/request id.
+- пользователь может выбрать local Ollama chat или Gemini chat через `approach` / model list;
+- embeddings/vision не зависят от Gemini;
+- при `hybrid` и недоступном Ollama chat возможен fallback на Gemini;
+- все chat generation calls логируются с `provider`, `model`, `request_id`.
 
 ## Этап E3: Agents, Function Calling And Tool Use
 
@@ -345,9 +381,9 @@ Scope:
 
 ## Рекомендуемый порядок
 
-1. E0 UI Skeleton.
-2. E1 Keycloak/BFF/RBAC.
-3. E2 Model Gateway и external providers.
+1. E0 UI Skeleton — **done**.
+2. E1 Keycloak/BFF/RBAC — **done** (2026-07-14).
+3. E2 Model Gateway и external providers — **next** (Gemini chat baseline).
 4. E3 Tool-use/agents.
 5. E4 n8n/email workflows.
 6. E5 Kafka event backbone.
