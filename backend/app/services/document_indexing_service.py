@@ -2,7 +2,6 @@ import logging
 import uuid
 from dataclasses import replace
 from pathlib import Path
-from shutil import copy2
 from tempfile import TemporaryDirectory
 
 from sqlalchemy import select
@@ -14,6 +13,11 @@ from app.services.chunking import DocumentChunk, chunk_documents
 from app.services.document_loader import RawDocument, load_raw_documents
 from app.services.image_digest_service import load_image_digest_documents
 from app.services.indexing_event_publisher import IndexingEventPublisher
+from app.services.object_storage import (
+    LocalFilesystemStorage,
+    ObjectStorage,
+    display_name_from_ref,
+)
 from app.services.ollama_client import OllamaClient
 
 logger = logging.getLogger(__name__)
@@ -31,6 +35,7 @@ class DocumentIndexingService:
         image_vision_enabled: bool = False,
         image_vision_model: str | None = None,
         event_publisher: IndexingEventPublisher | None = None,
+        object_storage: ObjectStorage | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._qdrant_store = qdrant_store
@@ -39,6 +44,7 @@ class DocumentIndexingService:
         self._image_vision_enabled = image_vision_enabled
         self._image_vision_model = image_vision_model
         self._event_publisher = event_publisher
+        self._object_storage = object_storage
 
     async def process_jobs(self, job_ids: list[str]) -> None:
         for job_id in job_ids:
@@ -186,7 +192,12 @@ class DocumentIndexingService:
             logger.exception("Failed to publish document.index_failed for job=%s", job_id)
 
     async def _index_document(self, *, document: DocumentAsset, bucket_id: str) -> int:
-        raw_documents = _load_raw_documents_for_asset(document=document, bucket_id=bucket_id)
+        storage = self._object_storage or LocalFilesystemStorage(Path("."))
+        raw_documents = _load_raw_documents_for_asset(
+            document=document,
+            bucket_id=bucket_id,
+            object_storage=storage,
+        )
         if not raw_documents and _can_build_image_digest(
             document=document,
             enabled=self._image_vision_enabled,
@@ -197,6 +208,7 @@ class DocumentIndexingService:
                 bucket_id=bucket_id,
                 ollama_client=self._ollama_client,
                 vision_model=self._image_vision_model or "",
+                object_storage=storage,
             )
         chunks = chunk_documents(raw_documents)
         if not chunks:
@@ -225,12 +237,18 @@ class DocumentIndexingService:
         return len(pending)
 
 
-def _load_raw_documents_for_asset(*, document: DocumentAsset, bucket_id: str) -> list[RawDocument]:
-    source_path = Path(document.source_path)
+def _load_raw_documents_for_asset(
+    *,
+    document: DocumentAsset,
+    bucket_id: str,
+    object_storage: ObjectStorage,
+) -> list[RawDocument]:
+    source_ref = document.source_path
+    file_name = display_name_from_ref(source_ref)
     with TemporaryDirectory(prefix="document-index-") as temporary_dir_name:
         temporary_dir = Path(temporary_dir_name)
-        temporary_path = temporary_dir / source_path.name
-        copy2(source_path, temporary_path)
+        temporary_path = temporary_dir / file_name
+        object_storage.materialize(source_ref, temporary_path)
 
         loaded_documents = load_raw_documents(
             temporary_dir,
@@ -248,7 +266,7 @@ def _load_raw_documents_for_asset(*, document: DocumentAsset, bucket_id: str) ->
                 id=f"{document.id}:{raw_document.id}",
                 tenant_id=document.tenant_id,
                 bucket_id=bucket_id,
-                source_path=str(source_path),
+                source_path=source_ref,
                 metadata={
                     **raw_document.metadata,
                     "document_asset_id": document.id,
@@ -266,12 +284,14 @@ async def _load_image_digest_documents_for_asset(
     bucket_id: str,
     ollama_client: OllamaClient,
     vision_model: str,
+    object_storage: ObjectStorage,
 ) -> list[RawDocument]:
-    source_path = Path(document.source_path)
+    source_ref = document.source_path
+    file_name = display_name_from_ref(source_ref)
     with TemporaryDirectory(prefix="document-index-vision-") as temporary_dir_name:
         temporary_dir = Path(temporary_dir_name)
-        temporary_path = temporary_dir / source_path.name
-        copy2(source_path, temporary_path)
+        temporary_path = temporary_dir / file_name
+        object_storage.materialize(source_ref, temporary_path)
 
         loaded_documents = await load_image_digest_documents(
             temporary_dir,
@@ -291,7 +311,7 @@ async def _load_image_digest_documents_for_asset(
                 id=f"{document.id}:{raw_document.id}",
                 tenant_id=document.tenant_id,
                 bucket_id=bucket_id,
-                source_path=str(source_path),
+                source_path=source_ref,
                 metadata={
                     **raw_document.metadata,
                     "document_asset_id": document.id,

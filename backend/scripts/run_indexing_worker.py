@@ -38,6 +38,17 @@ async def run_worker() -> None:
         collection_name=settings.qdrant_collection,
         check_compatibility=settings.qdrant_check_compatibility,
     )
+    from app.services.object_storage import build_object_storage, resolve_upload_root
+
+    object_storage = build_object_storage(
+        enabled=settings.object_storage_enabled,
+        upload_root=resolve_upload_root(settings.raw_data_dir),
+        endpoint_url=settings.object_storage_endpoint,
+        access_key=settings.object_storage_access_key,
+        secret_key=settings.object_storage_secret_key,
+        bucket=settings.object_storage_bucket,
+        region=settings.object_storage_region,
+    )
     ollama_client = OllamaClient(
         base_url=settings.ollama_base_url,
         timeout_seconds=settings.request_timeout_seconds,
@@ -64,6 +75,7 @@ async def run_worker() -> None:
         image_vision_enabled=settings.image_vision_enabled,
         image_vision_model=settings.image_vision_model,
         event_publisher=event_publisher,
+        object_storage=object_storage,
     )
 
     consumer = AIOKafkaConsumer(

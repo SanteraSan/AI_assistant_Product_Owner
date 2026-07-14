@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
-from shutil import move
 from uuid import uuid4
 
 from sqlalchemy import func, select
@@ -17,6 +16,7 @@ from app.db.models import (
     StagedDocumentUpload,
 )
 from app.services.access_policy import UserContext, can_manage_document, can_read_document
+from app.services.object_storage import LocalFilesystemStorage, ObjectStorage, resolve_upload_root
 
 
 PERSONAL_INDEX_BUCKET_ID = "__personal__"
@@ -36,13 +36,22 @@ class BucketService:
         *,
         session_factory: async_sessionmaker[AsyncSession],
         raw_data_dir: str,
+        object_storage: ObjectStorage | None = None,
     ) -> None:
         self._session_factory = session_factory
-        self._upload_root = _resolve_upload_root(raw_data_dir)
+        self._upload_root = resolve_upload_root(raw_data_dir)
+        self._storage: ObjectStorage = object_storage or LocalFilesystemStorage(self._upload_root)
 
     @property
     def session_factory(self) -> async_sessionmaker[AsyncSession]:
         return self._session_factory
+
+    @property
+    def object_storage(self) -> ObjectStorage:
+        return self._storage
+
+    def _object_key(self, *parts: str) -> str:
+        return "/".join(part.strip("/") for part in parts if part)
 
     async def list_buckets(self, *, tenant_id: str) -> list[tuple[KnowledgeBucket, int]]:
         async with self._session_factory() as session:
@@ -323,10 +332,10 @@ class BucketService:
                     ],
                 )
 
-            source_path = Path(document.source_path)
+            source_ref = document.source_path
             await session.delete(document)
             await session.commit()
-            source_path.unlink(missing_ok=True)
+            self._storage.delete(source_ref)
             return DocumentDeleteResult(deleted=True)
 
     async def delete_bucket(
@@ -420,10 +429,12 @@ class BucketService:
             upload_id = str(uuid4())
             safe_file_name = _safe_file_name(file_name)
             content_sha256 = _content_sha256(content)
-            target_dir = self._upload_root / user.tenant_id / "staging"
-            target_dir.mkdir(parents=True, exist_ok=True)
-            target_path = target_dir / f"{upload_id}_{safe_file_name}"
-            target_path.write_bytes(content)
+            object_key = self._object_key(user.tenant_id, "staging", f"{upload_id}_{safe_file_name}")
+            source_ref = self._storage.put(
+                object_key,
+                content,
+                content_type=content_type or "application/octet-stream",
+            )
 
             metadata_json: dict[str, object] = {
                 "content_type": content_type or "application/octet-stream",
@@ -438,7 +449,7 @@ class BucketService:
                 owner_user_id=user.user_id,
                 original_file_name=safe_file_name,
                 source_type=_source_type_for_file(safe_file_name),
-                source_path=str(target_path),
+                source_path=source_ref,
                 status="staged",
                 size_bytes=len(content),
                 expires_at=datetime.now(UTC) + timedelta(days=1),
@@ -467,7 +478,7 @@ class BucketService:
                 return False
             if upload.owner_user_id is not None and upload.owner_user_id != user.user_id and not user.is_admin:
                 return False
-            Path(upload.source_path).unlink(missing_ok=True)
+            self._storage.delete(upload.source_path)
             upload.status = "cancelled"
             await session.commit()
             return True
@@ -582,7 +593,7 @@ class BucketService:
                             )
                         )
                         indexing_job_ids.append(job_id)
-                    Path(upload.source_path).unlink(missing_ok=True)
+                    self._storage.delete(upload.source_path)
                     upload.status = "committed"
                     upload.metadata_json = {
                         **dict(upload.metadata_json),
@@ -594,10 +605,12 @@ class BucketService:
                     continue
 
                 document_id = str(uuid4())
-                target_dir = self._upload_root / user.tenant_id / "documents"
-                target_dir.mkdir(parents=True, exist_ok=True)
-                target_path = target_dir / f"{document_id}_{upload.original_file_name}"
-                move(upload.source_path, target_path)
+                object_key = self._object_key(
+                    user.tenant_id,
+                    "documents",
+                    f"{document_id}_{upload.original_file_name}",
+                )
+                source_ref = self._storage.move(upload.source_path, object_key)
 
                 document = DocumentAsset(
                     id=document_id,
@@ -606,7 +619,7 @@ class BucketService:
                     title=upload.original_file_name,
                     file_name=upload.original_file_name,
                     source_type=upload.source_type,
-                    source_path=str(target_path),
+                    source_path=source_ref,
                     status="indexing",
                     visibility=visibility,
                     allowed_roles=normalized_allowed_roles,
@@ -678,7 +691,7 @@ class BucketService:
                     upload=upload,
                 )
                 if existing_document is not None:
-                    Path(upload.source_path).unlink(missing_ok=True)
+                    self._storage.delete(upload.source_path)
                     upload.status = "committed"
                     upload.metadata_json = {
                         **dict(upload.metadata_json),
@@ -689,10 +702,12 @@ class BucketService:
                     continue
 
                 document_id = str(uuid4())
-                target_dir = self._upload_root / user.tenant_id / "documents"
-                target_dir.mkdir(parents=True, exist_ok=True)
-                target_path = target_dir / f"{document_id}_{upload.original_file_name}"
-                move(upload.source_path, target_path)
+                object_key = self._object_key(
+                    user.tenant_id,
+                    "documents",
+                    f"{document_id}_{upload.original_file_name}",
+                )
+                source_ref = self._storage.move(upload.source_path, object_key)
 
                 document = DocumentAsset(
                     id=document_id,
@@ -701,7 +716,7 @@ class BucketService:
                     title=upload.original_file_name,
                     file_name=upload.original_file_name,
                     source_type=upload.source_type,
-                    source_path=str(target_path),
+                    source_path=source_ref,
                     status="indexing",
                     visibility=visibility,
                     allowed_roles=normalized_allowed_roles,
@@ -757,10 +772,16 @@ class BucketService:
             document_id = str(uuid4())
             safe_file_name = _safe_file_name(file_name)
             content_sha256 = _content_sha256(content)
-            target_dir = self._upload_root / user.tenant_id / (bucket_id or "personal")
-            target_dir.mkdir(parents=True, exist_ok=True)
-            target_path = target_dir / f"{document_id}_{safe_file_name}"
-            target_path.write_bytes(content)
+            object_key = self._object_key(
+                user.tenant_id,
+                bucket_id or "personal",
+                f"{document_id}_{safe_file_name}",
+            )
+            source_ref = self._storage.put(
+                object_key,
+                content,
+                content_type=content_type or "application/octet-stream",
+            )
 
             document = DocumentAsset(
                 id=document_id,
@@ -769,7 +790,7 @@ class BucketService:
                 title=safe_file_name,
                 file_name=safe_file_name,
                 source_type=_source_type_for_file(safe_file_name),
-                source_path=str(target_path),
+                source_path=source_ref,
                 status="uploaded",
                 visibility=visibility,
                 allowed_roles=allowed_roles or [],
@@ -836,14 +857,6 @@ class BucketService:
                 KnowledgeBucket.id == bucket_id,
             )
         )
-
-
-def _resolve_upload_root(raw_data_dir: str) -> Path:
-    raw_path = Path(raw_data_dir)
-    if not raw_path.is_absolute():
-        backend_root = Path(__file__).resolve().parents[2]
-        raw_path = backend_root / raw_path
-    return (raw_path / "uploads").resolve()
 
 
 def _safe_file_name(file_name: str) -> str:

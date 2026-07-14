@@ -31,6 +31,22 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-15: E7 Slice — MinIO/S3 Object Storage for Uploads
+
+Контекст:
+- roadmap: E5.x → E7 slice → E6; первый пункт E7 — object storage вместо только local disk.
+
+Решение:
+- `ObjectStorage` protocol: `LocalFilesystemStorage` (default) + `S3CompatibleStorage` (MinIO via boto3);
+- refs: local = absolute path (legacy-compatible); MinIO = `storage://{tenant}/documents/...`;
+- BucketService put/move/delete через adapter; indexing/vision `materialize` во temp file;
+- compose profile `e7` (`taskflow-minio` :9000 / console :9001);
+- seed corpus на диске не трогаем.
+
+Вывод:
+- upload lifecycle готов к S3-compatible backend без переписывания parsers;
+- следующий E7 slice: health/deploy или metrics.
+
 ## 2026-07-15: Roadmap Lock — E5.x → E7 slice → E6 lab
 
 Контекст:

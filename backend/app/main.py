@@ -2,6 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import perf_counter
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -50,6 +51,7 @@ from app.services.image_digest_service import build_targeted_image_digest
 from app.services.indexing_event_publisher import IndexingEventPublisher
 from app.services.indexing_job_dispatcher import IndexingJobDispatcher
 from app.services.integration_ingest_service import IntegrationIngestService
+from app.services.object_storage import build_object_storage, display_name_from_ref, resolve_upload_root
 from app.services.ollama_client import OllamaClient
 from app.services.ollama_load_guard import OllamaLoadGuard, OllamaOverloadedError
 from app.services.query_router import QueryRouter
@@ -134,9 +136,19 @@ conversation_summary_service = ConversationSummaryService(
     summary_model=settings.conversation_summary_model,
     summary_temperature=settings.conversation_summary_temperature,
 )
+object_storage = build_object_storage(
+    enabled=settings.object_storage_enabled,
+    upload_root=resolve_upload_root(settings.raw_data_dir),
+    endpoint_url=settings.object_storage_endpoint,
+    access_key=settings.object_storage_access_key,
+    secret_key=settings.object_storage_secret_key,
+    bucket=settings.object_storage_bucket,
+    region=settings.object_storage_region,
+)
 bucket_service = BucketService(
     session_factory=db_session_factory,
     raw_data_dir=settings.raw_data_dir,
+    object_storage=object_storage,
 )
 _sql_allowed_tables = parse_allowed_tables(settings.sql_tool_allowed_tables)
 sql_execution_service = SqlExecutionService(
@@ -187,6 +199,7 @@ document_indexing_service = DocumentIndexingService(
     image_vision_enabled=settings.image_vision_enabled,
     image_vision_model=settings.image_vision_model,
     event_publisher=indexing_event_publisher,
+    object_storage=object_storage,
 )
 integration_ingest_service = IntegrationIngestService(
     bucket_service=bucket_service,
@@ -1062,18 +1075,20 @@ async def _build_targeted_image_source(
     bucket_id: str,
     message: str,
 ) -> SourceChunk | None:
-    source_path = Path(document.source_path)
-    if not source_path.is_file():
+    if not object_storage.exists(document.source_path):
         return None
 
     previous_digest = _previous_image_digest(document=document, bucket_id=bucket_id)
-    digest = await build_targeted_image_digest(
-        source_path,
-        question=message,
-        ollama_client=ollama_client,
-        vision_model=settings.image_vision_model,
-        previous_digest=previous_digest,
-    )
+    with TemporaryDirectory(prefix="targeted-vision-") as temporary_dir_name:
+        temporary_path = Path(temporary_dir_name) / display_name_from_ref(document.source_path)
+        object_storage.materialize(document.source_path, temporary_path)
+        digest = await build_targeted_image_digest(
+            temporary_path,
+            question=message,
+            ollama_client=ollama_client,
+            vision_model=settings.image_vision_model,
+            previous_digest=previous_digest,
+        )
     content = str(digest.get("content") or "").strip()
     if not content:
         return None

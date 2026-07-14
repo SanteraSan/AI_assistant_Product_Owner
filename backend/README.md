@@ -1446,6 +1446,24 @@ python -m scripts.run_indexing_worker
 
 Postgres `document_indexing_jobs` остаётся source of truth. Redis по-прежнему для rate limits.
 
+## E7 Slice: MinIO / S3 Uploads
+
+Статус: **baseline**. Uploads идут через `ObjectStorage` adapter.
+
+- `OBJECT_STORAGE_ENABLED=false` (default) → локальный `data/raw/uploads` (как раньше)
+- `OBJECT_STORAGE_ENABLED=true` → MinIO/S3; `DocumentAsset.source_path` = `storage://{key}`
+- Indexing/vision materialize объект во временный файл перед парсерами
+- Compose: `docker compose --profile e7 up -d minio` (API `:9000`, console `:9001`)
+
+```bash
+docker compose --profile e7 up -d minio
+export OBJECT_STORAGE_ENABLED=true
+export OBJECT_STORAGE_ENDPOINT=http://localhost:9000
+# restart API (+ indexing worker if Kafka path)
+```
+
+Seed corpus под `data/raw/*` остаётся на диске; object storage покрывает upload lifecycle.
+
 ## Seed Corpus And E1 ACL
 
 `scripts/ingest_seed_data.py` индексирует `data/raw` в Qdrant (`bucket_id=taskflow_seed`, path-based chunk ids). После E1 `/rag/chat` режет retrieval по доступным `document_assets`.

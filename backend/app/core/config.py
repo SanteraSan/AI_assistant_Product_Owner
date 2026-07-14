@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     kafka_consumer_group: str = "taskflow-indexing-workers"
     # Local Qdrant server may lag client package; silence noisy mismatch warning.
     qdrant_check_compatibility: bool = False
+    # E7: MinIO / S3-compatible object storage for uploads (default = local FS).
+    object_storage_enabled: bool = False
+    object_storage_endpoint: str = "http://localhost:9000"
+    object_storage_access_key: str = "minioadmin"
+    object_storage_secret_key: str = "minioadmin"
+    object_storage_bucket: str = "taskflow-uploads"
+    object_storage_region: str = "us-east-1"
 
     @field_validator("rag_score_threshold", mode="before")
     @classmethod

@@ -19,10 +19,8 @@ Status: **implemented (2026-07-15)**
 
 ## E7 slice (next)
 
-Pick 1–2 only:
-- MinIO/S3 for uploads **or**
-- compose/deploy profile + worker health **or**
-- minimal metrics for API/worker
+1. MinIO/S3 for uploads — **done**
+2. Pick one more later: compose/deploy profile + worker health **or** minimal metrics
 
 Defer: mega admin UI, audit export suite, full report generation.
 
