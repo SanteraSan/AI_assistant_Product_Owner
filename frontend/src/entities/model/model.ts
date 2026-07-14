@@ -18,6 +18,11 @@ export const localModels: LocalModel[] = [
     description: 'Кандидат для более сложных ответов и comparison runs.',
   },
   {
+    id: 'qwen3:14b',
+    label: 'qwen3:14b',
+    description: 'Более крупный Qwen3 для agent/RAG comparison и reasoning.',
+  },
+  {
     id: 'qwen2.5-coder:7b',
     label: 'qwen2.5-coder:7b',
     description: 'Coder-модель и база для Text-to-SQL LoRA.',
