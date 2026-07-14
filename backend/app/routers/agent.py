@@ -11,6 +11,7 @@ from app.dependencies.auth import get_current_user
 from app.models.chat import AgentChatRequest, AgentChatResponse
 from app.services.access_policy import UserContext
 from app.services.agent.orchestrator import AgentOrchestrator
+from app.services.agent.langgraph_adapter import LangGraphAgentAdapter
 from app.services.chat_history_service import ChatExchangeRecord
 from app.services.metrics import AppMetrics
 from app.services.ollama_load_guard import OllamaOverloadedError
@@ -19,6 +20,7 @@ from app.services.ollama_load_guard import OllamaOverloadedError
 BuildConversationContext = Callable[..., Awaitable[dict[str, object]]]
 SaveChatExchange = Callable[..., Awaitable[ChatExchangeRecord | None]]
 EnforceRateLimit = Callable[..., Awaitable[None]]
+AgentRunner = AgentOrchestrator | LangGraphAgentAdapter
 
 
 def create_agent_router(
@@ -29,6 +31,8 @@ def create_agent_router(
     enforce_rate_limit: EnforceRateLimit,
     attach_chat_exchange: Callable[[AgentChatResponse, ChatExchangeRecord | None], None],
     metrics: AppMetrics | None = None,
+    langgraph_adapter: LangGraphAgentAdapter | None = None,
+    agent_langgraph_enabled: bool = False,
 ) -> APIRouter:
     router = APIRouter(tags=["agent"])
 
@@ -42,6 +46,16 @@ def create_agent_router(
         request_id = request.headers.get("x-request-id") or f"agent_{uuid4().hex[:12]}"
         started_at = perf_counter()
         outcome = "error"
+        runner: AgentRunner = (
+            langgraph_adapter
+            if agent_langgraph_enabled and langgraph_adapter is not None
+            else agent_orchestrator
+        )
+        runtime = (
+            "langgraph"
+            if agent_langgraph_enabled and langgraph_adapter is not None
+            else "handwritten"
+        )
 
         try:
             conversation_context = await build_conversation_context(
@@ -52,7 +66,7 @@ def create_agent_router(
             memory_context = memory if isinstance(memory, dict) else None
 
             try:
-                result = await agent_orchestrator.run(
+                result = await runner.run(
                     message=payload.message,
                     user=user,
                     request_id=request_id,
@@ -100,6 +114,7 @@ def create_agent_router(
                     "tool_calls": result.tool_calls,
                     "sources": result.sources,
                     "steps": result.steps,
+                    "agent_runtime": runtime,
                     "conversation_context": conversation_context,
                 },
             )

@@ -417,7 +417,7 @@ Definition of done:
 
 ## Этап E6: Framework Adapters
 
-Статус: **planned after E7 slice** (lab adapter beside handwritten Agent). См. `.cursor/plans/e5x_e7_e6_roadmap.plan.md`.
+Статус: **lab baseline done (2026-07-15)** — LangGraph adapter beside handwritten Agent. См. `.cursor/plans/e5x_e7_e6_roadmap.plan.md`.
 
 Цель:
 
@@ -431,15 +431,21 @@ Definition of done:
 - LangChain для provider/tool abstractions, когда это полезно;
 - CrewAI только для ограниченных multi-agent demos, не для ownership core backend.
 
+Сделано в lab:
+
+- `LangGraphAgentAdapter` + `AGENT_LANGGRAPH_ENABLED`;
+- те же tools/RBAC; `provider=langgraph`;
+- unit parity vs handwritten orchestrator.
+
 Definition of done:
 
-- framework integration вызывает текущие backend services, а не заменяет их;
-- evaluation scenarios подтверждают, что framework layer не обходит access controls;
-- side-by-side smoke: handwritten Agent vs adapter на одном сценарии.
+- framework integration вызывает текущие backend services, а не заменяет их — **yes**;
+- evaluation scenarios подтверждают, что framework layer не обходит access controls — **unit deny case**;
+- side-by-side smoke: handwritten Agent vs adapter на одном сценарии — **unit done**; optional live UI next.
 
 ## Этап E7: Product Hardening
 
-Статус: **E7 slice done** (MinIO + deploy/health + metrics + Grafana ops); next **E6 lab**.
+Статус: **E7 slice done**; **E6 lab baseline done** (LangGraph beside Agent).
 
 Цель:
 
@@ -468,8 +474,8 @@ Definition of done:
 4. E3 Tool-use/agents — **done** (2026-07-14).
 5. E4 n8n integrations (disk + external DB slice) — **E4.1 done**; email/Jira later.
 6. E5.1 Kafka indexing — **done**; **E5.x** lifecycle events + Qdrant compat — **done (2026-07-15)**.
-7. **E7 slice** — MinIO + deploy/health + metrics + Grafana **done**; next **E6**.
-8. **E6** lab framework adapter beside Agent.
+7. **E7 slice** — MinIO + deploy/health + metrics + Grafana **done**.
+8. **E6** lab framework adapter beside Agent — **lab baseline done**; optional live UI smoke.
 9. E7 remainder + E4.x connectors as needed.
 
 Порядок после E5.1 согласован 2026-07-15: сначала укрепить platform (E5.x + узкий E7), затем лабораторный E6 для сравнения с рукописным Agent.

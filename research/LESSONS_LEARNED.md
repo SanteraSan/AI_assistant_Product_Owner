@@ -31,6 +31,25 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-15: E6 Lab — LangGraph Adapter Beside Agent
+
+Контекст:
+- E7 закрыт; нужен лабораторный framework adapter без замены рукописного Agent.
+
+Решение:
+- `LangGraphAgentAdapter` (StateGraph) вызывает те же `ToolExecutor` / registry / `_build_agent_prompt`;
+- флаг `AGENT_LANGGRAPH_ENABLED` (default false); `AgentOrchestrator` остаётся primary;
+- `provider=langgraph`, metadata `agent_runtime`; readiness `features.agent_langgraph_enabled`;
+- dep: `langgraph` (+ langchain-core transitive); unit parity tests с orchestrator.
+
+Проверки:
+- `test_langgraph_adapter` + `test_agent_orchestrator` → 6 passed.
+
+Вывод:
+- framework даёт явный graph/routing, но тянет langchain-core и deprecation warnings на Py3.14;
+- RBAC не обходится (viewer SQL denied в trace);
+- next: optional UI side-by-side smoke + сравнить latency в Grafana.
+
 ## 2026-07-15: E7 Closed — Grafana UI Smoke Confirmed
 
 Контекст:

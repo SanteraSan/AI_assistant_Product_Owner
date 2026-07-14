@@ -28,11 +28,11 @@ Next: **E6 lab** (LangGraph beside Agent).
 
 Defer: mega admin UI, audit export suite, full report generation, in-app product charts.
 
-## E6 lab (next)
+## E6 lab
 
-Status: **starting**
+Status: **lab baseline implemented (2026-07-15)**
 
-- thin LangGraph (or similar) adapter calling existing tools/RBAC
-- side-by-side smoke vs handwritten Agent
-- goal: learn framework trade-offs, not rewrite core
-- feature flag default off; `AgentOrchestrator` remains primary
+- thin LangGraph adapter calling existing tools/RBAC — **done**
+- feature flag `AGENT_LANGGRAPH_ENABLED` (default off); handwritten Agent remains primary
+- unit side-by-side parity tests — **done**
+- optional next: live UI smoke + Grafana latency compare handwritten vs langgraph

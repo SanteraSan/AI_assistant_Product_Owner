@@ -1365,6 +1365,23 @@ pytest tests/test_agent_orchestrator.py -q
 # UI: Режим → Agent → вопрос вроде «какие у меня права?» / «какие buckets есть?»
 ```
 
+## E6 Lab: LangGraph Adapter (beside handwritten Agent)
+
+Статус: **lab baseline**. `AgentOrchestrator` остаётся default path.
+
+```bash
+export AGENT_LANGGRAPH_ENABLED=true
+# restart API → same POST /agent/chat / UI Agent mode
+```
+
+- `LangGraphAgentAdapter` — StateGraph (`call_model` → `execute_tools` → `finalize`) поверх тех же tools/RBAC/prompt;
+- response `provider=langgraph`; chat metadata `agent_runtime=langgraph|handwritten`;
+- цель: side-by-side trade-offs, не rewrite core.
+
+```bash
+pytest tests/test_agent_orchestrator.py tests/test_langgraph_adapter.py -q
+```
+
 ## E3.4 Package V5 LoRA → Ollama Tag
 
 PEFT safetensors для Qwen **не** подходят как Ollama `ADAPTER` напрямую. Рабочий путь: **adapter GGUF** (`llama.cpp convert_lora_to_gguf.py`) + Modelfile `FROM qwen2.5-coder:7b` + `ADAPTER …lora.gguf`. Полный merge (`--mode merge_full`) — тяжёлый fallback.

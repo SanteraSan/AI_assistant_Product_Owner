@@ -40,6 +40,7 @@ from app.routers.buckets import create_bucket_router
 from app.routers.integrations import create_integrations_router
 from app.services.access_policy import UserContext
 from app.services.agent.orchestrator import AgentOrchestrator
+from app.services.agent.langgraph_adapter import LangGraphAgentAdapter
 from app.services.bucket_service import PERSONAL_INDEX_BUCKET_ID, BucketService
 from app.services.chat_history_service import ChatExchangeRecord, ChatHistoryService
 from app.services.conversation_context_service import ConversationContextService
@@ -184,6 +185,17 @@ agent_orchestrator = AgentOrchestrator(
     tool_registry=tool_registry,
     default_model=settings.agent_default_model or settings.default_rag_model,
     max_steps=settings.agent_max_steps,
+)
+langgraph_agent_adapter = (
+    LangGraphAgentAdapter(
+        ollama_client=ollama_client,
+        tool_executor=tool_executor,
+        tool_registry=tool_registry,
+        default_model=settings.agent_default_model or settings.default_rag_model,
+        max_steps=settings.agent_max_steps,
+    )
+    if settings.agent_langgraph_enabled
+    else None
 )
 indexing_event_publisher = (
     IndexingEventPublisher(
@@ -750,6 +762,7 @@ async def _readiness_snapshot() -> dict[str, object]:
         "kafka_enabled": settings.kafka_enabled,
         "object_storage_enabled": settings.object_storage_enabled,
         "metrics_enabled": settings.metrics_enabled,
+        "agent_langgraph_enabled": settings.agent_langgraph_enabled,
     }
     if settings.kafka_enabled:
         dependencies["kafka_reachable"] = await _kafka_bootstrap_reachable()
@@ -1395,5 +1408,7 @@ app.include_router(
         enforce_rate_limit=_enforce_rate_limit,
         attach_chat_exchange=_attach_chat_exchange,
         metrics=app_metrics,
+        langgraph_adapter=langgraph_agent_adapter,
+        agent_langgraph_enabled=settings.agent_langgraph_enabled,
     )
 )

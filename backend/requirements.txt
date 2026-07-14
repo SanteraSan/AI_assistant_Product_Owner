@@ -20,4 +20,5 @@ hiredis
 sqlglot
 boto3
 aiokafka
+langgraph>=0.3,<0.4
 pytest

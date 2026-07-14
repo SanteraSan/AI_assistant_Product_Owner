@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     sql_tool_allowed_tables: str = ""
     agent_max_steps: int = 4
     agent_default_model: str = ""
+    # E6 lab: LangGraph adapter beside handwritten AgentOrchestrator (default off).
+    agent_langgraph_enabled: bool = False
     # E4: readonly DSN for synthetic external demo DB (n8n sync source).
     external_postgres_dsn: str = (
         "postgresql+asyncpg://external_user:external_password@localhost:5433/external_demo"
