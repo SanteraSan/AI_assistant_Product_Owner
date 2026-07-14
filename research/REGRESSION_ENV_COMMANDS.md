@@ -15,6 +15,8 @@ Expected services:
 
 - `taskflow-postgres` healthy on `5432`
 - `taskflow-qdrant` running on `6333` and `6334`
+- `taskflow-redis` on `6379`
+- `taskflow-keycloak` on `8080` (realm `taskflow`)
 
 Quick checks:
 
@@ -44,6 +46,26 @@ Quick health check from another terminal:
 ```bash
 curl http://127.0.0.1:8000/health
 ```
+
+Protected routes require a BFF service JWT (`Authorization: Bearer ...`). Browser traffic should go through BFF, not directly to `:8000` with `X-User-*` headers.
+
+## 2.1 Start BFF (required for UI auth)
+
+```bash
+cd /home/santera/Projects/bff
+source .venv/bin/activate
+# BFF_PUBLIC_BASE_URL=http://localhost:5173 for Vite same-origin cookie
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
+```
+
+## 2.2 Start Frontend
+
+```bash
+cd /home/santera/Projects/frontend
+npm run dev
+```
+
+Open `http://localhost:5173`, click **Войти**, use Keycloak users from `infra/keycloak/README.md` (e.g. `admin@local` / `ChangeMe123!`).
 
 ## 3. Optional Reindex
 
