@@ -16,6 +16,8 @@ DEFAULT_SQL_TOOL_ALLOWED_TABLES: frozenset[str] = frozenset(
         "document_indexing_jobs",
         "evaluation_results",
         "evaluation_runs",
+        "external_customers",
+        "external_support_tickets",
         "knowledge_buckets",
         "rag_request_logs",
         "rag_source_logs",

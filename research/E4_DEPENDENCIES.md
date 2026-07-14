@@ -62,7 +62,7 @@ mkdir -p /home/santera/Projects/data/integrations/processed
 
 ## Когда готово
 
-Пришли подтверждение roughly:
+Чеклист выполнен, если:
 
 ```text
 n8n: http://localhost:5678 OK
@@ -70,4 +70,4 @@ external postgres: 5433 OK
 inbox dir: exists
 ```
 
-После этого можно начинать реализацию E4.1.
+Реализация E4.1: см. `backend/README.md` § E4.1 и `.cursor/plans/e4_n8n_integrations.plan.md`.

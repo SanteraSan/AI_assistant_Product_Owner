@@ -418,3 +418,39 @@ class ToolCallLog(Base):
         DateTime(timezone=True),
         server_default=func.now(),
     )
+
+
+class ExternalCustomer(Base):
+    """Synced slice from external CRM demo DB (E4)."""
+
+    __tablename__ = "external_customers"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), index=True)
+    external_id: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    segment: Mapped[str] = mapped_column(String(64), default="enterprise")
+    arr_usd: Mapped[int] = mapped_column(Integer, default=0)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
+class ExternalSupportTicket(Base):
+    """Synced support tickets from external demo DB (E4)."""
+
+    __tablename__ = "external_support_tickets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(255), index=True)
+    external_id: Mapped[str] = mapped_column(String(64), index=True)
+    customer_external_id: Mapped[str] = mapped_column(String(64), index=True)
+    subject: Mapped[str] = mapped_column(String(512))
+    status: Mapped[str] = mapped_column(String(64), default="open")
+    priority: Mapped[str] = mapped_column(String(32), default="medium")
+    product_area: Mapped[str] = mapped_column(String(64), default="notifications")
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )

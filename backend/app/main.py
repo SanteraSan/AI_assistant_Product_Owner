@@ -35,6 +35,7 @@ from app.models.chat import (
 )
 from app.routers.agent import create_agent_router
 from app.routers.buckets import create_bucket_router
+from app.routers.integrations import create_integrations_router
 from app.services.access_policy import UserContext
 from app.services.agent.orchestrator import AgentOrchestrator
 from app.services.bucket_service import PERSONAL_INDEX_BUCKET_ID, BucketService
@@ -43,8 +44,10 @@ from app.services.conversation_context_service import ConversationContextService
 from app.services.conversation_memory_service import ConversationMemoryService
 from app.services.conversation_summary_service import ConversationSummaryService
 from app.services.document_indexing_service import IMAGE_SOURCE_TYPES, DocumentIndexingService
+from app.services.external_db_sync_service import ExternalDbSyncService
 from app.services.feature_extractor import FeatureExtractor
 from app.services.image_digest_service import build_targeted_image_digest
+from app.services.integration_ingest_service import IntegrationIngestService
 from app.services.ollama_client import OllamaClient
 from app.services.ollama_load_guard import OllamaLoadGuard, OllamaOverloadedError
 from app.services.query_router import QueryRouter
@@ -172,6 +175,14 @@ document_indexing_service = DocumentIndexingService(
     image_vision_enabled=settings.image_vision_enabled,
     image_vision_model=settings.image_vision_model,
 )
+integration_ingest_service = IntegrationIngestService(
+    bucket_service=bucket_service,
+    default_bucket_name=settings.integrations_default_bucket_name,
+)
+external_db_sync_service = ExternalDbSyncService(
+    session_factory=db_session_factory,
+    external_postgres_dsn=settings.external_postgres_dsn,
+)
 
 
 @asynccontextmanager
@@ -211,6 +222,13 @@ app.include_router(
         bucket_service=bucket_service,
         document_indexing_service=document_indexing_service,
         default_tenant_id=settings.default_tenant_id,
+    )
+)
+app.include_router(
+    create_integrations_router(
+        integration_ingest_service=integration_ingest_service,
+        external_db_sync_service=external_db_sync_service,
+        document_indexing_service=document_indexing_service,
     )
 )
 

@@ -1388,11 +1388,39 @@ python3 -m venv .venv-lora-pack
 
 Артефакты пишутся в `models/text_to_sql_lora/..._ollama/` (каталог `/models/` в `.gitignore`). После `ollama create` tag `qwen2_5_coder_7b_v5_projection_steps400` должен появиться в `ollama list`.
 
-## E4 Planned: n8n Disk + External DB Sync
+## E4.1: n8n Disk Ingest + External DB Sync
 
-Статус: kickoff зафиксирован. MVP = n8n (disk file) + synthetic external Postgres sync → Agent RAG/SQL.
+Статус: **implemented (MVP)**.
 
-Перед реализацией установи зависимости из [research/E4_DEPENDENCIES.md](../research/E4_DEPENDENCIES.md). План: `.cursor/plans/e4_n8n_integrations.plan.md`.
+Inbound seam (service JWT):
+
+- `POST /integrations/ingest` — binary body + `X-File-Name` → stage/commit в bucket `n8n Integrations` (или `X-Bucket-Id` / `X-Bucket-Name`), metadata `source=n8n`, `channel=disk|…`
+- `POST /integrations/sync-external-db` — sync slice из synthetic external Postgres (`EXTERNAL_POSTGRES_DSN`, default `:5433`) → allowlisted `external_customers` / `external_support_tickets`
+- SQL allowlist включает эти таблицы; Agent использует обычные `text_to_sql` / `execute_readonly_sql`
+
+Локальный прогон:
+
+```bash
+# deps: research/E4_DEPENDENCIES.md (n8n :5678, postgres-external :5433)
+cd backend
+python scripts/seed_external_demo.py
+python scripts/issue_integration_jwt.py > /tmp/taskflow_n8n.jwt
+TOKEN=$(cat /tmp/taskflow_n8n.jwt)
+
+curl -sS -X POST http://localhost:8000/integrations/ingest \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-File-Name: external_integrations_brief.txt" \
+  -H "X-Integration-Channel: disk" \
+  -H "Content-Type: text/plain" \
+  --data-binary @../data/integrations/inbox/external_integrations_brief.txt | jq
+
+curl -sS -X POST http://localhost:8000/integrations/sync-external-db \
+  -H "Authorization: Bearer $TOKEN" | jq
+```
+
+Compose profile `e4`: `docker compose --profile e4 up -d postgres-external n8n` (если ещё не запущены через `docker run`). Workflow JSON: `data/integrations/n8n_workflow_e4_disk_and_db.json`. План: `.cursor/plans/e4_n8n_integrations.plan.md`.
+
+Out of scope: email OAuth, Jira, прямой agent→foreign DB, Kafka.
 
 ## Seed Corpus And E1 ACL
 

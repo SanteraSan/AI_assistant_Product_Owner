@@ -1,0 +1,101 @@
+{
+  "name": "TaskFlow E4 Disk Ingest + External DB Sync",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "When clicking ‘Execute workflow’",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "fileSelector": "/data/integrations/inbox/external_integrations_brief.txt",
+        "options": {}
+      },
+      "id": "read-binary",
+      "name": "Read Inbox File",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [260, -80]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/integrations/ingest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.TASKFLOW_SERVICE_JWT }}"
+            },
+            {
+              "name": "X-File-Name",
+              "value": "external_integrations_brief.txt"
+            },
+            {
+              "name": "X-Integration-Channel",
+              "value": "disk"
+            },
+            {
+              "name": "X-External-Ref",
+              "value": "inbox/external_integrations_brief.txt"
+            },
+            {
+              "name": "Content-Type",
+              "value": "text/plain"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain",
+        "body": "={{ $binary.data }}"
+      },
+      "id": "http-ingest",
+      "name": "POST /integrations/ingest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, -80]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/integrations/sync-external-db",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.TASKFLOW_SERVICE_JWT }}"
+            }
+          ]
+        }
+      },
+      "id": "http-sync",
+      "name": "POST /integrations/sync-external-db",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 120]
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          { "node": "Read Inbox File", "type": "main", "index": 0 },
+          { "node": "POST /integrations/sync-external-db", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Read Inbox File": {
+      "main": [[{ "node": "POST /integrations/ingest", "type": "main", "index": 0 }]]
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "taskflow-e4-local"
+  }
+}

@@ -54,7 +54,47 @@ services:
     volumes:
       - ./infra/keycloak/realm-taskflow.json:/opt/keycloak/data/import/realm-taskflow.json:ro
 
+  # Optional E4 services (also runnable via docker run — see research/E4_DEPENDENCIES.md)
+  postgres-external:
+    profiles: ["e4"]
+    image: postgres:16-alpine
+    container_name: taskflow-postgres-external
+    environment:
+      POSTGRES_DB: external_demo
+      POSTGRES_USER: external_user
+      POSTGRES_PASSWORD: external_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_external_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U external_user -d external_demo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  n8n:
+    profiles: ["e4"]
+    image: docker.n8n.io/n8nio/n8n
+    container_name: taskflow-n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - GENERIC_TIMEZONE=Asia/Yekaterinburg
+      # Set after: python backend/scripts/issue_integration_jwt.py
+      - TASKFLOW_SERVICE_JWT=${TASKFLOW_SERVICE_JWT:-}
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./data/integrations:/data/integrations
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   postgres_data:
   qdrant_data:
   redis_data:
+  postgres_external_data:
+  n8n_data:

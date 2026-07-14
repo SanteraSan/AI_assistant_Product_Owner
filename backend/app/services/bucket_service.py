@@ -414,6 +414,7 @@ class BucketService:
         file_name: str,
         content: bytes,
         content_type: str | None,
+        extra_metadata: dict[str, object] | None = None,
     ) -> StagedDocumentUpload:
         async with self._session_factory() as session:
             upload_id = str(uuid4())
@@ -423,6 +424,13 @@ class BucketService:
             target_dir.mkdir(parents=True, exist_ok=True)
             target_path = target_dir / f"{upload_id}_{safe_file_name}"
             target_path.write_bytes(content)
+
+            metadata_json: dict[str, object] = {
+                "content_type": content_type or "application/octet-stream",
+                "content_sha256": content_sha256,
+            }
+            if extra_metadata:
+                metadata_json.update(extra_metadata)
 
             upload = StagedDocumentUpload(
                 id=upload_id,
@@ -434,10 +442,7 @@ class BucketService:
                 status="staged",
                 size_bytes=len(content),
                 expires_at=datetime.now(UTC) + timedelta(days=1),
-                metadata_json={
-                    "content_type": content_type or "application/octet-stream",
-                    "content_sha256": content_sha256,
-                },
+                metadata_json=metadata_json,
             )
             session.add(upload)
             await session.commit()

@@ -1,0 +1,31 @@
+# TaskFlow AI — External Integrations Brief (E4 demo fixture)
+#
+# Feature: notifications, webhooks, integrations
+# Persona relevance: PO, Support Manager, Developer
+#
+# This file is delivered by n8n from disk inbox into TaskFlow for RAG grounding.
+
+## Summary
+
+Enterprise customers continue to escalate Slack notification delays. Support volume
+for the notifications product area is concentrated in two accounts: Northwind Logistics
+and Aurora Retail Group.
+
+## Key Findings
+
+1. Northwind Logistics reports Slack notifications delayed about 20 minutes after
+   task status changes during peak hours.
+2. Aurora Retail Group sees webhook retry storms that flood Slack channels when
+   delivery workers retry too aggressively.
+3. Product recommendation for PO: prioritize notification digest mode and softer
+   retry backoff before expanding CSV import work.
+
+## Suggested Agent Checks
+
+- RAG: use this brief for qualitative context on notifications pain.
+- SQL: after external DB sync, count open high-priority tickets in product_area
+  `notifications` from `external_support_tickets`.
+
+## Trace Marker
+
+integration_fixture_code: E4_DISK_N8N_BRIEF_2026_07

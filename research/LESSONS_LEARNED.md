@@ -31,6 +31,47 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-15: E4.1 UI Chat — Удачная Интеграция Подтверждена
+
+Контекст:
+- E4.1 MVP уже в коде; пользователь проверил hero-сценарий в product UI (не только curl).
+
+Наблюдение (UI):
+- RAG + bucket `n8n Integrations`: вопрос про `integration_fixture_code` → ответ с `E4_DISK_N8N_BRIEF_2026_07` и рекомендацией digest mode / softer retry backoff;
+- Agent: вопрос про open high-priority `notifications` в `external_support_tickets` → **2**;
+- формулировка пользователя верная: это sync-slice внешней БД в allowlist, не прямой доступ агента к чужой БД (аналог МИС-справочника через API/контракт).
+
+Вывод:
+- E4.1 DoD закрыт end-to-end в чате; интеграционный seam доказан для портфолио.
+- Дальше по плану: E4.x (email/Jira optional), затем E5 Kafka / E2 gateway / E6–E7 — по приоритету.
+
+## 2026-07-14: E4.1 MVP — Inbound Ingest + External DB Sync
+
+Контекст:
+- deps готовы: n8n `:5678`, `taskflow-postgres-external` `:5433`, inbox `data/integrations/`;
+- цель — доказать seam «оркестратор доставляет → TaskFlow индексирует/sync → Agent grounded».
+
+Что сделано:
+- `POST /integrations/ingest` (service JWT) → stage/commit + indexing jobs, metadata `source=n8n`;
+- `POST /integrations/sync-external-db` → `external_customers` / `external_support_tickets` в SQL allowlist;
+- Alembic `20260714_0008`, seed `scripts/seed_external_demo.py`, JWT helper, n8n workflow JSON, compose profile `e4`;
+- unit tests: `tests/test_integrations_*.py` (8 passed).
+
+Smoke (2026-07-14):
+- ingest doc `becde95c-…` → indexed; metadata `source=n8n`, `channel=disk`;
+- sync: customers=3, tickets=4;
+- `/rag/chat` по document_id: marker `E4_DISK_N8N_BRIEF_2026_07` + digest recommendation;
+- Agent SQL: `execute_readonly_sql` → 2 open high notifications tickets;
+- viewer: sync 403; SQL tools denied (RBAC сохранён).
+
+Наблюдение:
+- Agent `/agent/chat` пока не прокидывает request `document_ids` в tool args — для doc QA надёжнее `/rag/chat` или явный `rag_search` scope; это future hardening, не блокер E4.1.
+- UI confirmation 2026-07-15: см. запись выше.
+
+Вывод:
+- n8n не заменяет backend: один inbound контракт + allowlisted sync достаточно для portfolio hero-сценария;
+- email/Jira остаются тем же швом позже.
+
 ## 2026-07-14: E4 Kickoff — Disk + External DB (not email-first)
 
 Контекст:

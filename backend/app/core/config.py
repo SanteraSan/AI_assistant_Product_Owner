@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     sql_tool_allowed_tables: str = ""
     agent_max_steps: int = 4
     agent_default_model: str = ""
+    # E4: readonly DSN for synthetic external demo DB (n8n sync source).
+    external_postgres_dsn: str = (
+        "postgresql+asyncpg://external_user:external_password@localhost:5433/external_demo"
+    )
+    integrations_default_bucket_name: str = "n8n Integrations"
 
     @field_validator("rag_score_threshold", mode="before")
     @classmethod

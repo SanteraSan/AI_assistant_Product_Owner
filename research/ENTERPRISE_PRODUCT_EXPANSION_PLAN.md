@@ -323,7 +323,7 @@ Definition of done:
 
 ## Этап E4: n8n Integrations (Disk + External DB Slice)
 
-Статус: **planned / kickoff agreed (2026-07-14)**. Детали: `.cursor/plans/e4_n8n_integrations.plan.md`.
+Статус: **E4.1 done + UI chat confirmed (2026-07-15)**. Детали: `.cursor/plans/e4_n8n_integrations.plan.md`.
 
 ### Цель (portfolio)
 
@@ -362,6 +362,8 @@ n8n: файл с диска + строки из внешней/синтетич�
 - Agent: grounded ответ по новому документу **и** SQL по sync-данным;
 - viewer/analyst RBAC на SQL tools сохраняется;
 - статус/ошибки ingestion или sync видны (API и/или UI minimally).
+
+**Проверено в UI (2026-07-15):** RAG дал `E4_DISK_N8N_BRIEF_2026_07` + digest recommendation; Agent SQL → 2 open high notifications tickets.
 
 ## Этап E5: Kafka And Event-Driven Ingestion
 
@@ -435,7 +437,7 @@ Scope:
 2. E1 Keycloak/BFF/RBAC — **done** (2026-07-14).
 3. E2 Model Gateway и external providers — **blocked** (VPN / Gemini unreachable; kickoff сохранён).
 4. E3 Tool-use/agents — **done** (2026-07-14).
-5. E4 n8n integrations (disk + external DB slice) — **next** (email/Jira later).
+5. E4 n8n integrations (disk + external DB slice) — **E4.1 done**; email/Jira later.
 6. E5 Kafka event backbone.
 7. E6 framework adapters.
 8. E7 product hardening.
