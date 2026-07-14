@@ -177,6 +177,8 @@ def test_missing_requested_file_names_detects_absent_image() -> None:
         sources,
     ) == []
 
+
+def test_rag_prompt_includes_document_file_name_in_source_header() -> None:
     prompt = build_rag_prompt(
         question="О чем написано в файле AGENTS.md?",
         sources=[
