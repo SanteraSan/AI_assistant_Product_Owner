@@ -201,7 +201,7 @@ Definition of done:
 
 ## Этап E2: Model Gateway And External Providers
 
-Статус: **planned** (2026-07-14) — kickoff decisions зафиксированы, реализация ещё не начата.
+Статус: **blocked** (2026-07-14) — kickoff decisions сохранены; реализация отложена из‑за VPN / недоступности внешнего Gemini API. Не реализуем пустой gateway «на вырост». Вернуться к E2.1 после сетевого доступа к Google AI Studio.
 
 Цель:
 
@@ -265,33 +265,44 @@ Definition of done (E2.1):
 
 ## Этап E3: Agents, Function Calling And Tool Use
 
+Статус: **in progress** (2026-07-14) — после block E2 (VPN). План реализации: `.cursor/plans/e3_tools_agents_201ce1e6.plan.md`.
+
 Цель:
 
-- вынести существующие backend-возможности как controlled tools.
+- вынести существующие backend-возможности как controlled tools с registry, RBAC matrix, audit и portable JSON tool loop.
 
-Candidate tools:
+Baseline tools (E3.1–E3.2):
 
-- `rag_search`;
-- `text_to_sql`;
-- `execute_readonly_sql`;
-- `ingest_document`;
+- `get_user_context`;
 - `list_buckets`;
 - `get_document_status`;
+- `rag_search`;
+- `text_to_sql` (LoRA default + fallback);
+- `execute_readonly_sql`.
+
+Later / out of scope сейчас:
+
+- `ingest_document`;
 - `generate_report`;
-- `send_email_summary`.
+- `send_email_summary`;
+- auto-retry framework;
+- native OpenAI/Gemini function-calling adapter (после E2 VPN).
 
 Правила:
 
-- tools сами enforce RBAC и tenant filters;
-- tool inputs используют Pydantic schemas;
-- tool calls аудируются;
+- tools сами enforce RBAC и tenant/document filters до side effects;
+- единый `ToolResult` (`ok` / `denied` / `invalid_input` / `failed`);
+- tool inputs — Pydantic schemas; role matrix явная;
+- tool calls аудируются (`metadata.tool_calls` + `tool_call_logs`);
+- conversation memory — в prompt оркестратора, не внутри tools;
 - agent output остаётся grounded в retrieved/tool-produced evidence.
 
 Definition of done:
 
-- chat flow может вызвать как минимум tools RAG и Text-to-SQL;
-- tool call trace виден в logs или UI;
-- unauthorized tool calls падают до execution.
+- agent chat может вызвать как минимум `rag_search` и Text-to-SQL path;
+- unauthorized/invalid tool calls → `ToolResult` до execution;
+- tool call trace виден в API metadata и UI;
+- viewer не execute SQL; document no-leak сохраняется.
 
 ## Этап E4: n8n And Email/Workflow Integration
 
@@ -383,8 +394,8 @@ Scope:
 
 1. E0 UI Skeleton — **done**.
 2. E1 Keycloak/BFF/RBAC — **done** (2026-07-14).
-3. E2 Model Gateway и external providers — **next** (Gemini chat baseline).
-4. E3 Tool-use/agents.
+3. E2 Model Gateway и external providers — **blocked** (VPN / Gemini unreachable; kickoff сохранён).
+4. E3 Tool-use/agents — **in progress** (next after E2 block).
 5. E4 n8n/email workflows.
 6. E5 Kafka event backbone.
 7. E6 framework adapters.

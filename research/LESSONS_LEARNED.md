@@ -31,6 +31,22 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E2 Blocked (VPN) → Start E3 Tools/Agents
+
+Контекст:
+- E2 kickoff (Gemini chat baseline) зафиксирован;
+- внешний Gemini API недоступен из‑за VPN / сети;
+- пустой ModelGateway «на вырост» — overengineering без smoke.
+
+Решение:
+- E2 статус **blocked**; kickoff decisions сохранены в enterprise plan и `.cursor/plans/e2_gemini_model_gateway.plan.md`;
+- следующий фокус — **E3** controlled tools + agent loop (план `e3_tools_agents_201ce1e6`);
+- уточнения E3: LoRA default для text_to_sql, единый `ToolResult`, `get_user_context`, memory в orchestrator prompt, явная role matrix; без auto-retry framework и без bucket-ACL redesign.
+
+Вывод:
+- blocked external dependency не должна тормозить независимый enterprise слой (tools/RBAC/audit);
+- portable JSON tool loop остаётся совместимым с будущим native function calling после E2.
+
 ## 2026-07-14: E2 Kickoff — Gemini Chat Baseline
 
 Контекст:
@@ -46,6 +62,7 @@
 Вывод:
 - один `OpenAICompatibleProvider` покрывает Gemini сейчас и Groq/OpenRouter позже;
 - ключ: `GEMINI_API_KEY` из AI Studio, не shared OpenAI keys.
+- **Update:** реализация E2 отложена (VPN block); см. запись выше.
 
 ## 2026-07-14: E1 Named-File Scope And Inventory Groundedness
 

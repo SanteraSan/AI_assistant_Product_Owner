@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned 2026-07-14. Implementation not started.
+**Blocked** 2026-07-14 — VPN / external Gemini API unreachable. Kickoff decisions below remain valid. Do **not** implement an empty ModelGateway stub while blocked. Resume E2.1 when Google AI Studio is reachable. Meanwhile proceed with **E3** (tools/agents).
 
 ## Decisions
 
