@@ -1,4 +1,4 @@
-import { FileText, Folder, Pencil, Plus, Upload } from 'lucide-react'
+import { FileText, Folder, Pencil, Plus, RotateCcw, Trash2, Upload } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useRef, useState } from 'react'
 import type { Bucket } from '../../entities/bucket/model'
@@ -9,6 +9,7 @@ type BucketWorkspaceProps = {
   buckets: Bucket[]
   availableDocuments: DocumentItem[]
   canMutateDocuments: boolean
+  currentUserId: string
   documents: DocumentItem[]
   onCancelStagedDocument: (uploadId: string) => Promise<void>
   onCommitChanges: (
@@ -20,9 +21,16 @@ type BucketWorkspaceProps = {
     },
   ) => Promise<void>
   onCreateBucket: () => void
+  onDeleteBucket: (bucketId: string) => Promise<void>
+  onDeleteDocument: (documentId: string) => Promise<void>
   onInspectBucket: (bucketId: string) => void
+  onRetryIndexing: (documentId: string, bucketId?: string) => Promise<void>
   onSelectBucket: (bucketId: string) => void
   onStageDocument: (file: File) => Promise<StagedDocumentItem>
+  onUpdateBucket: (
+    bucketId: string,
+    payload: { name: string; description: string },
+  ) => Promise<void>
 }
 
 const statusTone = {
@@ -35,20 +43,35 @@ export function BucketWorkspace({
   availableDocuments,
   buckets,
   canMutateDocuments,
+  currentUserId,
   documents,
   onCancelStagedDocument,
   onCommitChanges,
   onCreateBucket,
+  onDeleteBucket,
+  onDeleteDocument,
   onInspectBucket,
+  onRetryIndexing,
   onSelectBucket,
   onStageDocument,
+  onUpdateBucket,
 }: BucketWorkspaceProps) {
   const [openedBucket, setOpenedBucket] = useState<Bucket | null>(null)
+  const [bucketToEdit, setBucketToEdit] = useState<Bucket | null>(null)
+  const [bucketToDelete, setBucketToDelete] = useState<Bucket | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDescription, setEditDescription] = useState('')
   const [existingDraftIds, setExistingDraftIds] = useState<string[]>([])
   const [removedDocumentIds, setRemovedDocumentIds] = useState<string[]>([])
   const [stagedUploads, setStagedUploads] = useState<StagedDocumentItem[]>([])
   const [isSaving, setIsSaving] = useState(false)
+  const [isBucketActionSaving, setIsBucketActionSaving] = useState(false)
+  const [retryingDocumentId, setRetryingDocumentId] = useState<string | null>(null)
+  const [documentToDelete, setDocumentToDelete] = useState<DocumentItem | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [draftError, setDraftError] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [bucketActionError, setBucketActionError] = useState<string | null>(null)
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const documentsInBucket = new Set(
     documents
@@ -145,6 +168,86 @@ export function BucketWorkspace({
     }
   }
 
+  async function handleDeleteDocument() {
+    if (documentToDelete === null) {
+      return
+    }
+    setIsDeleting(true)
+    setDeleteError(null)
+    setDraftError(null)
+    try {
+      await onDeleteDocument(documentToDelete.id)
+      setDocumentToDelete(null)
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'Не удалось удалить документ.')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  async function handleRetryIndexing(documentId: string, bucketId?: string) {
+    setRetryingDocumentId(documentId)
+    setDraftError(null)
+    try {
+      await onRetryIndexing(documentId, bucketId)
+    } catch (error) {
+      setDraftError(error instanceof Error ? error.message : 'Не удалось повторить индексацию.')
+    } finally {
+      setRetryingDocumentId(null)
+    }
+  }
+
+  async function handleSaveBucketEdit() {
+    if (bucketToEdit === null) {
+      return
+    }
+    const nextName = editName.trim()
+    if (!nextName) {
+      setBucketActionError('Название bucket не может быть пустым.')
+      return
+    }
+    setIsBucketActionSaving(true)
+    setBucketActionError(null)
+    try {
+      await onUpdateBucket(bucketToEdit.id, {
+        name: nextName,
+        description: editDescription.trim(),
+      })
+      if (openedBucket?.id === bucketToEdit.id) {
+        setOpenedBucket({
+          ...openedBucket,
+          name: nextName,
+          description: editDescription.trim(),
+        })
+      }
+      setBucketToEdit(null)
+    } catch (error) {
+      setBucketActionError(error instanceof Error ? error.message : 'Не удалось обновить bucket.')
+    } finally {
+      setIsBucketActionSaving(false)
+    }
+  }
+
+  async function handleDeleteBucket() {
+    if (bucketToDelete === null) {
+      return
+    }
+    setIsBucketActionSaving(true)
+    setBucketActionError(null)
+    try {
+      await onDeleteBucket(bucketToDelete.id)
+      if (openedBucket?.id === bucketToDelete.id) {
+        resetDraft()
+        setOpenedBucket(null)
+      }
+      setBucketToDelete(null)
+    } catch (error) {
+      setBucketActionError(error instanceof Error ? error.message : 'Не удалось удалить bucket.')
+    } finally {
+      setIsBucketActionSaving(false)
+    }
+  }
+
   function resetDraft() {
     setExistingDraftIds([])
     setRemovedDocumentIds([])
@@ -194,8 +297,28 @@ export function BucketWorkspace({
                   <FileText size={16} />
                   Документы
                 </Button>
-                <Button variant="ghost">
+                <Button
+                  disabled={!canMutateDocuments}
+                  onClick={() => {
+                    setBucketActionError(null)
+                    setEditName(bucket.name)
+                    setEditDescription(bucket.description)
+                    setBucketToEdit(bucket)
+                  }}
+                  variant="ghost"
+                >
                   <Pencil size={16} />
+                </Button>
+                <Button
+                  className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                  disabled={!canMutateDocuments}
+                  onClick={() => {
+                    setBucketActionError(null)
+                    setBucketToDelete(bucket)
+                  }}
+                  variant="ghost"
+                >
+                  <Trash2 size={16} />
                 </Button>
               </div>
             </div>
@@ -262,13 +385,25 @@ export function BucketWorkspace({
                     {visibleDocuments.map((document) => (
                       <DocumentRow
                         action={
-                          <Button
-                            disabled={!canMutateDocuments}
-                            onClick={() => handleDraftRemoveDocument(document.id)}
-                            variant="ghost"
-                          >
-                            Убрать
-                          </Button>
+                          <>
+                            {document.status === 'index_failed' ? (
+                              <Button
+                                disabled={!canMutateDocuments || retryingDocumentId === document.id}
+                                onClick={() => handleRetryIndexing(document.id, openedBucket?.id)}
+                                variant="ghost"
+                              >
+                                <RotateCcw size={14} />
+                                {retryingDocumentId === document.id ? 'Повтор...' : 'Повторить'}
+                              </Button>
+                            ) : null}
+                            <Button
+                              disabled={!canMutateDocuments}
+                              onClick={() => handleDraftRemoveDocument(document.id)}
+                              variant="ghost"
+                            >
+                              Убрать
+                            </Button>
+                          </>
                         }
                         document={document}
                         key={document.id}
@@ -324,13 +459,35 @@ export function BucketWorkspace({
                     <DocumentRow
                       action={
                         openedBucket ? (
-                          <Button
-                            disabled={!canMutateDocuments}
-                            onClick={() => handleDraftExistingDocument(document.id)}
-                            variant="ghost"
-                          >
-                            Добавить
-                          </Button>
+                          <>
+                            <Button
+                              disabled={!canMutateDocuments}
+                              onClick={() => handleDraftExistingDocument(document.id)}
+                              variant="ghost"
+                            >
+                              Добавить
+                            </Button>
+                            {document.status === 'index_failed' ? (
+                              <Button
+                                disabled={!canMutateDocuments || retryingDocumentId === document.id}
+                                onClick={() => handleRetryIndexing(document.id)}
+                                variant="ghost"
+                              >
+                                <RotateCcw size={14} />
+                                {retryingDocumentId === document.id ? 'Повтор...' : 'Повторить'}
+                              </Button>
+                            ) : null}
+                            {canDeleteAvailableDocument(document, currentUserId) ? (
+                              <Button
+                                className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                                disabled={!canMutateDocuments}
+                                onClick={() => setDocumentToDelete(document)}
+                                variant="ghost"
+                              >
+                                Удалить
+                              </Button>
+                            ) : null}
+                          </>
                         ) : null
                       }
                       document={document}
@@ -354,8 +511,146 @@ export function BucketWorkspace({
           </Button>
         </div>
       </Modal>
+
+      <Modal
+        isOpen={documentToDelete !== null}
+        onClose={() => {
+          if (!isDeleting) {
+            setDocumentToDelete(null)
+            setDeleteError(null)
+          }
+        }}
+        title="Удалить файл?"
+      >
+        <div className="space-y-4">
+          <p className="text-sm leading-6 text-slate-600">
+            Вы точно хотите удалить файл{' '}
+            <span className="font-semibold text-slate-950">
+              {documentToDelete?.fileName}
+            </span>
+            ? Это удалит его из личной библиотеки документов.
+          </p>
+          {deleteError ? (
+            <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              {deleteError}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button
+              disabled={isDeleting}
+              onClick={() => {
+                setDocumentToDelete(null)
+                setDeleteError(null)
+              }}
+              variant="secondary"
+            >
+              Отмена
+            </Button>
+            <Button
+              className="bg-red-600 text-white hover:bg-red-700"
+              disabled={isDeleting}
+              onClick={handleDeleteDocument}
+              variant="primary"
+            >
+              {isDeleting ? 'Удаляем...' : 'Удалить'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={bucketToEdit !== null}
+        onClose={() => {
+          if (!isBucketActionSaving) {
+            setBucketToEdit(null)
+            setBucketActionError(null)
+          }
+        }}
+        title="Редактировать bucket"
+      >
+        <div className="space-y-4">
+          <label className="block space-y-2 text-sm text-slate-700">
+            <span>Название</span>
+            <input
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-400"
+              onChange={(event) => setEditName(event.target.value)}
+              value={editName}
+            />
+          </label>
+          <label className="block space-y-2 text-sm text-slate-700">
+            <span>Описание</span>
+            <textarea
+              className="min-h-24 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-400"
+              onChange={(event) => setEditDescription(event.target.value)}
+              value={editDescription}
+            />
+          </label>
+          {bucketActionError && bucketToEdit ? (
+            <p className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {bucketActionError}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button
+              disabled={isBucketActionSaving}
+              onClick={() => setBucketToEdit(null)}
+              variant="secondary"
+            >
+              Отмена
+            </Button>
+            <Button disabled={isBucketActionSaving} onClick={handleSaveBucketEdit} variant="primary">
+              {isBucketActionSaving ? 'Сохраняем...' : 'Сохранить'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={bucketToDelete !== null}
+        onClose={() => {
+          if (!isBucketActionSaving) {
+            setBucketToDelete(null)
+            setBucketActionError(null)
+          }
+        }}
+        title="Удалить bucket?"
+      >
+        <div className="space-y-4">
+          <p className="text-sm leading-6 text-slate-600">
+            Bucket{' '}
+            <span className="font-semibold text-slate-950">{bucketToDelete?.name}</span> будет
+            удалён. Документы из него останутся в списке «Доступные документы».
+          </p>
+          {bucketActionError && bucketToDelete ? (
+            <p className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {bucketActionError}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button
+              disabled={isBucketActionSaving}
+              onClick={() => setBucketToDelete(null)}
+              variant="secondary"
+            >
+              Отмена
+            </Button>
+            <Button
+              className="bg-red-600 text-white hover:bg-red-700"
+              disabled={isBucketActionSaving}
+              onClick={handleDeleteBucket}
+              variant="primary"
+            >
+              {isBucketActionSaving ? 'Удаляем...' : 'Удалить'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </main>
   )
+}
+
+function canDeleteAvailableDocument(document: DocumentItem, currentUserId: string): boolean {
+  return document.ownerUserId === currentUserId && document.visibility === 'private'
 }
 
 function StagedDocumentRow({

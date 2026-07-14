@@ -1,8 +1,9 @@
 import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from pathlib import Path
 from time import perf_counter
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -12,7 +13,7 @@ from fastapi.responses import JSONResponse
 
 from app.clients.qdrant_store import QdrantStore
 from app.core.config import get_settings
-from app.db.models import ChatMessage, ChatSession
+from app.db.models import ChatMessage, ChatSession, DocumentAsset
 from app.db.session import (
     create_engine,
     create_session_factory,
@@ -20,6 +21,7 @@ from app.db.session import (
     init_db,
 )
 from app.models.chat import (
+    ChatAttachmentCreateRequest,
     ChatMessageResponse,
     ChatRequest,
     ChatResponse,
@@ -28,15 +30,18 @@ from app.models.chat import (
     ChatSessionUpdateRequest,
     RagChatRequest,
     RagChatResponse,
+    SourceChunk,
 )
 from app.routers.buckets import create_bucket_router
-from app.services.bucket_service import BucketService
+from app.services.access_policy import UserContext, parse_roles
+from app.services.bucket_service import PERSONAL_INDEX_BUCKET_ID, BucketService
 from app.services.chat_history_service import ChatExchangeRecord, ChatHistoryService
 from app.services.conversation_context_service import ConversationContextService
 from app.services.conversation_memory_service import ConversationMemoryService
 from app.services.conversation_summary_service import ConversationSummaryService
-from app.services.document_indexing_service import DocumentIndexingService
+from app.services.document_indexing_service import IMAGE_SOURCE_TYPES, DocumentIndexingService
 from app.services.feature_extractor import FeatureExtractor
+from app.services.image_digest_service import build_targeted_image_digest
 from app.services.ollama_client import OllamaClient
 from app.services.ollama_load_guard import OllamaLoadGuard, OllamaOverloadedError
 from app.services.query_router import QueryRouter
@@ -322,6 +327,21 @@ async def update_chat_session(
     return _chat_session_response(session)
 
 
+@app.delete("/chat/sessions/{session_id}", status_code=204)
+async def delete_chat_session(
+    session_id: str,
+    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    user_id: str | None = Header(default=None, alias="X-User-ID"),
+) -> None:
+    deleted = await chat_history_service.delete_session(
+        tenant_id=_tenant_from_header(tenant_id),
+        user_id=_user_from_header(user_id),
+        session_id=session_id,
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+
+
 @app.get("/chat/sessions/{session_id}/messages", response_model=list[ChatMessageResponse])
 async def list_chat_session_messages(
     session_id: str,
@@ -334,6 +354,31 @@ async def list_chat_session_messages(
         session_id=session_id,
     )
     return [_chat_message_response(message) for message in messages]
+
+
+@app.post(
+    "/chat/sessions/{session_id}/attachments",
+    response_model=ChatMessageResponse,
+    status_code=201,
+)
+async def create_chat_attachment_message(
+    session_id: str,
+    payload: ChatAttachmentCreateRequest,
+    tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    user_id: str | None = Header(default=None, alias="X-User-ID"),
+) -> ChatMessageResponse:
+    message = await chat_history_service.save_attachment_message(
+        tenant_id=_tenant_from_header(tenant_id),
+        user_id=_user_from_header(user_id),
+        session_id=session_id,
+        document_id=payload.document_id,
+        file_name=payload.file_name,
+        source_type=payload.source_type,
+        status=payload.status,
+    )
+    if message is None:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+    return _chat_message_response(message)
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -392,6 +437,7 @@ async def rag_chat(
     payload: RagChatRequest,
     tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     user_id: str | None = Header(default=None, alias="X-User-ID"),
+    roles: str | None = Header(default=None, alias="X-User-Roles"),
 ) -> RagChatResponse:
     _enforce_rag_request_limits(payload)
     await _enforce_rate_limit(request=request, endpoint="rag_chat")
@@ -405,34 +451,68 @@ async def rag_chat(
         )
 
     try:
+        started_at = perf_counter()
+        normalized_tenant_id = _tenant_from_header(tenant_id)
+        normalized_user_id = _user_from_header(user_id)
+        effective_bucket_ids = _effective_bucket_ids(payload)
+        bucket_documents = await _bucket_documents_for_context(
+            user=UserContext(
+                tenant_id=normalized_tenant_id,
+                user_id=normalized_user_id,
+                roles=parse_roles(roles),
+            ),
+            bucket_ids=effective_bucket_ids,
+        )
+        effective_document_ids = payload.document_ids or _document_ids(bucket_documents)
         conversation_context = await _build_conversation_context(
             session_id=payload.session_id,
             message=payload.message,
         )
-        response = await rag_service.answer(
-            message=payload.message,
-            model=payload.model,
-            retrieval_query=str(
-                conversation_context.get("retrieval_query") or payload.message
-            ),
-            top_k=payload.top_k,
-            score_threshold=payload.score_threshold,
-            tenant_id=payload.tenant_id or settings.default_tenant_id,
-            bucket_ids=payload.bucket_ids,
-            features=payload.features,
-            source_types=payload.source_types,
-            document_ids=payload.document_ids,
-            source_paths=payload.source_paths,
-            max_sources_per_title=payload.max_sources_per_title,
-            max_sources_per_source_type=payload.max_sources_per_source_type,
-            max_sources_per_source_path=payload.max_sources_per_source_path,
-            memory_context=_as_dict(conversation_context.get("prompt_memory")),
-        )
+        if effective_bucket_ids and _looks_like_bucket_file_inventory_question(payload.message):
+            response = _bucket_file_inventory_response(
+                message=payload.message,
+                model=payload.model or settings.default_rag_model,
+                bucket_ids=effective_bucket_ids,
+                documents=bucket_documents,
+                latency_ms=int((perf_counter() - started_at) * 1000),
+            )
+        else:
+            targeted_image_sources = await _build_targeted_image_sources(
+                message=payload.message,
+                user=UserContext(
+                    tenant_id=normalized_tenant_id,
+                    user_id=normalized_user_id,
+                    roles=parse_roles(roles),
+                ),
+                document_ids=effective_document_ids,
+                bucket_ids=effective_bucket_ids,
+                bucket_documents=bucket_documents,
+            )
+            response = await rag_service.answer(
+                message=payload.message,
+                model=payload.model,
+                retrieval_query=str(
+                    conversation_context.get("retrieval_query") or payload.message
+                ),
+                top_k=payload.top_k,
+                score_threshold=payload.score_threshold,
+                tenant_id=payload.tenant_id or settings.default_tenant_id,
+                bucket_ids=effective_bucket_ids,
+                features=payload.features,
+                source_types=payload.source_types,
+                document_ids=effective_document_ids,
+                source_paths=payload.source_paths,
+                max_sources_per_title=payload.max_sources_per_title,
+                max_sources_per_source_type=payload.max_sources_per_source_type,
+                max_sources_per_source_path=payload.max_sources_per_source_path,
+                memory_context=_as_dict(conversation_context.get("prompt_memory")),
+                additional_sources=targeted_image_sources,
+            )
         response.conversation_context = conversation_context
         chat_exchange = await _try_save_chat_exchange(
             session_id=payload.session_id,
-            tenant_id=_tenant_from_header(tenant_id),
-            user_id=_user_from_header(user_id),
+            tenant_id=normalized_tenant_id,
+            user_id=normalized_user_id,
             user_message=payload.message,
             response=response,
             metadata={
@@ -441,8 +521,8 @@ async def rag_chat(
                 "model_id": response.model,
                 "approach": payload.approach,
                 "active_bucket_id": payload.active_bucket_id,
-                "bucket_ids": payload.bucket_ids,
-                "document_ids": payload.document_ids,
+                "bucket_ids": effective_bucket_ids,
+                "document_ids": effective_document_ids,
                 "sources": [
                     {
                         "id": source.id,
@@ -664,6 +744,342 @@ def _conversation_context_error(*, message: str) -> dict[str, object]:
             reason="conversation_context_build_failed"
         ),
     }
+
+
+def _effective_bucket_ids(payload: RagChatRequest) -> list[str]:
+    values = [*payload.bucket_ids]
+    if payload.active_bucket_id:
+        values.append(payload.active_bucket_id)
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        cleaned = value.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        normalized.append(cleaned)
+    return normalized
+
+
+async def _bucket_documents_for_context(
+    *,
+    user: UserContext,
+    bucket_ids: list[str],
+) -> list[DocumentAsset]:
+    documents: list[DocumentAsset] = []
+    seen: set[str] = set()
+    for bucket_id in bucket_ids:
+        rows = await bucket_service.list_documents(user=user, bucket_id=bucket_id)
+        if rows is None:
+            continue
+        for document, _bucket_link in rows:
+            if document.id in seen:
+                continue
+            seen.add(document.id)
+            documents.append(document)
+    return documents
+
+
+def _document_ids(documents: list[DocumentAsset]) -> list[str]:
+    return [document.id for document in documents if document.status == "indexed"]
+
+
+def _looks_like_bucket_file_inventory_question(message: str) -> bool:
+    normalized = message.lower()
+    file_markers = ("какие файл", "какой файл", "список файл", "что за файл", "есть в бакет", "есть в bucket")
+    bucket_markers = ("бакет", "bucket", "выбранн", "текущ")
+    return any(marker in normalized for marker in file_markers) and any(
+        marker in normalized for marker in bucket_markers
+    )
+
+
+def _bucket_file_inventory_response(
+    *,
+    message: str,
+    model: str,
+    bucket_ids: list[str],
+    documents: list[DocumentAsset],
+    latency_ms: int,
+) -> RagChatResponse:
+    if not documents:
+        answer = "В выбранном bucket нет доступных документов."
+    else:
+        lines = [f"- `{document.file_name}` — status `{document.status}`" for document in documents]
+        answer = "В выбранном bucket доступны файлы:\n" + "\n".join(lines)
+    source_content = "\n".join(
+        f"{document.file_name} | status={document.status} | document_id={document.id}"
+        for document in documents
+    ) or "Документы в выбранном bucket не найдены."
+    return RagChatResponse(
+        model=model,
+        response=answer,
+        latency_ms=latency_ms,
+        collection=qdrant_store.collection_name,
+        sources=[
+            SourceChunk(
+                id="bucket-file-inventory",
+                score=None,
+                title="Bucket file inventory",
+                source_type="bucket_metadata",
+                source_path=None,
+                content=source_content,
+                metadata={"bucket_ids": bucket_ids},
+            )
+        ],
+        score_threshold=None,
+        retrieval={
+            "mode": "bucket_file_inventory",
+            "bucket_ids": bucket_ids,
+            "document_ids": [document.id for document in documents],
+            "final_top_k": len(documents),
+        },
+    )
+
+
+async def _build_targeted_image_sources(
+    *,
+    message: str,
+    user: UserContext,
+    document_ids: list[str],
+    bucket_ids: list[str],
+    bucket_documents: list[DocumentAsset],
+) -> list[SourceChunk]:
+    if not settings.image_vision_enabled or not settings.image_vision_model.strip():
+        return []
+    if not _looks_like_targeted_image_reanalysis(message):
+        return []
+
+    documents = await _targeted_image_documents(
+        user=user,
+        document_ids=document_ids,
+        bucket_ids=bucket_ids,
+        bucket_documents=bucket_documents,
+    )
+    if not documents:
+        return []
+
+    sources: list[SourceChunk] = []
+    for document, bucket_id in documents[:3]:
+        try:
+            source = await _build_targeted_image_source(
+                document=document,
+                bucket_id=bucket_id,
+                message=message,
+            )
+        except Exception:
+            logger.exception("Targeted image re-analysis failed")
+            continue
+        if source is not None:
+            sources.append(source)
+    return sources
+
+
+async def _targeted_image_documents(
+    *,
+    user: UserContext,
+    document_ids: list[str],
+    bucket_ids: list[str],
+    bucket_documents: list[DocumentAsset],
+) -> list[tuple[DocumentAsset, str]]:
+    documents: list[tuple[DocumentAsset, str]] = []
+    seen: set[str] = set()
+
+    if document_ids:
+        bucket_id = bucket_ids[0] if bucket_ids else PERSONAL_INDEX_BUCKET_ID
+        for document_id in document_ids:
+            document = await bucket_service.get_document(user=user, document_id=document_id)
+            if document is None or document.id in seen:
+                continue
+            if _is_indexed_image_document(document):
+                documents.append((document, bucket_id))
+                seen.add(document.id)
+        return documents
+
+    bucket_id = bucket_ids[0] if bucket_ids else PERSONAL_INDEX_BUCKET_ID
+    for document in bucket_documents:
+        if document.id in seen:
+            continue
+        if _is_indexed_image_document(document):
+            documents.append((document, bucket_id))
+            seen.add(document.id)
+    return documents
+
+
+async def _build_targeted_image_source(
+    *,
+    document: DocumentAsset,
+    bucket_id: str,
+    message: str,
+) -> SourceChunk | None:
+    source_path = Path(document.source_path)
+    if not source_path.is_file():
+        return None
+
+    previous_digest = _previous_image_digest(document=document, bucket_id=bucket_id)
+    digest = await build_targeted_image_digest(
+        source_path,
+        question=message,
+        ollama_client=ollama_client,
+        vision_model=settings.image_vision_model,
+        previous_digest=previous_digest,
+    )
+    content = str(digest.get("content") or "").strip()
+    if not content:
+        return None
+
+    evidence_content = "\n".join(
+        [
+            f"File: {document.file_name}",
+            "Block type: image_targeted_digest",
+            f"Focused question: {message.strip()}",
+            "Targeted vision digest:",
+            content,
+        ]
+    )
+    features = feature_extractor.extract(f"{message}\n{content}")
+    point_id = _targeted_image_point_id(
+        document_id=document.id,
+        bucket_id=bucket_id,
+        question=message,
+        vision_model=settings.image_vision_model,
+    )
+    document_metadata = {
+        "document_asset_id": document.id,
+        "document_file_name": document.file_name,
+        "document_visibility": document.visibility,
+        "prompt_question": message.strip(),
+        "block_type": "image_targeted_digest",
+        "digest_type": "targeted_visual_answer",
+        "vision_model": settings.image_vision_model,
+        "image_width": digest.get("image_width"),
+        "image_height": digest.get("image_height"),
+        "image_format": digest.get("image_format"),
+    }
+    payload = {
+        "document_id": document.id,
+        "tenant_id": document.tenant_id,
+        "bucket_id": bucket_id,
+        "chunk_id": point_id,
+        "chunk_index": 0,
+        "domain": "uploaded_image",
+        "source_type": "image_targeted_digest",
+        "source_path": document.source_path,
+        "processing_status": "indexed",
+        "title": f"{document.file_name} - targeted image analysis",
+        "content": evidence_content,
+        "feature": features,
+        "document_metadata": document_metadata,
+        "language": "ru",
+    }
+    vector = await ollama_client.embed(settings.embedding_model, evidence_content)
+    qdrant_store.ensure_collection(vector_size=len(vector), recreate=False)
+    qdrant_store.upsert_chunks([(point_id, vector, payload)])
+    return SourceChunk(
+        id=point_id,
+        score=None,
+        title=str(payload["title"]),
+        source_type="image_targeted_digest",
+        source_path=document.source_path,
+        feature=features,
+        content=evidence_content,
+        metadata={
+            "document_id": document.id,
+            "tenant_id": document.tenant_id,
+            "bucket_id": bucket_id,
+            "chunk_id": point_id,
+            "chunk_index": 0,
+            "domain": "uploaded_image",
+            "processing_status": "indexed",
+            "document_metadata": document_metadata,
+            "language": "ru",
+        },
+    )
+
+
+def _previous_image_digest(*, document: DocumentAsset, bucket_id: str) -> str | None:
+    sources = qdrant_store.scroll(
+        limit=1,
+        tenant_id=document.tenant_id,
+        bucket_ids=[bucket_id],
+        source_types=["image_digest"],
+        document_ids=[document.id],
+    )
+    if not sources:
+        return None
+    return sources[0].content
+
+
+def _looks_like_targeted_image_reanalysis(message: str) -> bool:
+    normalized = message.lower()
+    reanalysis_markers = (
+        "повторно проанализ",
+        "проанализируй повторно",
+        "проанализируй еще",
+        "проанализируй ещё",
+        "посмотри еще",
+        "посмотри ещё",
+        "ещё раз",
+        "еще раз",
+        "уточни",
+        "детальнее",
+        "подробнее",
+    )
+    visual_attribute_markers = (
+        "цвет",
+        "оттен",
+        "форма",
+        "размер",
+        "располож",
+        "слева",
+        "справа",
+        "сверху",
+        "снизу",
+        "фон",
+        "материал",
+        "ствол",
+        "дерев",
+        "листв",
+        "видно",
+        "выгляд",
+    )
+    image_markers = (
+        "картин",
+        "изображ",
+        "фото",
+        "picture",
+        "image",
+        "photo",
+    )
+    return (
+        any(marker in normalized for marker in reanalysis_markers)
+        and (
+            any(marker in normalized for marker in visual_attribute_markers)
+            or any(marker in normalized for marker in image_markers)
+        )
+    ) or any(marker in normalized for marker in visual_attribute_markers)
+
+
+def _is_indexed_image_document(document: DocumentAsset) -> bool:
+    return (
+        document.status == "indexed"
+        and document.source_type.lower() in IMAGE_SOURCE_TYPES
+    )
+
+
+def _targeted_image_point_id(
+    *,
+    document_id: str,
+    bucket_id: str,
+    question: str,
+    vision_model: str,
+) -> str:
+    normalized_question = " ".join(question.lower().split())
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            f"image-targeted-digest:{document_id}:{bucket_id}:{vision_model}:{normalized_question}",
+        )
+    )
 
 
 async def _try_save_chat_exchange(

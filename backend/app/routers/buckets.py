@@ -107,6 +107,18 @@ def create_bucket_router(
             raise HTTPException(status_code=404, detail="Bucket not found.")
         return _bucket_response(bucket=bucket, document_count=0)
 
+    @router.delete("/buckets/{bucket_id}", status_code=204)
+    async def delete_bucket(
+        bucket_id: str,
+        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    ) -> None:
+        deleted = await bucket_service.delete_bucket(
+            tenant_id=tenant_from_header(tenant_id),
+            bucket_id=bucket_id,
+        )
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Bucket not found.")
+
     @router.get("/buckets/{bucket_id}/documents", response_model=list[DocumentResponse])
     async def list_documents(
         bucket_id: str,
@@ -334,6 +346,60 @@ def create_bucket_router(
         )
         if removed is None:
             raise HTTPException(status_code=404, detail="Bucket not found.")
+
+    @router.delete("/documents/{document_id}", status_code=204)
+    async def delete_document(
+        document_id: str,
+        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
+    ) -> None:
+        result = await bucket_service.delete_document(
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            document_id=document_id,
+        )
+        if result.not_found:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        if result.forbidden:
+            raise HTTPException(status_code=403, detail="Document cannot be deleted by this user.")
+        if result.in_use_buckets:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "reason": "document_in_use",
+                    "buckets": [
+                        {"id": bucket_id, "name": bucket_name}
+                        for bucket_id, bucket_name in result.in_use_buckets
+                    ],
+                },
+            )
+
+    @router.post(
+        "/documents/{document_id}/retry-indexing",
+        response_model=CommitBucketDocumentsResponse,
+    )
+    async def retry_document_indexing(
+        document_id: str,
+        background_tasks: BackgroundTasks,
+        bucket_id: str | None = None,
+        tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        user_id: str | None = Header(default=None, alias="X-User-ID"),
+        roles: str | None = Header(default=None, alias="X-User-Roles"),
+    ) -> CommitBucketDocumentsResponse:
+        retried = await bucket_service.retry_document_indexing(
+            user=user_context(tenant_id=tenant_id, user_id=user_id, roles=roles),
+            document_id=document_id,
+            bucket_id=bucket_id,
+        )
+        if retried is None:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        document, indexing_job_id = retried
+        if document_indexing_service is not None:
+            background_tasks.add_task(document_indexing_service.process_jobs, [indexing_job_id])
+        return CommitBucketDocumentsResponse(
+            documents=[_document_response(document, bucket_id=bucket_id)],
+            indexing_job_ids=[indexing_job_id],
+        )
 
     @router.get("/documents/{document_id}/status", response_model=DocumentResponse)
     async def get_document_status(

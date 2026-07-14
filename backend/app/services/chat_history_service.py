@@ -1,6 +1,7 @@
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import desc, select
+from sqlalchemy import case, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import ChatMessage, ChatSession
@@ -50,11 +51,13 @@ class ChatHistoryService:
                 metadata=metadata or {},
             )
             _apply_session_context(chat_session, metadata or {})
+            created_at = datetime.now(UTC)
             user_entry = ChatMessage(
                 session_id=chat_session.id,
                 role="user",
                 content=user_message,
                 metadata_json=metadata or {},
+                created_at=created_at,
             )
             assistant_entry = ChatMessage(
                 session_id=chat_session.id,
@@ -64,6 +67,7 @@ class ChatHistoryService:
                 provider=provider,
                 latency_ms=latency_ms,
                 metadata_json=metadata or {},
+                created_at=created_at + timedelta(milliseconds=1),
             )
             session.add_all([user_entry, assistant_entry])
             await session.commit()
@@ -73,6 +77,80 @@ class ChatHistoryService:
                 user_message_id=user_entry.id,
                 assistant_message_id=assistant_entry.id,
             )
+
+    async def save_attachment_message(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str | None,
+        session_id: str | None,
+        document_id: str,
+        file_name: str,
+        source_type: str,
+        status: str,
+        active_bucket_id: str | None = None,
+        model_id: str | None = None,
+        approach: str | None = None,
+    ) -> ChatMessage | None:
+        async with self._session_factory() as session:
+            if session_id:
+                chat_session = await self._session_for_user(
+                    session=session,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+                if chat_session is None:
+                    return None
+            else:
+                chat_session = await self._get_or_create_session(
+                    session=session,
+                    session_id=None,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    title=file_name,
+                    metadata={},
+                )
+
+            if active_bucket_id is not None:
+                chat_session.active_bucket_id = _empty_to_none(active_bucket_id)
+            if model_id is not None:
+                chat_session.model_id = _empty_to_none(model_id)
+            if approach is not None:
+                chat_session.approach = _empty_to_none(approach)
+
+            attached_document_ids = _metadata_string_list(
+                chat_session.metadata_json,
+                "attached_document_ids",
+            )
+            if document_id not in attached_document_ids:
+                attached_document_ids.append(document_id)
+            chat_session.metadata_json = {
+                **(chat_session.metadata_json or {}),
+                "attached_document_ids": attached_document_ids,
+            }
+            if not chat_session.title or chat_session.title in {"Новый чат", "Untitled chat"}:
+                chat_session.title = _build_title(file_name)
+
+            message = ChatMessage(
+                session_id=chat_session.id,
+                role="user",
+                content=f"Прикреплён файл: {file_name}",
+                metadata_json={
+                    "attachments": [
+                        {
+                            "id": document_id,
+                            "file_name": file_name,
+                            "source_type": source_type,
+                            "status": status,
+                        }
+                    ]
+                },
+            )
+            session.add(message)
+            await session.commit()
+            await session.refresh(message)
+            return message
 
     async def get_recent_messages(
         self,
@@ -87,7 +165,13 @@ class ChatHistoryService:
             result = await session.execute(
                 select(ChatMessage)
                 .where(ChatMessage.session_id == session_id)
-                .order_by(desc(ChatMessage.created_at))
+                .order_by(
+                    desc(ChatMessage.created_at),
+                    # Within the same timestamp, fetch assistant before user so
+                    # reverse() restores stable user -> assistant order.
+                    _message_role_rank(reverse=True),
+                    desc(ChatMessage.id),
+                )
                 .limit(limit)
             )
             messages = [
@@ -163,9 +247,33 @@ class ChatHistoryService:
             result = await session.execute(
                 select(ChatMessage)
                 .where(ChatMessage.session_id == session_id)
-                .order_by(ChatMessage.created_at)
+                .order_by(
+                    ChatMessage.created_at.asc(),
+                    _message_role_rank(reverse=False),
+                    ChatMessage.id.asc(),
+                )
             )
             return list(result.scalars())
+
+    async def delete_session(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str | None,
+        session_id: str,
+    ) -> bool:
+        async with self._session_factory() as session:
+            chat_session = await self._session_for_user(
+                session=session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            if chat_session is None:
+                return False
+            await session.delete(chat_session)
+            await session.commit()
+            return True
 
     async def update_session(
         self,
@@ -256,6 +364,17 @@ class ChatHistoryService:
         return await session.scalar(statement)
 
 
+def _message_role_rank(*, reverse: bool):
+    # Keep user messages before assistant when timestamps collide.
+    user_rank = 1 if reverse else 0
+    assistant_rank = 0 if reverse else 1
+    return case(
+        (ChatMessage.role == "user", user_rank),
+        (ChatMessage.role == "assistant", assistant_rank),
+        else_=2,
+    )
+
+
 def _build_title(message: str, limit: int = 120) -> str:
     compact = " ".join(message.split())
     return compact[:limit] or "Untitled chat"
@@ -264,6 +383,23 @@ def _build_title(message: str, limit: int = 120) -> str:
 def _empty_to_none(value: str | None) -> str | None:
     normalized = (value or "").strip()
     return normalized or None
+
+
+def _metadata_string_list(metadata: dict[str, object] | None, key: str) -> list[str]:
+    raw_values = (metadata or {}).get(key)
+    if not isinstance(raw_values, list):
+        return []
+    values: list[str] = []
+    seen: set[str] = set()
+    for value in raw_values:
+        if not isinstance(value, str):
+            continue
+        cleaned = value.strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        values.append(cleaned)
+    return values
 
 
 def _apply_session_context(chat_session: ChatSession, metadata: dict[str, object]) -> None:

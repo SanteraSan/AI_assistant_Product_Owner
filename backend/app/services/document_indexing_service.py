@@ -243,7 +243,7 @@ def _can_build_image_digest(
 
 def _should_update_document_status(job: DocumentIndexingJob) -> bool:
     source = str(job.metadata_json.get("source") or "")
-    return source in {"personal_commit", "bucket_commit"}
+    return source in {"personal_commit", "bucket_commit", "retry_indexing"}
 
 
 async def _get_bucket_link(

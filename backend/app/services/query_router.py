@@ -148,6 +148,7 @@ class QueryRouter:
             "image_digest",
         ]
         self._visual_image_source_types = [
+            "image_targeted_digest",
             "image_digest",
             "image_ocr",
         ]

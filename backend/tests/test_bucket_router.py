@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.routers.buckets import create_bucket_router
+from app.services.bucket_service import DocumentDeleteResult
 
 
 @dataclass
@@ -127,6 +128,35 @@ class _FakeBucketService:
     async def remove_document_from_bucket(self, *, user, bucket_id: str, document_id: str):
         assert user.tenant_id == "tenant-a"
         return bucket_id == self.bucket.id
+
+    async def delete_document(self, *, user, document_id: str):
+        assert user.tenant_id == "tenant-a"
+        assert user.user_id == "user-a"
+        if document_id == "in-use-document":
+            return DocumentDeleteResult(
+                deleted=False,
+                in_use_buckets=[("bucket-3", "Bucket 3"), ("bucket-5", "Bucket 5")],
+            )
+        if self.document is None or self.document.id != document_id:
+            return DocumentDeleteResult(deleted=False, not_found=True)
+        self.document = None
+        return DocumentDeleteResult(deleted=True)
+
+    async def delete_bucket(self, *, tenant_id: str, bucket_id: str):
+        assert tenant_id == "tenant-a"
+        if bucket_id != self.bucket.id:
+            return False
+        self.bucket = None  # type: ignore[assignment]
+        return True
+
+    async def retry_document_indexing(self, *, user, document_id: str, bucket_id: str | None = None):
+        assert user.tenant_id == "tenant-a"
+        assert user.user_id == "user-a"
+        if self.document is None or self.document.id != document_id:
+            return None
+        self.document.status = "indexing"
+        self.document.error = None
+        return self.document, "job-retry"
 
     async def stage_uploaded_document(self, *, user, file_name: str, content: bytes, content_type: str | None):
         assert user.tenant_id == "tenant-a"
@@ -447,3 +477,85 @@ def test_commit_personal_documents_returns_document_without_bucket_id() -> None:
     assert response.json()["documents"][0]["id"] == "document-personal"
     assert response.json()["documents"][0]["bucket_id"] is None
     assert response.json()["indexing_job_ids"] == ["job-personal"]
+
+
+def test_delete_personal_document() -> None:
+    app = FastAPI()
+    service = _FakeBucketService()
+    service.document = _FakeDocument(
+        id="document-1",
+        tenant_id="tenant-a",
+        title="notes.txt",
+        file_name="notes.txt",
+        source_type="txt",
+        source_path="/tmp/notes.txt",
+        status="indexed",
+    )
+    app.include_router(
+        create_bucket_router(
+            bucket_service=service,  # type: ignore[arg-type]
+            default_tenant_id="tenant-a",
+        )
+    )
+    client = TestClient(app)
+
+    response = client.delete(
+        "/documents/document-1",
+        headers={"X-Tenant-ID": "tenant-a", "X-User-ID": "user-a"},
+    )
+
+    assert response.status_code == 204
+
+
+def test_delete_document_returns_conflict_when_used_in_buckets() -> None:
+    client = _client()
+
+    response = client.delete(
+        "/documents/in-use-document",
+        headers={"X-Tenant-ID": "tenant-a", "X-User-ID": "user-a"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["reason"] == "document_in_use"
+    assert response.json()["detail"]["buckets"][0]["name"] == "Bucket 3"
+
+
+def test_delete_bucket() -> None:
+    client = _client()
+
+    response = client.delete(
+        "/buckets/bucket-1",
+        headers={"X-Tenant-ID": "tenant-a"},
+    )
+
+    assert response.status_code == 204
+
+
+def test_retry_document_indexing() -> None:
+    app = FastAPI()
+    service = _FakeBucketService()
+    service.document = _FakeDocument(
+        id="document-1",
+        tenant_id="tenant-a",
+        title="notes.txt",
+        file_name="notes.txt",
+        source_type="txt",
+        source_path="/tmp/notes.txt",
+        status="index_failed",
+    )
+    app.include_router(
+        create_bucket_router(
+            bucket_service=service,  # type: ignore[arg-type]
+            default_tenant_id="tenant-a",
+        )
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/documents/document-1/retry-indexing",
+        headers={"X-Tenant-ID": "tenant-a", "X-User-ID": "user-a"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["documents"][0]["status"] == "indexing"
+    assert response.json()["indexing_job_ids"] == ["job-retry"]

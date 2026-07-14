@@ -59,6 +59,7 @@ class RagService:
         max_sources_per_source_type: int | None = None,
         max_sources_per_source_path: int | None = None,
         memory_context: dict[str, object] | None = None,
+        additional_sources: list[SourceChunk] | None = None,
     ) -> RagChatResponse:
         selected_model = model or self._default_model
         selected_top_k = top_k or self._default_top_k
@@ -86,6 +87,7 @@ class RagService:
         selected_source_types = routing_decision.source_types
         selected_score_threshold = routing_decision.score_threshold
         if score_threshold is None and _is_narrow_document_scope(
+            bucket_ids=selected_bucket_ids,
             document_ids=selected_document_ids,
             source_paths=selected_source_paths,
         ):
@@ -121,6 +123,8 @@ class RagService:
             max_sources_per_source_type=diversity["max_sources_per_source_type"],
             max_sources_per_source_path=diversity["max_sources_per_source_path"],
         )
+        targeted_sources = additional_sources or []
+        sources = _merge_sources(targeted_sources, sources)
         sources = sources[:selected_top_k]
         context_policy = _build_context_policy(routing_decision.hints)
         prompt_sources = _apply_context_policy(
@@ -168,6 +172,8 @@ class RagService:
                 "source_paths": selected_source_paths,
                 "excel_supplement_count": excel_supplement_count,
                 "docx_supplement_count": docx_supplement_count,
+                "additional_source_count": len(targeted_sources),
+                "additional_source_ids": [source.id for source in targeted_sources],
                 "final_top_k": len(sources),
             },
             query_hints=routing_decision.hints,
@@ -237,6 +243,7 @@ class RagService:
         required_source_types = _required_source_types_for_supplement(
             routing_hints=routing_hints,
             selected_source_types=selected_source_types,
+            selected_bucket_ids=selected_bucket_ids,
             selected_document_ids=selected_document_ids,
             selected_source_paths=selected_source_paths,
         )
@@ -304,7 +311,7 @@ class RagService:
     ) -> list[SourceChunk]:
         if selected_source_types and "excel_row" not in selected_source_types:
             return []
-        if not selected_document_ids and not selected_source_paths:
+        if not selected_bucket_ids and not selected_document_ids and not selected_source_paths:
             return []
 
         candidates = self._qdrant_store.scroll(
@@ -356,7 +363,7 @@ class RagService:
     ) -> list[SourceChunk]:
         if selected_source_types and "image_digest" not in selected_source_types:
             return []
-        if not selected_document_ids and not selected_source_paths:
+        if not selected_bucket_ids and not selected_document_ids and not selected_source_paths:
             return []
 
         candidates = self._qdrant_store.scroll(
@@ -402,7 +409,7 @@ class RagService:
     ) -> list[SourceChunk]:
         if selected_source_types and "docx" not in selected_source_types:
             return []
-        if not selected_document_ids and not selected_source_paths:
+        if not selected_bucket_ids and not selected_document_ids and not selected_source_paths:
             return []
 
         candidates = self._qdrant_store.scroll(
@@ -454,7 +461,7 @@ def build_rag_prompt(
             "\n".join(
                 [
                     (
-                        f"[CHUNK {index}: {source_type} | title={title} | "
+                        f"[Источник {index}: {source_type} | title={title} | "
                         f"file={file_name} | feature={features}]"
                     ),
                     source.content.strip(),
@@ -482,15 +489,17 @@ def build_rag_prompt(
     rules = "\n".join(
         [
             "- Отвечай на русском языке.",
+            "- Пиши кратко и по делу: обычно 3–6 предложений или короткий список.",
+            "- Не пиши длинные эссе, вступления и повторения.",
             "- Не выдумывай факты, которых нет в контексте.",
             (
                 "- Если в контексте есть релевантный фрагмент, ответь по нему, "
                 "даже если документ не относится к продукту TaskFlow AI."
             ),
             (
-                "- Если header источника содержит `file=<имя файла>`, считай этот chunk "
-                "фрагментом указанного файла. Не говори, что файл отсутствует, если "
-                "в Контексте есть chunk с таким `file`."
+                "- Если header источника содержит `file=<имя файла>`, считай этот фрагмент "
+                "частью указанного файла. Не говори, что файл отсутствует, если "
+                "в Контексте есть фрагмент с таким `file`."
             ),
             (
                 "- Если источник выглядит как шутка, заметка или черновик, "
@@ -498,16 +507,19 @@ def build_rag_prompt(
                 "только из-за типа источника."
             ),
             "- Если в контексте нет ответа, скажи, каких данных не хватает.",
-            "- Отделяй факты из контекста от интерпретации и рекомендации.",
+            "- Сначала факты, потом короткая интерпретация только если она нужна.",
             "- Если используешь числа, бери их только из контекста.",
-            "- В конце перечисли источники, которые реально использовал.",
+            (
+                "- Не перечисляй источники, файлы, CHUNK, номера фрагментов, UUID "
+                "и служебные metadata в ответе. Пиши только содержание ответа."
+            ),
             dynamic_rules,
         ]
     ).strip()
 
     return f"""Ты — AI-ассистент для Product Owner, который отвечает по пользовательским документам.
 
-Твоя задача: ответить на вопрос пользователя строго на основе предоставленного контекста.
+Твоя задача: дать короткий grounded-ответ на вопрос пользователя строго на основе предоставленного контекста.
 
 Правила:
 {rules}
@@ -540,8 +552,17 @@ def _source_file_name(source: SourceChunk) -> str:
             if value:
                 return str(value)
     if source.source_path:
-        return source.source_path.rsplit("/", maxsplit=1)[-1]
+        return _display_file_name(source.source_path.rsplit("/", maxsplit=1)[-1])
     return "unknown"
+
+
+def _display_file_name(file_name: str) -> str:
+    # Storage paths look like `<uuid>_<original_name>`; prefer the original name in prompts.
+    if len(file_name) > 37 and file_name[36] == "_":
+        prefix = file_name[:36]
+        if all(char in "0123456789abcdefABCDEF-" for char in prefix):
+            return file_name[37:] or file_name
+    return file_name
 
 
 def _estimate_tokens(text: str) -> int:
@@ -648,10 +669,11 @@ def _filter_sources_by_score(
 
 def _is_narrow_document_scope(
     *,
+    bucket_ids: list[str],
     document_ids: list[str],
     source_paths: list[str],
 ) -> bool:
-    return 0 < len(document_ids) + len(source_paths) <= 3
+    return 0 < len(bucket_ids) + len(document_ids) + len(source_paths) <= 3
 
 
 def _lower_score_threshold(current: float | None, target: float) -> float:
@@ -672,14 +694,17 @@ def _required_source_types_for_supplement(
     *,
     routing_hints: dict[str, object],
     selected_source_types: list[str],
+    selected_bucket_ids: list[str],
     selected_document_ids: list[str],
     selected_source_paths: list[str],
 ) -> list[str]:
     required_source_types = _normalize_values(
         routing_hints.get("required_source_types") or []
     )
-    has_document_scope = bool(selected_document_ids or selected_source_paths)
-    if has_document_scope and len(selected_source_types) > 1:
+    has_retrieval_scope = bool(
+        selected_bucket_ids or selected_document_ids or selected_source_paths
+    )
+    if has_retrieval_scope and len(selected_source_types) > 1:
         required_source_types = _merge_values(required_source_types, selected_source_types)
     return required_source_types
 

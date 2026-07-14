@@ -1037,6 +1037,15 @@ Image digest:
 - metadata содержит размеры, формат, `vision_model`, `digest_type=vision_caption`;
 - исходная картинка не попадает в prompt ответа, туда попадает только digest text.
 
+Targeted image digest:
+
+- создаётся on-demand в `/rag/chat`, когда пользователь просит повторно проанализировать изображение или уточняет визуальный признак вроде цвета, формы, положения или материала;
+- работает только для уже доступных пользователю image documents из narrow scope (`document_ids` attachments или выбранный bucket), а не по произвольному path из запроса;
+- сохраняется в Qdrant как `source_type=image_targeted_digest` с deterministic point id по `document_id`, `bucket_id`, вопросу и `vision_model`;
+- content содержит `File`, `Block type: image_targeted_digest`, `Focused question`, `Targeted vision digest`;
+- metadata сохраняет `document_id`, `bucket_id`, `source_path`, `prompt_question`, `vision_model`, размеры изображения и `digest_type=targeted_visual_answer`;
+- новый chunk сразу добавляется в текущий RAG prompt и остаётся доступным для будущих похожих вопросов.
+
 Проверки M5.6.2:
 
 - `gemma4:12b` подтвердил vision input через Ollama;

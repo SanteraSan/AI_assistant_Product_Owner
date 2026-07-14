@@ -116,6 +116,15 @@ export async function updateChatSession(
   return chatThreadFromDto(session)
 }
 
+export async function deleteChatSession(user: User, sessionId: string): Promise<void> {
+  await apiRequest<void>(`/chat/sessions/${sessionId}`, {
+    method: 'DELETE',
+    tenantId: user.tenantId,
+    userId: user.id,
+    roles: user.roles,
+  })
+}
+
 export async function fetchChatMessages(
   user: User,
   sessionId: string,
@@ -126,6 +135,31 @@ export async function fetchChatMessages(
     roles: user.roles,
   })
   return messages.map(chatMessageFromDto)
+}
+
+export async function saveChatAttachmentMessage(
+  user: User,
+  sessionId: string,
+  attachment: {
+    documentId: string
+    fileName: string
+    sourceType: string
+    status: string
+  },
+): Promise<ChatMessage> {
+  const message = await apiRequest<ChatMessageDto>(`/chat/sessions/${sessionId}/attachments`, {
+    body: JSON.stringify({
+      document_id: attachment.documentId,
+      file_name: attachment.fileName,
+      source_type: attachment.sourceType,
+      status: attachment.status,
+    }),
+    method: 'POST',
+    tenantId: user.tenantId,
+    userId: user.id,
+    roles: user.roles,
+  })
+  return chatMessageFromDto(message)
 }
 
 export async function sendRagMessage(
@@ -168,6 +202,9 @@ export async function sendRagMessage(
 }
 
 function chatThreadFromDto(session: ChatSessionDto): ChatThread {
+  const attachedDocumentIds = Array.isArray(session.metadata?.attached_document_ids)
+    ? session.metadata.attached_document_ids.filter((value): value is string => typeof value === 'string')
+    : []
   return {
     id: session.id,
     title: session.title || 'Новый чат',
@@ -175,7 +212,7 @@ function chatThreadFromDto(session: ChatSessionDto): ChatThread {
     bucketId: session.active_bucket_id ?? '',
     sessionId: session.id,
     bucketIds: session.active_bucket_id ? [session.active_bucket_id] : [],
-    documentIds: [],
+    documentIds: attachedDocumentIds,
     modelId: session.model_id ?? undefined,
     approach: session.approach ?? undefined,
   }
@@ -185,10 +222,22 @@ function chatMessageFromDto(message: ChatMessageDto): ChatMessage {
   const sources = Array.isArray(message.metadata?.sources)
     ? message.metadata.sources
     : []
+  const attachments = Array.isArray(message.metadata?.attachments)
+    ? message.metadata.attachments
+    : []
   return {
     id: message.id,
     role: message.role,
     content: message.content,
+    attachments: attachments
+      .filter((attachment): attachment is Record<string, unknown> => typeof attachment === 'object' && attachment !== null)
+      .map((attachment) => ({
+        id: String(attachment.id ?? ''),
+        fileName: String(attachment.file_name ?? attachment.fileName ?? 'file'),
+        sourceType: String(attachment.source_type ?? attachment.sourceType ?? 'unknown'),
+        status: normalizeAttachmentStatus(attachment.status),
+      }))
+      .filter((attachment) => attachment.id),
     sources: sources
       .filter((source): source is Record<string, unknown> => typeof source === 'object' && source !== null)
       .map((source) => ({
@@ -197,6 +246,21 @@ function chatMessageFromDto(message: ChatMessageDto): ChatMessage {
         sourceType: String(source.source_type ?? 'unknown'),
       })),
   }
+}
+
+function normalizeAttachmentStatus(
+  value: unknown,
+): 'uploaded' | 'indexing' | 'indexed' | 'index_failed' | 'error' {
+  if (
+    value === 'uploaded' ||
+    value === 'indexing' ||
+    value === 'indexed' ||
+    value === 'index_failed' ||
+    value === 'error'
+  ) {
+    return value
+  }
+  return 'indexing'
 }
 
 function formatRelativeDate(value: string): string {

@@ -69,7 +69,7 @@ def test_visual_image_intent_selects_image_sources_and_lowers_threshold() -> Non
     )
 
     assert decision.hints["visual_image_intent"] is True
-    assert decision.source_types == ["image_digest", "image_ocr"]
+    assert decision.source_types == ["image_targeted_digest", "image_digest", "image_ocr"]
     assert decision.score_threshold == 0.55
     assert "image_digest" in decision.hints["required_source_types"]
 

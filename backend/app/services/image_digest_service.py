@@ -31,6 +31,22 @@ IMAGE_DIGEST_PROMPT = """Опиши изображение на русском �
 - Ответ должен быть компактным, 3-8 предложений.
 """
 
+TARGETED_IMAGE_DIGEST_PROMPT = """Проанализируй изображение на русском языке как focused evidence для RAG.
+
+Вопрос пользователя:
+{question}
+
+Уже известное описание:
+{previous_digest}
+
+Правила:
+- Сфокусируйся только на деталях, которые помогают ответить на вопрос пользователя.
+- Если спрашивают про цвет, форму, положение, материал или состояние объекта, проверь именно этот признак.
+- Не выдумывай детали, которых не видно на изображении.
+- Если признак нельзя определить визуально, явно напиши: "Не видно/нельзя определить".
+- Ответ должен быть компактным, 2-5 предложений.
+"""
+
 
 async def load_image_digest_documents(
     raw_data_dir: Path,
@@ -201,6 +217,36 @@ async def _build_image_digest(
     result = await ollama_client.generate(
         model=vision_model,
         prompt=IMAGE_DIGEST_PROMPT,
+        images=[encoded],
+        think=False,
+    )
+    return {
+        "content": str(result.get("response") or "").strip(),
+        "image_width": width,
+        "image_height": height,
+        "image_format": image_format,
+    }
+
+
+async def build_targeted_image_digest(
+    path: Path,
+    *,
+    question: str,
+    ollama_client: OllamaClient,
+    vision_model: str,
+    previous_digest: str | None = None,
+) -> dict[str, Any]:
+    with Image.open(path) as image:
+        width, height = image.size
+        image_format = image.format or path.suffix.lstrip(".").upper()
+        encoded = _encode_image_as_png(image)
+
+    result = await ollama_client.generate(
+        model=vision_model,
+        prompt=TARGETED_IMAGE_DIGEST_PROMPT.format(
+            question=question.strip(),
+            previous_digest=(previous_digest or "Нет сохранённого описания.").strip(),
+        ),
         images=[encoded],
         think=False,
     )

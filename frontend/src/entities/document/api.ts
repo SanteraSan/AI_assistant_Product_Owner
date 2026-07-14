@@ -86,6 +86,49 @@ export async function removeDocumentFromBucket(
   })
 }
 
+export type DeleteDocumentConflict = {
+  reason: 'document_in_use'
+  buckets: Array<{
+    id: string
+    name: string
+  }>
+}
+
+export async function deleteDocument(user: User, documentId: string): Promise<void> {
+  try {
+    await apiRequest<void>(`/documents/${documentId}`, {
+      method: 'DELETE',
+      tenantId: user.tenantId,
+      userId: user.id,
+      roles: user.roles,
+    })
+  } catch (error) {
+    const conflict = parseDeleteDocumentConflict(error)
+    if (conflict) {
+      throw new DocumentDeleteConflictError(conflict)
+    }
+    throw error
+  }
+}
+
+export async function retryDocumentIndexing(
+  user: User,
+  documentId: string,
+  bucketId?: string,
+): Promise<DocumentItem> {
+  const query = bucketId ? `?bucket_id=${encodeURIComponent(bucketId)}` : ''
+  const response = await apiRequest<CommitDocumentsDto>(
+    `/documents/${documentId}/retry-indexing${query}`,
+    {
+      method: 'POST',
+      tenantId: user.tenantId,
+      userId: user.id,
+      roles: user.roles,
+    },
+  )
+  return mapDocument(response.documents[0])
+}
+
 export async function stageDocument(user: User, file: File): Promise<StagedDocumentItem> {
   const document = await apiRequest<StagedDocumentDto>('/documents/stage', {
     body: await file.arrayBuffer(),
@@ -174,6 +217,30 @@ function mapDocument(document: DocumentDto): DocumentItem {
     allowedRoles: document.allowed_roles,
     uploadedAt: new Date(document.created_at).toLocaleString('ru-RU'),
   }
+}
+
+export class DocumentDeleteConflictError extends Error {
+  readonly conflict: DeleteDocumentConflict
+
+  constructor(conflict: DeleteDocumentConflict) {
+    super('Document is used in buckets.')
+    this.conflict = conflict
+  }
+}
+
+function parseDeleteDocumentConflict(error: unknown): DeleteDocumentConflict | null {
+  if (!(error instanceof Error)) {
+    return null
+  }
+  try {
+    const parsed = JSON.parse(error.message) as { detail?: DeleteDocumentConflict }
+    if (parsed.detail?.reason === 'document_in_use') {
+      return parsed.detail
+    }
+  } catch {
+    return null
+  }
+  return null
 }
 
 function mapStagedDocument(document: StagedDocumentDto): StagedDocumentItem {

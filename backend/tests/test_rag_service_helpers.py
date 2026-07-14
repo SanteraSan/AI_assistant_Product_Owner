@@ -55,11 +55,17 @@ def test_filter_sources_by_score_keeps_sources_at_or_above_threshold() -> None:
 
 
 def test_narrow_document_scope_can_lower_score_threshold() -> None:
-    assert _is_narrow_document_scope(document_ids=["doc-1"], source_paths=[])
-    assert _is_narrow_document_scope(document_ids=["doc-1", "doc-2"], source_paths=["/tmp/a.md"])
-    assert not _is_narrow_document_scope(document_ids=[], source_paths=[])
+    assert _is_narrow_document_scope(bucket_ids=[], document_ids=["doc-1"], source_paths=[])
+    assert _is_narrow_document_scope(
+        bucket_ids=["bucket-1"], document_ids=[], source_paths=[]
+    )
+    assert _is_narrow_document_scope(
+        bucket_ids=[], document_ids=["doc-1", "doc-2"], source_paths=["/tmp/a.md"]
+    )
+    assert not _is_narrow_document_scope(bucket_ids=[], document_ids=[], source_paths=[])
     assert not _is_narrow_document_scope(
-        document_ids=["doc-1", "doc-2", "doc-3", "doc-4"],
+        bucket_ids=["bucket-1", "bucket-2"],
+        document_ids=["doc-1", "doc-2", "doc-3"],
         source_paths=[],
     )
     assert _lower_score_threshold(0.68, 0.45) == 0.45
@@ -86,11 +92,24 @@ def test_required_source_types_include_explicit_document_scope_types() -> None:
     required = _required_source_types_for_supplement(
         routing_hints={},
         selected_source_types=["docx", "image_digest", "image_ocr"],
+        selected_bucket_ids=[],
         selected_document_ids=[],
         selected_source_paths=["/tmp/sample.docx"],
     )
 
     assert required == ["docx", "image_digest", "image_ocr"]
+
+
+def test_required_source_types_include_selected_bucket_scope_types() -> None:
+    required = _required_source_types_for_supplement(
+        routing_hints={},
+        selected_source_types=["excel_chart", "image_digest"],
+        selected_bucket_ids=["bucket-1"],
+        selected_document_ids=[],
+        selected_source_paths=[],
+    )
+
+    assert required == ["excel_chart", "image_digest"]
 
 
 def test_remove_numeric_metric_lines_keeps_qualitative_context() -> None:
@@ -153,6 +172,32 @@ def test_rag_prompt_includes_document_file_name_in_source_header() -> None:
     assert "file=AGENTS.md" in prompt
     assert "Не говори, что файл отсутствует" in prompt
     assert "который отвечает по пользовательским документам" in prompt
+
+
+def test_rag_prompt_asks_for_compact_answers() -> None:
+    prompt = build_rag_prompt(
+        question="Кратко: о чём файл?",
+        sources=[_source("doc", content="Файл про правила разработки.")],
+    )
+
+    assert "Пиши кратко и по делу" in prompt
+    assert "короткий grounded-ответ" in prompt
+    assert "Не перечисляй источники" in prompt
+    assert "CHUNK" in prompt
+    assert "1–3 реально использованных источника" not in prompt
+
+
+def test_metadata_string_list_dedupes_and_skips_invalid_values() -> None:
+    from app.services.chat_history_service import _metadata_string_list
+
+    values = _metadata_string_list(
+        {
+            "attached_document_ids": ["doc-1", " doc-1 ", "", "doc-2", 3, None, "doc-2"],
+        },
+        "attached_document_ids",
+    )
+
+    assert values == ["doc-1", "doc-2"]
 
 
 def test_chat_session_context_uses_active_bucket_separately_from_retrieval_scope() -> None:

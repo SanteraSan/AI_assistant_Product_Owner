@@ -71,3 +71,12 @@ export async function updateBucket(
     status: bucket.status,
   }
 }
+
+export async function deleteBucket(user: User, bucketId: string): Promise<void> {
+  await apiRequest<void>(`/buckets/${bucketId}`, {
+    method: 'DELETE',
+    tenantId: user.tenantId,
+    userId: user.id,
+    roles: user.roles,
+  })
+}

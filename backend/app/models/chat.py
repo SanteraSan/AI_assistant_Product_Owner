@@ -44,6 +44,13 @@ class ChatMessageResponse(BaseModel):
     created_at: str
 
 
+class ChatAttachmentCreateRequest(BaseModel):
+    document_id: str = Field(..., min_length=1, max_length=36)
+    file_name: str = Field(..., min_length=1, max_length=512)
+    source_type: str = Field(..., min_length=1, max_length=64)
+    status: str = Field(default="indexing", min_length=1, max_length=32)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     model: str | None = None

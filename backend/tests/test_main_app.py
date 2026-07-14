@@ -7,14 +7,20 @@ from fastapi.testclient import TestClient
 
 from app import main as main_module
 from app.main import (
+    _bucket_file_inventory_response,
     _conversation_context_error,
+    _document_ids,
+    _effective_bucket_ids,
     _enforce_chat_request_limits,
     _enforce_filter_values_limit,
     _enforce_rag_request_limits,
     _limits_snapshot,
+    _looks_like_bucket_file_inventory_question,
+    _looks_like_targeted_image_reanalysis,
+    _targeted_image_point_id,
     create_app,
 )
-from app.models.chat import ChatRequest, RagChatRequest
+from app.models.chat import ChatRequest, RagChatRequest, RagChatResponse, SourceChunk
 
 
 def test_create_app_returns_fastapi_instance() -> None:
@@ -203,6 +209,228 @@ def test_update_chat_session_endpoint_persists_context(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["active_bucket_id"] is None
     assert response.json()["model_id"] == "qwen3.5:9b"
+
+
+def test_create_chat_attachment_message_endpoint(monkeypatch) -> None:
+    timestamp = datetime(2026, 7, 14, 12, 0, tzinfo=UTC)
+
+    class _FakeChatHistoryService:
+        async def save_attachment_message(
+            self,
+            *,
+            tenant_id: str,
+            user_id: str | None,
+            session_id: str | None,
+            document_id: str,
+            file_name: str,
+            source_type: str,
+            status: str,
+            active_bucket_id: str | None = None,
+            model_id: str | None = None,
+            approach: str | None = None,
+        ):
+            assert tenant_id == "local_demo"
+            assert user_id == "local-user-1"
+            assert session_id == "session-1"
+            assert document_id == "doc-1"
+            assert file_name == "diagram.png"
+            assert source_type == "image"
+            assert status == "indexing"
+            return SimpleNamespace(
+                id="attachment-message-1",
+                session_id=session_id,
+                role="user",
+                content="Прикреплён файл: diagram.png",
+                model=None,
+                provider=None,
+                latency_ms=None,
+                metadata_json={
+                    "attachments": [
+                        {
+                            "id": document_id,
+                            "file_name": file_name,
+                            "source_type": source_type,
+                            "status": status,
+                        }
+                    ]
+                },
+                created_at=timestamp,
+            )
+
+    monkeypatch.setattr(main_module, "chat_history_service", _FakeChatHistoryService())
+    client = TestClient(main_module.app)
+
+    response = client.post(
+        "/chat/sessions/session-1/attachments",
+        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+        json={
+            "document_id": "doc-1",
+            "file_name": "diagram.png",
+            "source_type": "image",
+            "status": "indexing",
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["content"] == "Прикреплён файл: diagram.png"
+    assert body["metadata"]["attachments"][0]["id"] == "doc-1"
+
+
+def test_create_chat_attachment_message_endpoint_returns_404(monkeypatch) -> None:
+    class _FakeChatHistoryService:
+        async def save_attachment_message(self, **_kwargs):
+            return None
+
+    monkeypatch.setattr(main_module, "chat_history_service", _FakeChatHistoryService())
+    client = TestClient(main_module.app)
+
+    response = client.post(
+        "/chat/sessions/session-1/attachments",
+        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+        json={
+            "document_id": "doc-1",
+            "file_name": "diagram.png",
+            "source_type": "image",
+            "status": "indexing",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_delete_chat_session_endpoint(monkeypatch) -> None:
+    class _FakeChatHistoryService:
+        async def delete_session(self, *, tenant_id: str, user_id: str | None, session_id: str):
+            assert tenant_id == "local_demo"
+            assert user_id == "local-user-1"
+            assert session_id == "session-1"
+            return True
+
+    monkeypatch.setattr(main_module, "chat_history_service", _FakeChatHistoryService())
+    client = TestClient(main_module.app)
+
+    response = client.delete(
+        "/chat/sessions/session-1",
+        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+    )
+
+    assert response.status_code == 204
+
+
+
+def test_bucket_file_inventory_helpers_use_selected_bucket_context() -> None:
+    request = RagChatRequest(
+        message="Какие файлы есть в бакете?",
+        active_bucket_id="bucket-1",
+        bucket_ids=["bucket-1"],
+    )
+    documents = [
+        SimpleNamespace(id="doc-1", file_name="diagramms.xlsx", status="indexed"),
+        SimpleNamespace(id="doc-2", file_name="draft.txt", status="index_failed"),
+    ]
+
+    assert _effective_bucket_ids(request) == ["bucket-1"]
+    assert _looks_like_bucket_file_inventory_question(request.message)
+    assert _document_ids(documents) == ["doc-1"]
+
+    response = _bucket_file_inventory_response(
+        message=request.message,
+        model="qwen3.5:9b",
+        bucket_ids=["bucket-1"],
+        documents=documents,
+        latency_ms=1,
+    )
+
+    assert "diagramms.xlsx" in response.response
+    assert response.sources[0].source_type == "bucket_metadata"
+
+
+def test_targeted_image_reanalysis_intent_and_point_id_are_stable() -> None:
+    assert _looks_like_targeted_image_reanalysis("Повторно проанализируй картинку: какого цвета ствол?")
+    assert _looks_like_targeted_image_reanalysis("Какого цвета ствол у дерева?")
+    assert not _looks_like_targeted_image_reanalysis("Суммируй историю чата")
+
+    first = _targeted_image_point_id(
+        document_id="doc-1",
+        bucket_id="__personal__",
+        question="Какого цвета ствол у дерева?",
+        vision_model="gemma4:12b",
+    )
+    second = _targeted_image_point_id(
+        document_id="doc-1",
+        bucket_id="__personal__",
+        question="  какого   цвета ствол у дерева? ",
+        vision_model="gemma4:12b",
+    )
+
+    assert first == second
+
+
+def test_rag_chat_passes_targeted_image_source_to_rag(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    targeted_source = SourceChunk(
+        id="targeted-source-1",
+        score=None,
+        title="images.jpeg - targeted image analysis",
+        source_type="image_targeted_digest",
+        source_path="/tmp/images.jpeg",
+        content="Focused question: Какого цвета ствол?\nTargeted vision digest:\nСтвол коричневый.",
+        metadata={"document_metadata": {"document_asset_id": "doc-1"}},
+    )
+
+    async def _fake_build_context(*, session_id: str | None, message: str):
+        return {
+            "retrieval_query": message,
+            "prompt_memory": {"used": False},
+        }
+
+    async def _fake_build_targeted_image_sources(**kwargs):
+        captured["targeted_kwargs"] = kwargs
+        return [targeted_source]
+
+    class _FakeRagService:
+        async def answer(self, **kwargs):
+            captured["rag_kwargs"] = kwargs
+            return RagChatResponse(
+                model="qwen3.5:9b",
+                response="Ствол дерева коричневый.",
+                latency_ms=1,
+                collection="documents",
+                sources=kwargs["additional_sources"],
+                retrieval={
+                    "additional_source_count": len(kwargs["additional_sources"]),
+                },
+            )
+
+    async def _fake_save_exchange(**_kwargs):
+        return None
+
+    class _FakeRagLogService:
+        async def log_response(self, **_kwargs):
+            return None
+
+    monkeypatch.setattr(main_module, "_qdrant_collection_exists", lambda: True)
+    monkeypatch.setattr(main_module, "_build_conversation_context", _fake_build_context)
+    monkeypatch.setattr(main_module, "_build_targeted_image_sources", _fake_build_targeted_image_sources)
+    monkeypatch.setattr(main_module, "rag_service", _FakeRagService())
+    monkeypatch.setattr(main_module, "_try_save_chat_exchange", _fake_save_exchange)
+    monkeypatch.setattr(main_module, "rag_log_service", _FakeRagLogService())
+    client = TestClient(main_module.app)
+
+    response = client.post(
+        "/rag/chat",
+        headers={"X-Tenant-ID": "local_demo", "X-User-ID": "local-user-1"},
+        json={
+            "message": "Повторно проанализируй картинку: какого цвета ствол?",
+            "document_ids": ["doc-1"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["sources"][0]["source_type"] == "image_targeted_digest"
+    assert captured["targeted_kwargs"]["document_ids"] == ["doc-1"]
+    assert captured["rag_kwargs"]["additional_sources"] == [targeted_source]
 
 
 def test_limits_snapshot_contains_request_limits() -> None:

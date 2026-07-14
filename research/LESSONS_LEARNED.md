@@ -31,6 +31,44 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: Persist Chat Attachments Across Reload
+
+Контекст:
+- после attach файла в чат UI и RAG scope жили только в Zustand;
+- F5 очищал attachment из ленты, и повторный вопрос про картинку шёл только по истории текста.
+
+Наблюдение:
+- document commit в library сохранялся, но chat не помнил `document_id`;
+- `indexedAttachmentDocumentIds()` после reload становился пустым.
+
+Решение:
+- backend: `POST /chat/sessions/{id}/attachments` пишет user message с `metadata.attachments` и копит `session.metadata.attached_document_ids`;
+- frontend: после commit вызывает persist API, на load мапит attachments из message metadata и статусы подтягивает из available documents;
+- RAG scope после reload восстанавливается из сообщений + session `documentIds`.
+
+Вывод:
+- chat attachment — часть conversation history, не ephemeral UI state;
+- статус индексации лучше refresh'ить из document library, а не замораживать snapshot из момента attach.
+
+## 2026-07-14: User-Driven Visual Enrichment
+
+Контекст:
+- baseline `image_digest` честно описывает картинку один раз, но не обязан извлечь все признаки;
+- пользователь спросил про цвет ствола дерева, которого не было в сохранённом vision evidence.
+
+Наблюдение:
+- prompt ответа работал правильно: не выдумывал цвет, если его нет в контексте;
+- слабое место было до ответа: система не умела по запросу пользователя добрать новый визуальный факт из исходного изображения.
+
+Решение:
+- добавлен persisted `image_targeted_digest`: focused re-analysis исходного image asset по вопросу пользователя;
+- новый chunk сохраняется в Qdrant с `document_id`, `bucket_id`, `source_path`, `prompt_question`, `vision_model` и используется в текущем RAG ответе;
+- исходный `image_digest` не перезаписывается, чтобы сохранить traceability baseline и уточнений.
+
+Вывод:
+- пользовательские follow-up вопросы могут быть полезным механизмом постепенного обогащения visual evidence;
+- уточняющий vision слой должен оставаться evidence, а не памятью или догадкой модели.
+
 ## 2026-07-05: Стартовая Архитектура Данных
 
 Контекст:
@@ -3608,3 +3646,92 @@ Access baseline:
 
 - старые дубли физически остаются в БД/файловой системе, но больше не должны размножаться и не должны отображаться пачкой в available list;
 - отдельный cleanup/backfill можно сделать позже, когда появится admin maintenance endpoint.
+
+## 2026-07-12: E0.3 Personal Document Delete Guardrail
+
+Контекст:
+
+- после dedup появилась необходимость удалять личные документы из доступной библиотеки;
+- важно не смешивать `убрать из bucket` и `удалить файл полностью`.
+
+Что изменено:
+
+- добавлен backend endpoint `DELETE /documents/{document_id}`;
+- удаление разрешено только пользователю, который может управлять документом;
+- для обычного пользователя baseline дополнительно ограничивает удаление личными `private` документами;
+- если документ ещё используется в одном или нескольких bucket, backend возвращает `409 document_in_use` со списком bucket names;
+- frontend показывает кнопку `Удалить` только в блоке `Доступные документы`, только для личных private документов;
+- перед удалением показывается confirmation modal;
+- если документ используется в bucket, modal показывает сообщение с именами bucket.
+
+Вывод:
+
+- `Убрать` в bucket modal означает unlink из текущего bucket;
+- `Удалить` в available documents означает delete личного `DocumentAsset`, но только если нет активных bucket links;
+- это защищает shared/admin documents от случайного удаления обычными пользователями.
+
+## 2026-07-14: E0.3 Polish — Retry Indexing, Chat/Bucket CRUD, Compact Answers
+
+Контекст:
+
+- после document delete оставался polish-хвост E0.3 перед Keycloak;
+- нужны retry для `index_failed`, rename/delete чатов, edit/delete buckets и более компактные RAG-ответы.
+
+Что изменено:
+
+1. Retry indexing
+- endpoint `POST /documents/{document_id}/retry-indexing` (+ optional `bucket_id`);
+- создаёт новый `DocumentIndexingJob` с `source=retry_indexing`;
+- UI кнопка «Повторить» для `index_failed` в bucket и в available documents.
+
+2. Chat CRUD
+- `DELETE /chat/sessions/{session_id}` удаляет session и messages (CASCADE);
+- rename через существующий `PATCH` + UI modal в sidebar;
+- delete с confirmation; если чатов не осталось — создаётся новый.
+
+3. Bucket CRUD
+- `DELETE /buckets/{bucket_id}` удаляет bucket; `BucketDocument` links cascade-delete;
+- `DocumentAsset` остаются в available documents (unlink, не delete файлов);
+- edit modal для name/description; delete modal с предупреждением про сохранение документов.
+
+4. Compact answers
+- RAG prompt просит краткие grounded-ответы (3–6 предложений / короткий список);
+- меньше эссе и повторений; источники ограничены до 1–3 реально использованных.
+
+Проверки:
+
+- backend focused + full suite green;
+- frontend `lint` + `build` green.
+
+Future hardening:
+
+- Qdrant cleanup при retry/delete document/bucket;
+- owner checks для bucket delete после Keycloak/RBAC;
+- optional UI toggle «Краткий / подробный ответ».
+
+## 2026-07-14: E0.3 Bucket Context Regression Fix
+
+Контекст:
+
+- при выбранном bucket с `diagramms.xlsx` вопрос `Что изображено на диаграмме в бакете?` возвращал no-context answer;
+- вопрос `Какие файлы есть в бакете?` тоже пытался отвечать через semantic retrieval, хотя это metadata/inventory-вопрос.
+
+Причины:
+
+- frontend мог приоритизировать indexed chat attachments выше явно выбранного bucket;
+- backend Excel/chart supplement считал узким scope только `document_ids/source_paths`, но не `bucket_ids`;
+- `/rag/chat` не разворачивал выбранный bucket в список document IDs из БД, поэтому retrieval зависел от того, как именно chunks были записаны в Qdrant;
+- inventory-вопросы по bucket не должны зависеть от embedding similarity.
+
+Что изменено:
+
+- если пользователь явно спрашивает `в bucket/бакете/выбранном/текущем`, frontend отправляет выбранный bucket scope раньше attachments;
+- `bucket_ids` теперь считается валидным narrow retrieval scope для RAG supplements и lowered threshold;
+- `/rag/chat` разворачивает выбранные bucket IDs в indexed document IDs через `BucketService.list_documents`;
+- для вопроса `какие файлы есть в бакете` backend отвечает детерминированно по metadata из БД;
+- добавлены regression tests для bucket inventory и bucket-scoped supplement rules.
+
+Проверки:
+
+- `backend/.venv/bin/python -m pytest -q` -> 102 passed;
+- frontend `npm run lint && npm run build` -> green.

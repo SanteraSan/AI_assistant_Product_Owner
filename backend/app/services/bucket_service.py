@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
@@ -15,10 +16,18 @@ from app.db.models import (
     KnowledgeBucket,
     StagedDocumentUpload,
 )
-from app.services.access_policy import UserContext, can_read_document
+from app.services.access_policy import UserContext, can_manage_document, can_read_document
 
 
 PERSONAL_INDEX_BUCKET_ID = "__personal__"
+
+
+@dataclass(frozen=True)
+class DocumentDeleteResult:
+    deleted: bool
+    not_found: bool = False
+    forbidden: bool = False
+    in_use_buckets: list[tuple[str, str]] = field(default_factory=list)
 
 
 class BucketService:
@@ -260,6 +269,143 @@ class BucketService:
             await session.delete(link)
             await session.commit()
             return True
+
+    async def delete_document(
+        self,
+        *,
+        user: UserContext,
+        document_id: str,
+    ) -> DocumentDeleteResult:
+        async with self._session_factory() as session:
+            document = await session.scalar(
+                select(DocumentAsset)
+                .options(
+                    selectinload(DocumentAsset.acl_entries),
+                    selectinload(DocumentAsset.bucket_links),
+                )
+                .where(
+                    DocumentAsset.tenant_id == user.tenant_id,
+                    DocumentAsset.id == document_id,
+                )
+            )
+            if document is None:
+                return DocumentDeleteResult(deleted=False, not_found=True)
+            if not can_manage_document(
+                document=document,
+                user=user,
+                acl_entries=document.acl_entries,
+            ):
+                return DocumentDeleteResult(deleted=False, forbidden=True)
+            if not user.is_admin and (
+                document.visibility != "private"
+                or not user.user_id
+                or document.owner_user_id != user.user_id
+            ):
+                return DocumentDeleteResult(deleted=False, forbidden=True)
+
+            bucket_links = list(document.bucket_links)
+            if bucket_links:
+                bucket_ids = [link.bucket_id for link in bucket_links]
+                buckets = (
+                    await session.execute(
+                        select(KnowledgeBucket).where(
+                            KnowledgeBucket.tenant_id == user.tenant_id,
+                            KnowledgeBucket.id.in_(bucket_ids),
+                        )
+                    )
+                ).scalars().all()
+                bucket_names = {bucket.id: bucket.name for bucket in buckets}
+                return DocumentDeleteResult(
+                    deleted=False,
+                    in_use_buckets=[
+                        (bucket_id, bucket_names.get(bucket_id, bucket_id))
+                        for bucket_id in bucket_ids
+                    ],
+                )
+
+            source_path = Path(document.source_path)
+            await session.delete(document)
+            await session.commit()
+            source_path.unlink(missing_ok=True)
+            return DocumentDeleteResult(deleted=True)
+
+    async def delete_bucket(
+        self,
+        *,
+        tenant_id: str,
+        bucket_id: str,
+    ) -> bool:
+        async with self._session_factory() as session:
+            bucket = await self._get_bucket(
+                session=session,
+                tenant_id=tenant_id,
+                bucket_id=bucket_id,
+            )
+            if bucket is None:
+                return False
+            # BucketDocument links cascade-delete; DocumentAsset rows stay available.
+            await session.delete(bucket)
+            await session.commit()
+            return True
+
+    async def retry_document_indexing(
+        self,
+        *,
+        user: UserContext,
+        document_id: str,
+        bucket_id: str | None = None,
+    ) -> tuple[DocumentAsset, str] | None:
+        async with self._session_factory() as session:
+            document = await session.scalar(
+                select(DocumentAsset)
+                .options(selectinload(DocumentAsset.acl_entries))
+                .where(
+                    DocumentAsset.tenant_id == user.tenant_id,
+                    DocumentAsset.id == document_id,
+                )
+            )
+            if document is None:
+                return None
+            if not can_manage_document(
+                document=document,
+                user=user,
+                acl_entries=document.acl_entries,
+            ):
+                return None
+
+            target_bucket_id = bucket_id or PERSONAL_INDEX_BUCKET_ID
+            if bucket_id is not None:
+                bucket = await self._get_bucket(
+                    session=session,
+                    tenant_id=user.tenant_id,
+                    bucket_id=bucket_id,
+                )
+                if bucket is None:
+                    return None
+                await self._ensure_bucket_document_link(
+                    session=session,
+                    user=user,
+                    bucket_id=bucket_id,
+                    document_id=document_id,
+                    indexing_status="indexing",
+                )
+
+            document.status = "indexing"
+            document.error = None
+            job_id = str(uuid4())
+            session.add(
+                DocumentIndexingJob(
+                    id=job_id,
+                    tenant_id=user.tenant_id,
+                    bucket_id=target_bucket_id,
+                    document_id=document_id,
+                    status="pending",
+                    metadata_json={"source": "retry_indexing"},
+                )
+            )
+            await session.commit()
+            await session.refresh(document)
+            return document, job_id
 
     async def stage_uploaded_document(
         self,
