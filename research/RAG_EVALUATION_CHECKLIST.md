@@ -43,7 +43,14 @@ python -m scripts.run_rag_evaluation \
 
 Перед multi-model regression после E1 ACL: если у всех моделей `source_count=0` на известных fixtures — сначала `ingest_seed_data.py --recreate` (при необходимости) и **обязательно** `scripts/sync_seed_document_registry.py`. Иначе сравнивается пустой retrieval, не качество моделей.
 
-Валидные post-E3.4 runs (2026-07-14): Stage A `415f57a8-4e1c-4009-9ddd-6c0bc6994c26`; document-only `64e85eda-67d5-4ee8-8298-d5757e54c5cb`. `failed_flags` на document edge cases часто = хрупкий marker / неполнота формулировки, не обязательно фактическая ошибка.
+Валидные post-E3.4 / pre-E4 runs (2026-07-14):
+
+- Stage A: `415f57a8-4e1c-4009-9ddd-6c0bc6994c26` (vs baseline `d3ac1bb1…`)
+- Stage B: `baebac6d-48a5-43d9-ab62-c0d0c0e6804b` (vs baseline `58e4bf90…`) — 15/15 pass
+- Stage C: `6806655b-64fb-40c4-a13e-6a3655e48cf8` on `qwen3:14b` (vs baseline `2ecdcd0b…` on `qwen3.5:9b`)
+- document-only three-model: `64e85eda-67d5-4ee8-8298-d5757e54c5cb`
+
+`failed_flags` на document edge cases часто = хрупкий marker / неполнота формулировки, не обязательно фактическая ошибка.
 
 Важно: автоматические `quality_flags` являются быстрыми эвристиками, а не заменой ручной оценки. Они помогают найти очевидные регрессии: пустой ответ, неправильный router intent, отсутствие expected source type или нарушение простого negative constraint.
 

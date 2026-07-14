@@ -31,6 +31,26 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: Pre-E4 Full Project Regression Diff
+
+Контекст:
+- перед E4 прогнали full-project slices и сравнили с июльскими baseline;
+- Stage A уже был валиден после ACL-fix; добили Stage B + Stage C.
+
+Runs (new):
+- A: `415f57a8-4e1c-4009-9ddd-6c0bc6994c26` (3 models) vs old `d3ac1bb1…`
+- B: `baebac6d-48a5-43d9-ab62-c0d0c0e6804b` (`qwen3.5:9b`) vs old `58e4bf90…`
+- C: `6806655b-64fb-40c4-a13e-6a3655e48cf8` (`qwen3:14b` winner) vs old `2ecdcd0b…` (`qwen3.5:9b`)
+
+Наблюдение:
+- **B:** 15/15 pass, `failed_flags=0`, `zero_sources=0`; latency ~1.5s vs ~5.0s baseline (быстрее, качество по flags то же);
+- **A:** retrieval здоровый (`zero_sources=0`); 1 brittle fail — `gemma4` / `bucket_beta_positive` marker; иначе паритет с baseline;
+- **C:** 14/16 clean; 2 marker fails на `qwen3:14b` (`pdf_mentions_notifications`, chart marker groups) при осмысленных ответах — сравнение с old 9b не apple-to-apple по модели, не retrieval regression.
+
+Вывод:
+- pre-E4 baseline зелёный по retrieval/ACL; оставшиеся fails — wording markers;
+- можно переходить к E4 без блокирующего quality gate.
+
 ## 2026-07-14: Agent Smoke — Text-to-SQL LoRA Tag
 
 Контекст:
