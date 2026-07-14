@@ -1351,7 +1351,7 @@ Config keys: `SQL_TOOL_ENABLED`, `SQL_TOOL_ROW_LIMIT`, `SQL_TOOL_TIMEOUT_SECONDS
 pytest tests/test_sql_tools.py -q
 ```
 
-Чтобы использовать LoRA как Ollama model, создайте tag из adapter/Modelfile с именем `qwen2_5_coder_7b_v5_projection_steps400` (или задайте `TEXT_TO_SQL_MODEL`). Если tag отсутствует — автоматический fallback на `qwen2.5-coder:7b` + warning в tool result.
+Если Ollama tag для LoRA отсутствует — `TextToSqlService` делает fallback на `qwen2.5-coder:7b` + warning в tool result. Как создать tag — см. E3.4 ниже.
 
 ## E3.3 Agent Chat And Tool Trace
 
@@ -1364,6 +1364,29 @@ pytest tests/test_sql_tools.py -q
 pytest tests/test_agent_orchestrator.py -q
 # UI: Режим → Agent → вопрос вроде «какие у меня права?» / «какие buckets есть?»
 ```
+
+## E3.4 Package V5 LoRA → Ollama Tag
+
+PEFT safetensors для Qwen **не** подходят как Ollama `ADAPTER` напрямую. Рабочий путь: **adapter GGUF** (`llama.cpp convert_lora_to_gguf.py`) + Modelfile `FROM qwen2.5-coder:7b` + `ADAPTER …lora.gguf`. Полный merge (`--mode merge_full`) — тяжёлый fallback.
+
+```bash
+# one-time packing venv (CPU torch + peft/transformers/gguf)
+cd backend
+python3 -m venv .venv-lora-pack
+.venv-lora-pack/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+.venv-lora-pack/bin/pip install peft transformers gguf sentencepiece protobuf
+
+# llama.cpp converters (example path)
+# git clone https://github.com/ggerganov/llama.cpp /tmp/llama.cpp
+
+.venv-lora-pack/bin/python scripts/package_text_to_sql_lora_ollama.py \
+  --adapter-dir ../models/text_to_sql_lora/qwen2_5_coder_7b_v5_projection_steps400 \
+  --llama-cpp-dir /tmp/llama.cpp \
+  --mode adapter_gguf \
+  --ollama-create
+```
+
+Артефакты пишутся в `models/text_to_sql_lora/..._ollama/` (каталог `/models/` в `.gitignore`). После `ollama create` tag `qwen2_5_coder_7b_v5_projection_steps400` должен появиться в `ollama list`.
 
 ## E0 UI Skeleton: Buckets And Document Registry API
 

@@ -31,6 +31,25 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E3.4 LoRA → Ollama Tag (adapter GGUF)
+
+Контекст:
+- `TEXT_TO_SQL_MODEL=qwen2_5_coder_7b_v5_projection_steps400` без Ollama tag всегда уходил в fallback `qwen2.5-coder:7b`;
+- PEFT safetensors для Qwen нельзя просто указать в Modelfile `ADAPTER` (Ollama покрывает safetensors-ADAPTER для Llama/Mistral/Gemma).
+
+Наблюдение:
+- полный merge PEFT→HF→GGUF требует много disk/VRAM; на машине GPU был недоступен для packing;
+- путь **adapter_gguf** сработал: `convert_lora_to_gguf.py` → ~39MB `*.lora.gguf` + `FROM qwen2.5-coder:7b` + `ADAPTER`;
+- `ollama create` дал tag ~4.7GB; smoke `TextToSqlService.generate`: `fallback_used=False`, `model_used=qwen2_5_coder_7b_v5_projection_steps400`, валидный `SELECT COUNT(*) … FROM evaluation_runs`.
+
+Решение:
+- скрипт `backend/scripts/package_text_to_sql_lora_ollama.py` (`adapter_gguf` default, `merge_full` fallback);
+- артефакты остаются локально под `/models/` (gitignore); команды recreate в `backend/README.md`.
+
+Вывод:
+- для Qwen Coder LoRA в Ollama предпочтителен adapter GGUF, а не полный merge, если base tag уже есть;
+- validator/allowlist по-прежнему обязательны: packaging закрывает model path, не SQL safety.
+
 ## 2026-07-14: Model Comparison — Grounded No-Answer On Missing Diagram File
 
 Контекст:
@@ -67,7 +86,7 @@
 Решение:
 - interim: для agent smoke предпочитать `gemma4:12b` (или сравнимо сильную модель);
 - unit/RBAC тесты оставлять без LLM; tool-choice quality не путать с ACL;
-- follow-up остаётся: E3.4 LoRA→Ollama tag; optional repair для кривых tool JSON / `list_accessible_documents`.
+- follow-up: E3.4 LoRA→Ollama tag **закрыт** (см. запись выше); optional repair для кривых tool JSON / `list_accessible_documents` остаётся.
 
 Вывод:
 - доступность документов + agent/RAG path работают как product baseline;

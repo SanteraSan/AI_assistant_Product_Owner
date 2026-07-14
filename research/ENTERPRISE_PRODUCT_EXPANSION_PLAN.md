@@ -284,7 +284,8 @@ Delivered:
 
 - E3.1 tool registry/executor/`ToolResult`/role matrix + audit `tool_call_logs`;
 - E3.2 allowlisted readonly SQL + LoRA model fallback;
-- E3.3 `POST /agent/chat` + AgentOrchestrator + UI mode Agent + tool-trace panel.
+- E3.3 `POST /agent/chat` + AgentOrchestrator + UI mode Agent + tool-trace panel;
+- E3.4 V5 LoRA packaged as Ollama tag `qwen2_5_coder_7b_v5_projection_steps400` (adapter GGUF path; smoke без fallback).
 
 Later / out of scope сейчас:
 
@@ -310,11 +311,11 @@ Definition of done:
 - tool call trace виден в API metadata и UI — **done**;
 - viewer не execute SQL; document no-leak сохраняется — **done**.
 
-### E3.4 follow-up (обязательно): LoRA → Ollama tag
+### E3.4: LoRA → Ollama tag
 
-Статус: **planned** — без этого `text_to_sql` на практике использует fallback `qwen2.5-coder:7b`.
+Статус: **done** — tag `qwen2_5_coder_7b_v5_projection_steps400` в Ollama; `TextToSqlService` smoke с `fallback_used=false`.
 
-Почему не «просто Modelfile ADAPTER»: V5 adapter — PEFT safetensors на **Qwen2.5-Coder**; Ollama safetensors-ADAPTER официально покрывает Llama/Mistral/Gemma, не Qwen. Путь: merge → GGUF → `ollama create qwen2_5_coder_7b_v5_projection_steps400`. Детали: `.cursor/plans/e3_tools_agents_201ce1e6.plan.md` § E3.4.
+Почему не «просто Modelfile ADAPTER» на safetensors: V5 adapter — PEFT на **Qwen2.5-Coder**; Ollama safetensors-ADAPTER официально покрывает Llama/Mistral/Gemma, не Qwen. Рабочий путь: **adapter → GGUF LoRA** (`convert_lora_to_gguf.py`) + Modelfile `FROM qwen2.5-coder:7b` + `ADAPTER …lora.gguf` (скрипт `backend/scripts/package_text_to_sql_lora_ollama.py`; полный merge — fallback). Детали: `.cursor/plans/e3_tools_agents_201ce1e6.plan.md` § E3.4.
 
 ## Этап E4: n8n And Email/Workflow Integration
 
