@@ -171,6 +171,7 @@ def test_rag_prompt_includes_document_file_name_in_source_header() -> None:
 
     assert "file=AGENTS.md" in prompt
     assert "Не говори, что файл отсутствует" in prompt
+    assert "Не описывай другой файл вместо запрошенного" in prompt
     assert "который отвечает по пользовательским документам" in prompt
 
 
