@@ -220,7 +220,6 @@ class LangGraphAgentAdapter:
         sources = list(state.get("sources") or [])
         response_text = str(state.get("pending_response_text") or "")
         pending_calls = list(state.get("pending_tool_calls") or [])
-        pending_final = state.get("pending_final_answer")
         step = int(state.get("step") or 0)
         max_steps = int(state.get("max_steps") or self._max_steps)
 
@@ -251,16 +250,7 @@ class LangGraphAgentAdapter:
             }
         )
 
-        if pending_final:
-            return {
-                "transcript": transcript,
-                "tool_calls_audit": tool_calls_audit,
-                "sources": sources,
-                "answer": str(pending_final),
-                "done": True,
-                "pending_tool_calls": [],
-                "pending_final_answer": None,
-            }
+        # Ignore premature final_answer that arrived with tool_calls; continue loop.
         if step >= max_steps:
             return {
                 "transcript": transcript,

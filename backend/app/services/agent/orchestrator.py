@@ -123,15 +123,8 @@ class AgentOrchestrator:
                         "content": json.dumps(tool_results_for_model, ensure_ascii=False),
                     }
                 )
-                if parsed.final_answer:
-                    return AgentRunResult(
-                        answer=parsed.final_answer,
-                        model=selected_model,
-                        latency_ms=_latency_ms(started),
-                        tool_calls=tool_calls_audit,
-                        sources=sources,
-                        steps=step,
-                    )
+                # Ignore premature final_answer paired with tool_calls — model must
+                # see tool results before finishing (avoids answers like "[]").
                 continue
 
             if parsed.final_answer:
@@ -194,6 +187,8 @@ def _build_agent_prompt(
 - Отвечай ТОЛЬКО одним JSON-объектом.
 - Чтобы вызвать tools: {{"tool_calls":[{{"name":"...","arguments":{{...}}}}]}}
 - Чтобы закончить: {{"final_answer":"...","tool_calls":[]}}
+- Не совмещай tool_calls и final_answer в одном ответе: сначала tools, потом отдельный final_answer строкой.
+- final_answer — непустая строка для пользователя (не [] и не JSON-массив).
 - Evidence только из tool results (особенно rag_search / analyze_image / SQL). Memory — не evidence.
 - Не выдумывай документы, SQL-результаты или содержимое картинок.
 - Если tool вернул denied/invalid_input — объясни ограничение или попробуй другой tool.

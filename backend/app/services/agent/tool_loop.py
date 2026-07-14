@@ -77,7 +77,14 @@ def parse_tool_loop_response(text: str) -> ToolLoopParseResult:
 
     final_answer = parsed.get("final_answer")
     if final_answer is not None:
-        final_answer = str(final_answer).strip() or None
+        if isinstance(final_answer, (list, dict)):
+            # Models sometimes emit []/{} instead of a string; treat empties as missing.
+            if not final_answer:
+                final_answer = None
+            else:
+                final_answer = json.dumps(final_answer, ensure_ascii=False)
+        else:
+            final_answer = str(final_answer).strip() or None
 
     return ToolLoopParseResult(
         tool_calls=tool_calls,

@@ -135,7 +135,42 @@ async def test_agent_orchestrator_viewer_sql_denied_in_trace() -> None:
 
 
 @pytest.mark.anyio
-async def test_agent_orchestrator_direct_final_answer() -> None:
+async def test_agent_orchestrator_ignores_premature_final_answer_with_tools() -> None:
+    registry = ToolRegistry()
+    registry.register(_ListBucketsTool())
+    executor = ToolExecutor(registry=registry)
+    ollama = _FakeOllama(
+        [
+            json.dumps(
+                {
+                    "tool_calls": [{"name": "list_buckets", "arguments": {}}],
+                    "final_answer": [],
+                }
+            ),
+            json.dumps(
+                {
+                    "final_answer": "В тенанте есть bucket Alpha.",
+                    "tool_calls": [],
+                }
+            ),
+        ]
+    )
+    orchestrator = AgentOrchestrator(
+        ollama_client=ollama,  # type: ignore[arg-type]
+        tool_executor=executor,
+        tool_registry=registry,
+        default_model="test-model",
+        max_steps=4,
+    )
+    result = await orchestrator.run(
+        message="Какие buckets есть?",
+        user=_user("viewer"),
+        request_id="req-agent-premature",
+    )
+    assert result.answer == "В тенанте есть bucket Alpha."
+    assert result.answer != "[]"
+    assert result.steps == 2
+
     registry = ToolRegistry()
     registry.register(_ListBucketsTool())
     executor = ToolExecutor(registry=registry)

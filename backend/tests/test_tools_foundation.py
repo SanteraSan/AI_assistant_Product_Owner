@@ -269,6 +269,14 @@ def test_parse_tool_loop_response_final_answer_fenced() -> None:
     assert "viewer" in (parsed.final_answer or "")
 
 
+def test_parse_tool_loop_response_empty_list_final_answer_is_none() -> None:
+    parsed = parse_tool_loop_response(
+        '{"tool_calls":[],"final_answer":[]}'
+    )
+    assert parsed.error is None
+    assert parsed.final_answer is None
+
+
 def test_registry_list_specs() -> None:
     registry = ToolRegistry()
     registry.register(GetUserContextTool())
