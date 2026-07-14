@@ -109,3 +109,21 @@ class RagChatResponse(ChatResponse):
     context_policy: dict[str, Any] = Field(default_factory=dict)
     conversation_context: dict[str, Any] = Field(default_factory=dict)
     prompt_tokens_estimate: int | None = None
+
+
+class AgentChatRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+    model: str | None = None
+    session_id: str | None = Field(default=None, min_length=1, max_length=36)
+    approach: str | None = Field(default=None, max_length=64)
+    active_bucket_id: str | None = Field(default=None, max_length=36)
+    tenant_id: str | None = Field(default=None, min_length=1)
+    bucket_ids: list[str] = Field(default_factory=list)
+    document_ids: list[str] = Field(default_factory=list)
+
+
+class AgentChatResponse(ChatResponse):
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    sources: list[dict[str, Any]] = Field(default_factory=list)
+    steps: int = 0
+    conversation_context: dict[str, Any] = Field(default_factory=dict)

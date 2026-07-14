@@ -33,8 +33,10 @@ from app.models.chat import (
     RagChatResponse,
     SourceChunk,
 )
+from app.routers.agent import create_agent_router
 from app.routers.buckets import create_bucket_router
 from app.services.access_policy import UserContext
+from app.services.agent.orchestrator import AgentOrchestrator
 from app.services.bucket_service import PERSONAL_INDEX_BUCKET_ID, BucketService
 from app.services.chat_history_service import ChatExchangeRecord, ChatHistoryService
 from app.services.conversation_context_service import ConversationContextService
@@ -154,6 +156,13 @@ tool_registry = build_default_tool_registry(
 tool_executor = ToolExecutor(
     registry=tool_registry,
     session_factory=db_session_factory,
+)
+agent_orchestrator = AgentOrchestrator(
+    ollama_client=ollama_client,
+    tool_executor=tool_executor,
+    tool_registry=tool_registry,
+    default_model=settings.agent_default_model or settings.default_rag_model,
+    max_steps=settings.agent_max_steps,
 )
 document_indexing_service = DocumentIndexingService(
     session_factory=db_session_factory,
@@ -1240,3 +1249,14 @@ def _as_dict(value: object) -> dict[str, object]:
     if isinstance(value, dict):
         return value
     return {}
+
+
+app.include_router(
+    create_agent_router(
+        agent_orchestrator=agent_orchestrator,
+        build_conversation_context=_build_conversation_context,
+        save_chat_exchange=_try_save_chat_exchange,
+        enforce_rate_limit=_enforce_rate_limit,
+        attach_chat_exchange=_attach_chat_exchange,
+    )
+)

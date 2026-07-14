@@ -265,7 +265,7 @@ Definition of done (E2.1):
 
 ## Этап E3: Agents, Function Calling And Tool Use
 
-Статус: **in progress** (2026-07-14) — после block E2 (VPN). План реализации: `.cursor/plans/e3_tools_agents_201ce1e6.plan.md`.
+Статус: **done** (2026-07-14) — controlled tools + agent loop baseline. E2 остаётся blocked (VPN).
 
 Цель:
 
@@ -279,6 +279,12 @@ Baseline tools (E3.1–E3.2):
 - `rag_search`;
 - `text_to_sql` (LoRA default + fallback);
 - `execute_readonly_sql`.
+
+Delivered:
+
+- E3.1 tool registry/executor/`ToolResult`/role matrix + audit `tool_call_logs`;
+- E3.2 allowlisted readonly SQL + LoRA model fallback;
+- E3.3 `POST /agent/chat` + AgentOrchestrator + UI mode Agent + tool-trace panel.
 
 Later / out of scope сейчас:
 
@@ -299,10 +305,11 @@ Later / out of scope сейчас:
 
 Definition of done:
 
-- agent chat может вызвать как минимум `rag_search` и Text-to-SQL path;
-- unauthorized/invalid tool calls → `ToolResult` до execution;
-- tool call trace виден в API metadata и UI;
-- viewer не execute SQL; document no-leak сохраняется.
+- agent chat может вызвать как минимум `rag_search` и Text-to-SQL path — **done**;
+- unauthorized/invalid tool calls → `ToolResult` до execution — **done**;
+- tool call trace виден в API metadata и UI — **done**;
+- viewer не execute SQL; document no-leak сохраняется — **done**.
+
 
 ## Этап E4: n8n And Email/Workflow Integration
 
@@ -395,7 +402,7 @@ Scope:
 1. E0 UI Skeleton — **done**.
 2. E1 Keycloak/BFF/RBAC — **done** (2026-07-14).
 3. E2 Model Gateway и external providers — **blocked** (VPN / Gemini unreachable; kickoff сохранён).
-4. E3 Tool-use/agents — **in progress** (next after E2 block).
+4. E3 Tool-use/agents — **done** (2026-07-14).
 5. E4 n8n/email workflows.
 6. E5 Kafka event backbone.
 7. E6 framework adapters.

@@ -1,3 +1,14 @@
+export type ChatMode = 'rag' | 'agent'
+
+export type ToolTraceItem = {
+  id: string
+  name: string
+  status: string
+  latencyMs?: number
+  errorCode?: string | null
+  errorMessage?: string | null
+}
+
 export type ChatThread = {
   id: string
   title: string
@@ -20,6 +31,7 @@ export type ChatMessage = {
     title: string
     sourceType: string
   }>
+  toolCalls?: ToolTraceItem[]
 }
 
 export type ChatAttachment = {

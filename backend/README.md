@@ -1352,6 +1352,18 @@ pytest tests/test_sql_tools.py -q
 
 Чтобы использовать LoRA как Ollama model, создайте tag из adapter/Modelfile с именем `qwen2_5_coder_7b_v5_projection_steps400` (или задайте `TEXT_TO_SQL_MODEL`). Если tag отсутствует — автоматический fallback на `qwen2.5-coder:7b` + warning в tool result.
 
+## E3.3 Agent Chat And Tool Trace
+
+- `POST /agent/chat` — thin router + `AgentOrchestrator` (portable JSON tool loop)
+- Memory (`prompt_memory`) входит в agent prompt, не в tools
+- Response: `response`, `tool_calls[]`, `sources[]`, `steps`
+- Frontend: режим **Agent** в TopBar; правая панель Tool trace
+
+```bash
+pytest tests/test_agent_orchestrator.py -q
+# UI: Режим → Agent → вопрос вроде «какие у меня права?» / «какие buckets есть?»
+```
+
 ## E0 UI Skeleton: Buckets And Document Registry API
 
 Для первого product UI добавлен минимальный API слой для управления buckets и document registry.

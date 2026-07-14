@@ -1,8 +1,14 @@
 import type { Bucket } from '../../entities/bucket/model'
+import type { ChatMode } from '../../entities/chat/model'
 import type { LocalModel, ModelApproach } from '../../entities/model/model'
 import { modelApproaches } from '../../entities/model/model'
 import type { User } from '../../entities/user/model'
 import { Button, Select } from '../../shared/ui'
+
+const chatModeOptions = [
+  { id: 'rag' as const, label: 'RAG' },
+  { id: 'agent' as const, label: 'Agent' },
+]
 
 type TopBarProps = {
   buckets: Bucket[]
@@ -10,9 +16,11 @@ type TopBarProps = {
   activeView: 'chat' | 'buckets'
   models: LocalModel[]
   selectedApproach: ModelApproach
+  selectedChatMode: ChatMode
   selectedModelId: string
   user: User | null
   onChangeApproach: (approach: ModelApproach) => void
+  onChangeChatMode: (mode: ChatMode) => void
   onChangeBucket: (bucketId: string) => void
   onChangeModel: (modelId: string) => void
   onChangeView: (view: 'chat' | 'buckets') => void
@@ -26,12 +34,14 @@ export function TopBar({
   buckets,
   models,
   onChangeApproach,
+  onChangeChatMode,
   onChangeBucket,
   onChangeModel,
   onChangeView,
   onLoginClick,
   onLogoutClick,
   selectedApproach,
+  selectedChatMode,
   selectedModelId,
   user,
 }: TopBarProps) {
@@ -53,6 +63,15 @@ export function TopBar({
       </div>
 
       <div className="flex flex-1 items-center justify-end gap-3">
+        <Select
+          label="Режим"
+          onChange={(event) => onChangeChatMode(event.target.value as ChatMode)}
+          options={chatModeOptions.map((mode) => ({
+            label: mode.label,
+            value: mode.id,
+          }))}
+          value={selectedChatMode}
+        />
         <Select
           label="Модель"
           onChange={(event) => onChangeModel(event.target.value)}
@@ -78,7 +97,7 @@ export function TopBar({
           value={activeBucketId}
         />
         <Button onClick={user ? onLogoutClick ?? onLoginClick : onLoginClick} variant="ghost">
-          {user ? `${user.displayName || user.email} · Выйти` : 'Войти'}
+          {user ? 'Выйти' : 'Войти'}
         </Button>
       </div>
     </header>

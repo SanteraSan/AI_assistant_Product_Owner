@@ -1,5 +1,5 @@
 import { Bot, FileText, UserRound } from 'lucide-react'
-import type { ChatMessage } from '../../entities/chat/model'
+import type { ChatMessage, ChatMode } from '../../entities/chat/model'
 import type { Bucket } from '../../entities/bucket/model'
 import type { LocalModel, ModelApproach } from '../../entities/model/model'
 import { MessageComposer } from '../../features/send-message/MessageComposer'
@@ -8,6 +8,7 @@ import { Badge, Card } from '../../shared/ui'
 type ChatWorkspaceProps = {
   activeBucket?: Bucket
   approach: ModelApproach
+  chatMode: ChatMode
   attachDisabled?: boolean
   composerValue: string
   isSending?: boolean
@@ -21,6 +22,7 @@ type ChatWorkspaceProps = {
 export function ChatWorkspace({
   activeBucket,
   approach,
+  chatMode,
   attachDisabled,
   composerValue,
   isSending,
@@ -32,6 +34,7 @@ export function ChatWorkspace({
 }: ChatWorkspaceProps) {
   const latestAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant')
   const latestSources = latestAssistantMessage?.sources ?? []
+  const latestToolCalls = latestAssistantMessage?.toolCalls ?? []
 
   return (
     <main className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_320px] bg-slate-50">
@@ -40,6 +43,7 @@ export function ChatWorkspace({
           <Card className="p-5">
             <p className="text-sm font-medium text-slate-500">Активный контекст</p>
             <div className="mt-3 flex flex-wrap gap-2">
+              <Badge>{chatMode === 'agent' ? 'Agent' : 'RAG'}</Badge>
               <Badge>{activeBucket?.name ?? 'Без bucket'}</Badge>
               <Badge>{selectedModel?.label ?? 'Модель не выбрана'}</Badge>
               <Badge>{approach}</Badge>
@@ -96,7 +100,7 @@ export function ChatWorkspace({
                 <Bot size={18} />
               </div>
               <div className="rounded-3xl border border-slate-200 bg-white px-5 py-4 text-sm leading-6 text-slate-500">
-                Думаю над ответом...
+                {chatMode === 'agent' ? 'Агент вызывает tools...' : 'Думаю над ответом...'}
               </div>
             </div>
           ) : null}
@@ -114,27 +118,61 @@ export function ChatWorkspace({
         </div>
       </section>
 
-      <aside className="border-l border-slate-200 bg-white p-5">
-        <h2 className="text-base font-semibold text-slate-950">Источники ответа</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Здесь будут документы и фрагменты, на которые опирался последний RAG ответ.
-        </p>
-        <div className="mt-4 space-y-3">
-          {latestSources.length ? (
-            latestSources.map((source) => (
-              <Card className="p-4" key={source.id}>
-                <p className="text-sm font-medium text-slate-900">{source.title}</p>
-                <p className="mt-2 text-xs text-slate-500">{source.sourceType}</p>
+      <aside className="space-y-8 overflow-y-auto border-l border-slate-200 bg-white p-5">
+        <section>
+          <h2 className="text-base font-semibold text-slate-950">Источники ответа</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Документы и фрагменты, на которые опирался последний ответ.
+          </p>
+          <div className="mt-4 space-y-3">
+            {latestSources.length ? (
+              latestSources.map((source) => (
+                <Card className="p-4" key={source.id}>
+                  <p className="text-sm font-medium text-slate-900">{source.title}</p>
+                  <p className="mt-2 text-xs text-slate-500">{source.sourceType}</p>
+                </Card>
+              ))
+            ) : (
+              <Card className="p-4">
+                <p className="text-sm text-slate-500">
+                  Источники появятся после ответа с evidence.
+                </p>
               </Card>
-            ))
-          ) : (
-            <Card className="p-4">
-              <p className="text-sm text-slate-500">
-                Источники появятся после ответа, который использует RAG context.
-              </p>
-            </Card>
-          )}
-        </div>
+            )}
+          </div>
+        </section>
+
+        <section>
+          <h2 className="text-base font-semibold text-slate-950">Tool trace</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Вызовы инструментов последнего agent-ответа.
+          </p>
+          <div className="mt-4 space-y-3">
+            {latestToolCalls.length ? (
+              latestToolCalls.map((call) => (
+                <Card className="p-4" key={call.id}>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-slate-900">{call.name}</p>
+                    <Badge tone={call.status === 'ok' ? 'success' : 'warning'}>{call.status}</Badge>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {call.latencyMs != null ? `${call.latencyMs} ms` : '—'}
+                    {call.errorCode ? ` · ${call.errorCode}` : ''}
+                  </p>
+                  {call.errorMessage ? (
+                    <p className="mt-2 text-xs text-slate-600">{call.errorMessage}</p>
+                  ) : null}
+                </Card>
+              ))
+            ) : (
+              <Card className="p-4">
+                <p className="text-sm text-slate-500">
+                  Trace появится в режиме Agent после tool calls.
+                </p>
+              </Card>
+            )}
+          </div>
+        </section>
       </aside>
     </main>
   )

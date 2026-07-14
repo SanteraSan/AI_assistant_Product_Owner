@@ -8,9 +8,11 @@ import {
   fetchChatMessages,
   fetchChatSessions,
   saveChatAttachmentMessage,
+  sendAgentMessage,
   sendRagMessage,
   updateChatSession,
 } from '../../entities/chat/api'
+import type { ChatMode } from '../../entities/chat/model'
 import { useChatStore } from '../../entities/chat/store'
 import {
   cancelStagedDocument,
@@ -64,10 +66,12 @@ export function ChatPage() {
     openBuckets,
     openChat,
     selectApproach,
+    selectChatMode,
     selectBucket,
     selectBucketAndOpenChat,
     selectModel,
     selectedApproach,
+    selectedChatMode,
     selectedModelId,
   } = useWorkspaceStore()
   const bucketsQuery = useQuery({
@@ -320,6 +324,37 @@ export function ChatPage() {
       })
     },
   })
+  const sendAgentMessageMutation = useMutation({
+    mutationFn: (message: string) =>
+      sendAgentMessage({
+        message,
+        model: selectedModelId,
+        approach: selectedApproach,
+        activeBucketId: selectedBucketId,
+        sessionId: activeThread?.sessionId,
+        tenantId: currentUser!.tenantId,
+        ...chatContext(message),
+      }),
+    onSuccess: ({ message, sessionId }) => {
+      addAssistantMessage(message)
+      if (sessionId) {
+        setThreadSessionId(activeThreadId, sessionId)
+      }
+      void queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
+      if (sessionId) {
+        void queryClient.invalidateQueries({ queryKey: ['chat-messages', currentUser?.tenantId, currentUser?.id, sessionId] })
+      }
+    },
+    onError: (error) => {
+      addAssistantMessage({
+        id: `assistant-error-${Date.now()}`,
+        role: 'assistant',
+        content: error instanceof Error ? error.message : 'Не удалось получить ответ агента.',
+      })
+    },
+  })
+  const isSendingMessage =
+    sendRagMessageMutation.isPending || sendAgentMessageMutation.isPending
 
   useEffect(() => {
     if (chatSessionsQuery.data?.length) {
@@ -328,7 +363,7 @@ export function ChatPage() {
   }, [chatSessionsQuery.data, setThreads])
 
   useEffect(() => {
-    if (sendRagMessageMutation.isPending) {
+    if (isSendingMessage) {
       return
     }
     if (activeSessionId && chatMessagesQuery.data) {
@@ -338,7 +373,7 @@ export function ChatPage() {
     activeSessionId,
     activeThreadId,
     chatMessagesQuery.data,
-    sendRagMessageMutation.isPending,
+    isSendingMessage,
     setThreadMessages,
   ])
 
@@ -443,7 +478,7 @@ export function ChatPage() {
 
   function handleSendMessage() {
     const message = composerValue.trim()
-    if (!message || sendRagMessageMutation.isPending) {
+    if (!message || isSendingMessage) {
       return
     }
     const { bucketIds, documentIds } = chatContext(message)
@@ -457,7 +492,15 @@ export function ChatPage() {
       modelId: selectedModelId,
       approach: selectedApproach,
     })
+    if (selectedChatMode === 'agent') {
+      sendAgentMessageMutation.mutate(message)
+      return
+    }
     sendRagMessageMutation.mutate(message)
+  }
+
+  function handleChangeChatMode(mode: ChatMode) {
+    selectChatMode(mode)
   }
 
   async function handleAttachFileToChat(file: File) {
@@ -606,6 +649,7 @@ export function ChatPage() {
           buckets={buckets}
           models={localModels}
           onChangeApproach={handleChangeApproach}
+          onChangeChatMode={handleChangeChatMode}
           onChangeBucket={handleChangeBucket}
           onChangeModel={handleChangeModel}
           onChangeView={(view) => {
@@ -618,6 +662,7 @@ export function ChatPage() {
           onLoginClick={() => login()}
           onLogoutClick={() => { void logout() }}
           selectedApproach={selectedApproach}
+          selectedChatMode={selectedChatMode}
           selectedModelId={selectedModelId}
           user={currentUser}
         />
@@ -626,8 +671,9 @@ export function ChatPage() {
           <ChatWorkspace
             activeBucket={activeBucket}
             approach={selectedApproach}
+            chatMode={selectedChatMode}
             composerValue={composerValue}
-            isSending={sendRagMessageMutation.isPending}
+            isSending={isSendingMessage}
             messages={messages}
             onAttachFile={(file) => {
               void handleAttachFileToChat(file)

@@ -172,6 +172,57 @@ export async function sendRagMessage(
   }
 }
 
+type AgentChatDto = {
+  model: string
+  response: string
+  latency_ms: number
+  session_id?: string | null
+  assistant_message_id?: string | null
+  tool_calls?: Array<Record<string, unknown>>
+  sources?: Array<{
+    id?: string
+    title?: string
+    source_type?: string
+    source_path?: string
+  }>
+}
+
+export async function sendAgentMessage(
+  payload: SendRagMessagePayload,
+): Promise<{
+  message: ChatMessage
+  sessionId?: string
+}> {
+  const response = await apiRequest<AgentChatDto>('/api/agent/chat', {
+    body: JSON.stringify({
+      message: payload.message,
+      model: payload.model,
+      approach: payload.approach,
+      active_bucket_id: payload.activeBucketId ?? null,
+      session_id: payload.sessionId,
+      tenant_id: payload.tenantId,
+      bucket_ids: payload.bucketIds,
+      document_ids: payload.documentIds
+  }),
+    method: 'POST'
+  })
+
+  return {
+    message: {
+      id: response.assistant_message_id ?? `assistant-${Date.now()}`,
+      role: 'assistant',
+      content: response.response,
+      sources: (response.sources ?? []).map((source) => ({
+        id: String(source.id ?? crypto.randomUUID()),
+        title: source.title ?? source.source_path ?? 'Источник',
+        sourceType: source.source_type ?? 'unknown'
+  })),
+      toolCalls: mapToolCalls(response.tool_calls)
+  },
+    sessionId: response.session_id ?? undefined
+  }
+}
+
 function chatThreadFromDto(session: ChatSessionDto): ChatThread {
   const attachedDocumentIds = Array.isArray(session.metadata?.attached_document_ids)
     ? session.metadata.attached_document_ids.filter((value): value is string => typeof value === 'string')
@@ -196,6 +247,9 @@ function chatMessageFromDto(message: ChatMessageDto): ChatMessage {
   const attachments = Array.isArray(message.metadata?.attachments)
     ? message.metadata.attachments
     : []
+  const toolCalls = Array.isArray(message.metadata?.tool_calls)
+    ? message.metadata.tool_calls
+    : []
   return {
     id: message.id,
     role: message.role,
@@ -215,8 +269,25 @@ function chatMessageFromDto(message: ChatMessageDto): ChatMessage {
         id: String(source.id ?? source.qdrant_point_id ?? crypto.randomUUID()),
         title: String(source.title ?? source.source_path ?? 'Источник'),
         sourceType: String(source.source_type ?? 'unknown')
-  }))
+  })),
+    toolCalls: mapToolCalls(toolCalls)
   }
+}
+
+function mapToolCalls(raw: unknown): ChatMessage['toolCalls'] {
+  if (!Array.isArray(raw)) {
+    return []
+  }
+  return raw
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map((item) => ({
+      id: String(item.id ?? crypto.randomUUID()),
+      name: String(item.name ?? 'tool'),
+      status: String(item.status ?? 'unknown'),
+      latencyMs: typeof item.latency_ms === 'number' ? item.latency_ms : undefined,
+      errorCode: item.error_code == null ? null : String(item.error_code),
+      errorMessage: item.error_message == null ? null : String(item.error_message),
+    }))
 }
 
 function normalizeAttachmentStatus(

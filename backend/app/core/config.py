@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     text_to_sql_fallback_model: str = "qwen2.5-coder:7b"
     # Comma-separated override; empty → DEFAULT_SQL_TOOL_ALLOWED_TABLES
     sql_tool_allowed_tables: str = ""
+    agent_max_steps: int = 4
+    agent_default_model: str = ""
 
     @field_validator("rag_score_threshold", mode="before")
     @classmethod
@@ -90,6 +92,7 @@ class Settings(BaseSettings):
         "ollama_queue_timeout_seconds",
         "sql_tool_row_limit",
         "sql_tool_timeout_seconds",
+        "agent_max_steps",
     )
     @classmethod
     def _positive_number(cls, value: int | float) -> int | float:

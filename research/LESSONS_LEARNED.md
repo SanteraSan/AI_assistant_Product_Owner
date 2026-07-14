@@ -31,6 +31,21 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E3 Closed — Agent Loop + UI Trace
+
+Контекст:
+- E3.1–E3.2 дали tools/RBAC/SQL; нужен user-facing agent surface.
+
+Решение:
+- `AgentOrchestrator` + `POST /agent/chat`;
+- memory только в prompt;
+- frontend chat mode RAG|Agent + tool-trace panel;
+- unit eval: tool then answer, viewer SQL denied in trace.
+
+Вывод:
+- portable JSON tool loop достаточен до E2 native function calling;
+- E3 baseline закрыт; E2 остаётся blocked by VPN.
+
 ## 2026-07-14: E3.2 Text-to-SQL Controlled Tools
 
 Контекст:
