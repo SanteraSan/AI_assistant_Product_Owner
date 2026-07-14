@@ -310,6 +310,11 @@ Definition of done:
 - tool call trace виден в API metadata и UI — **done**;
 - viewer не execute SQL; document no-leak сохраняется — **done**.
 
+### E3.4 follow-up (обязательно): LoRA → Ollama tag
+
+Статус: **planned** — без этого `text_to_sql` на практике использует fallback `qwen2.5-coder:7b`.
+
+Почему не «просто Modelfile ADAPTER»: V5 adapter — PEFT safetensors на **Qwen2.5-Coder**; Ollama safetensors-ADAPTER официально покрывает Llama/Mistral/Gemma, не Qwen. Путь: merge → GGUF → `ollama create qwen2_5_coder_7b_v5_projection_steps400`. Детали: `.cursor/plans/e3_tools_agents_201ce1e6.plan.md` § E3.4.
 
 ## Этап E4: n8n And Email/Workflow Integration
 

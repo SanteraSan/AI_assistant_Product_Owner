@@ -31,6 +31,30 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E3 Agent Smoke — Accessible Docs And Model Quality
+
+Контекст:
+- после E3.3 + fix `get_document_status(file_name)` прогнали browser smoke (viewer, режим Agent/RAG);
+- цель: проверить, что agent видит доступные документы и не подменяет evidence.
+
+Наблюдение:
+- lookup по имени файла заработал после fix (раньше agent требовал UUID или получал `denied` на `moto.jpg` как на document_id);
+- вопрос «есть ли файл с диаграммой о качестве производства?»:
+  - слабая модель в Agent иногда отдавала сырой JSON вида `{"rag_search":{...}}` вместо контракта `tool_calls` → tool не исполнялся;
+  - RAG ответил grounded: нужного файла нет, но в контексте есть visual evidence (`moto.jpg` и image digest из docx / «Free Download») — multimodal layers реально участвуют;
+  - **gemma4** в Agent ответил сильно лучше: нашёл ближайшие visual docs, явно сказал что это не диаграмма качества производства, предложил уточнить — без подмены смысла.
+- UI: восстановлен label текущего пользователя в TopBar (`Viewer Local · Выйти`).
+
+Решение:
+- interim: для agent smoke предпочитать `gemma4:12b` (или сравнимо сильную модель);
+- unit/RBAC тесты оставлять без LLM; tool-choice quality не путать с ACL;
+- follow-up остаётся: E3.4 LoRA→Ollama tag; optional repair для кривых tool JSON / `list_accessible_documents`.
+
+Вывод:
+- доступность документов + agent/RAG path работают как product baseline;
+- качество agent UX сильно зависит от модели при том же backend/RBAC;
+- vision/OCR evidence из Office/image — полезный сигнал даже когда «точного» файла нет.
+
 ## 2026-07-14: E3 Closed — Agent Loop + UI Trace
 
 Контекст:
