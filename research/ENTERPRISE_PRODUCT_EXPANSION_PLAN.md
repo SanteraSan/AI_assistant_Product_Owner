@@ -177,7 +177,7 @@ Definition of done:
 
 ## Этап E1: Keycloak, BFF And RBAC
 
-Статус: **in progress** — E1.1–E1.4 готовы (Keycloak, BFF, backend JWT, frontend same-origin auth). Остаётся ручной browser smoke + финальный journal close.
+Статус: **done** (2026-07-14). Browser smoke: admin/analyst/viewer login, logout/SSO switch, document RBAC (private/tenant/role) подтверждены.
 
 Цель:
 

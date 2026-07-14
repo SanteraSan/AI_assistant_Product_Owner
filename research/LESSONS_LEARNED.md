@@ -31,6 +31,24 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E1 Browser Smoke Confirmed
+
+Контекст:
+- после logout/SSO fix и demo visibility нужен живой browser check по трём ролям.
+
+Наблюдение:
+- `admin@local` видит все документы;
+- `analyst@local` / `viewer@local` видят tenant/role scope и не видят чужие private;
+- viewer может удалить свой новый private файл и не может удалять shared;
+- analyst не видит private файл viewer; admin видит.
+
+Решение:
+- E1 Keycloak/BFF/RBAC закрыт как baseline;
+- bucket-level visibility остаётся future hardening (сейчас список бакетов tenant-wide, доступ режется на документах).
+
+Вывод:
+- trust boundary работает end-to-end: Keycloak → BFF cookie/CSRF → service JWT → access_policy до retrieval/UI.
+
 ## 2026-07-14: E1 User Switch And Demo Document Visibility
 
 Контекст:
