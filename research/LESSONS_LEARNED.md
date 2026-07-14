@@ -31,6 +31,26 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E0.3 Chat Attachment Status And Clean Answers
+
+Контекст:
+- после persist attachments и targeted image re-analysis остались два polish-бага UI/prompt;
+- они мешали demo перед стартом E1 Keycloak.
+
+Наблюдение:
+- после F5 attachment в чате мог навсегда показывать `indexing`, хотя в available documents уже `indexed`;
+- причина: `setThreadMessages()` подставлял snapshot `status` из message metadata и затирал живой статус из library;
+- RAG иногда добавлял в текст ответа footer `Источники` / `CHUNK`, хотя sources уже есть в API/UI panel.
+
+Решение:
+- sync attachment statuses из available documents выполняется после загрузки chat history;
+- prompt rule больше не просит перечислять источники в тексте ответа и явно запрещает `CHUNK`/UUID/служебные metadata;
+- sources остаются в response metadata для evidence panel.
+
+Вывод:
+- message metadata — snapshot события, а не live document status;
+- user-facing answer и debug sources лучше разделять: факты в тексте, provenance в structured sources.
+
 ## 2026-07-14: Persist Chat Attachments Across Reload
 
 Контекст:

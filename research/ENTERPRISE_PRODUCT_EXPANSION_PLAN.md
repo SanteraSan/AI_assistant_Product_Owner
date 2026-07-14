@@ -1,6 +1,6 @@
 # Enterprise Product Expansion Plan
 
-## Context
+## Контекст
 
 После M5 document ingestion, backend hardening и M7 LoRA Text-to-SQL проект получил сильное backend/RAG/ML ядро.
 
@@ -8,7 +8,7 @@
 
 Цель этого плана — не заменить текущую архитектуру, а нарастить поверх неё production-minded слои.
 
-## Target Architecture
+## Целевая архитектура
 
 ```text
 Browser UI
@@ -30,67 +30,67 @@ Object Storage
 n8n / Email / External Workflows
 ```
 
-## Principles
+## Принципы
 
-- Backend access filters remain authoritative. LLMs, agents and external gateways must never decide what the user can access.
-- UI should be simple but real: login, buckets, upload, ingestion status, chat and source evidence.
-- Provider abstraction should hide local/external model differences from business logic.
-- Frameworks such as LangGraph, LangChain or LlamaIndex should be adapter/orchestration layers, not a rewrite of current services.
-- Kafka and workflow tooling should be introduced around explicit events, not as hidden background magic.
-- Every enterprise layer should add traceability: request id, user id, tenant id, bucket id, document id, tool call id and model provider.
-- Frontend follows Flux-style state flow: actions update Zustand/client state or React Query/server state first, then widgets render from state. Pages should not own business state through scattered local `useState`.
+- Backend access filters остаются авторитетными. LLM, agents и external gateways никогда не должны решать, к чему пользователь имеет доступ.
+- UI должен быть простым, но настоящим: login, buckets, upload, статус ingestion, chat и source evidence.
+- Provider abstraction должна скрывать различия local/external моделей от бизнес-логики.
+- Frameworks вроде LangGraph, LangChain или LlamaIndex должны быть adapter/orchestration слоями, а не переписыванием текущих сервисов.
+- Kafka и workflow tooling нужно вводить вокруг явных events, а не как скрытую background-магию.
+- Каждый enterprise-слой должен добавлять traceability: request id, user id, tenant id, bucket id, document id, tool call id и model provider.
+- Frontend следует Flux-style data flow: actions сначала обновляют Zustand/client state или React Query/server state, затем widgets рендерятся из state. Pages не должны владеть business state через разрозненный локальный `useState`.
 
-## Stage E0: UI Skeleton
+## Этап E0: UI Skeleton
 
-Goal:
+Цель:
 
-- create the first usable web interface over existing backend capabilities.
+- создать первый usable web interface поверх уже существующих backend-возможностей.
 
 Scope:
 
-- simple login mock without Keycloak;
-- bucket list and bucket creation;
+- простой login mock без Keycloak;
+- список buckets и создание bucket;
 - document upload;
-- ingestion status display;
-- chat panel with bucket selection;
-- source/evidence panel for RAG answers;
-- model selector prepared for local/external providers;
-- minimal layout that can later receive real auth.
+- отображение статуса ingestion;
+- chat panel с выбором bucket;
+- source/evidence panel для RAG-ответов;
+- model selector, подготовленный под local/external providers;
+- минимальный layout, который позже сможет принять настоящий auth.
 
-Recommended implementation:
+Рекомендуемая реализация:
 
-- frontend: React/Vite or Next.js;
-- keep UI contracts explicit and typed;
-- use Zustand for client/business state and React Query for server state;
-- keep backend endpoints thin;
-- do not move ingestion/RAG logic into frontend;
-- start with mock auth context: `user_id`, `tenant_id`, roles.
+- frontend: React/Vite или Next.js;
+- держать UI contracts явными и typed;
+- использовать Zustand для client/business state и React Query для server state;
+- держать backend endpoints тонкими;
+- не переносить ingestion/RAG logic во frontend;
+- стартовать с mock auth context: `user_id`, `tenant_id`, roles.
 
 Definition of done:
 
-- user can open UI, select/create bucket, upload document, ask a chat question and see answer sources;
-- all requests carry a mock user/tenant context;
-- UI state is visible enough to demo the product flow;
-- no Keycloak dependency yet.
+- пользователь может открыть UI, выбрать/создать bucket, загрузить document, задать вопрос в chat и увидеть sources ответа;
+- все запросы несут mock user/tenant context;
+- UI state достаточно видимый, чтобы показать product flow;
+- зависимости от Keycloak ещё нет.
 
-### Stage E0.1: Document Library And Access Model
+### Этап E0.1: Document Library And Access Model
 
-Goal:
+Цель:
 
-- split "document exists in the system" from "document is linked to a bucket";
-- introduce owner/visibility/role access rules before full Keycloak/RBAC integration.
+- разделить «document существует в системе» и «document привязан к bucket»;
+- ввести owner/visibility/role access rules до полной интеграции Keycloak/RBAC.
 
 Scope:
 
-- `document_assets` as system-level document library;
-- `bucket_documents` as many-to-many links between buckets and documents;
-- `document_acl_entries` for explicit grants;
-- default uploaded document visibility is owner-only/private;
-- admins can see tenant documents;
-- role-based visibility supports team-lead/admin/developer style access;
-- bucket membership never grants access by itself.
+- `document_assets` как system-level document library;
+- `bucket_documents` как many-to-many связи между buckets и documents;
+- `document_acl_entries` для explicit grants;
+- default visibility загруженного document — owner-only/private;
+- admins видят documents tenant;
+- role-based visibility поддерживает доступ в стиле team-lead/admin/developer;
+- membership в bucket сам по себе доступ не даёт.
 
-Access rule:
+Правило доступа:
 
 ```text
 can_read(document, user) =
@@ -106,19 +106,19 @@ can_read(document, user) =
 
 Definition of done:
 
-- user can see own documents;
-- user can see available documents according to access policy;
-- user can add an accessible existing document to a bucket;
-- user can upload a private document and link it to a bucket;
-- RAG-facing bucket document lists never include inaccessible documents.
+- пользователь видит свои documents;
+- пользователь видит available documents согласно access policy;
+- пользователь может добавить доступный существующий document в bucket;
+- пользователь может загрузить private document и привязать его к bucket;
+- RAG-facing списки documents bucket никогда не включают недоступные documents.
 
-### Stage E0.2: Staged Upload And Indexing Baseline
+### Этап E0.2: Staged Upload And Indexing Baseline
 
-Goal:
+Цель:
 
-- make document upload production-like instead of "file selected means permanently saved";
-- keep bucket edits explicit through draft/stage/commit;
-- index committed documents into Qdrant so RAG can answer from uploaded files.
+- сделать document upload production-like, а не «файл выбран = файл навсегда сохранён»;
+- держать правки bucket явными через draft/stage/commit;
+- индексировать committed documents в Qdrant, чтобы RAG мог отвечать по загруженным файлам.
 
 Flow:
 
@@ -133,101 +133,103 @@ UI file selection
 -> Qdrant chunks with tenant/bucket/document metadata
 ```
 
-Baseline constraints:
+Ограничения baseline:
 
-- Kafka is not introduced in E0.2;
-- `document_indexing_jobs` is the architectural boundary that can later publish/consume Kafka events;
-- committed files live under document-level storage, not bucket folders, because one document can belong to many buckets;
-- removing a document from a bucket removes only `bucket_documents`, not `document_assets`.
-
-Definition of done:
-
-- staged uploads can be created and cancelled;
-- bucket modal has explicit save/commit behavior;
-- committed documents get `indexing` then `indexed` or `index_failed` status;
-- uploaded document chunks are upserted to Qdrant with `tenant_id`, `bucket_id`, `document_id`, `source_path`, and traceable `document_metadata`;
-- UI clearly distinguishes staged, indexing, indexed, and failed documents.
-
-### Stage E0.3: Chat RAG Integration Baseline
-
-Goal:
-
-- replace mock assistant responses in the web UI with real `/rag/chat` calls;
-- make model, tenant, bucket and uploaded-document context explicit before Keycloak/RBAC.
-
-Scope:
-
-- typed frontend API client for `/rag/chat`;
-- chat store actions for user messages, assistant messages, session id and context metadata;
-- PostgreSQL-backed chat sessions/messages scoped by mock tenant/user headers;
-- loading/error states in the chat composer and message stream;
-- real RAG sources in the source/evidence panel;
-- context rule for the current backend filter model: use `bucket_ids` when chatting with a selected bucket, use explicit `document_ids` when indexed chat attachments are present.
+- Kafka на E0.2 не вводится;
+- `document_indexing_jobs` — архитектурная граница, которая позже сможет publish/consume Kafka events;
+- committed files живут в document-level storage, а не в папках bucket, потому что один document может принадлежать многим buckets;
+- удаление document из bucket удаляет только `bucket_documents`, не `document_assets`.
 
 Definition of done:
 
-- sending a chat message calls `/rag/chat`;
-- response text and sources come from backend, not mock data;
-- selected model and mock tenant/user context are passed to backend;
-- indexed chat attachments can be used as explicit document context;
-- chat history survives frontend reload through `/chat/sessions` and `/chat/sessions/{session_id}/messages`;
-- frontend build/lint and backend tests pass.
+- staged uploads можно создавать и отменять;
+- bucket modal имеет явное поведение save/commit;
+- committed documents получают статусы `indexing`, затем `indexed` или `index_failed`;
+- chunks загруженных documents upsert-ятся в Qdrant с `tenant_id`, `bucket_id`, `document_id`, `source_path` и трассируемым `document_metadata`;
+- UI ясно различает staged, indexing, indexed и failed documents.
 
-## Stage E1: Keycloak, BFF And RBAC
+### Этап E0.3: Chat RAG Integration Baseline
 
-Goal:
+Статус: **done** (2026-07-14). Следующий фокус — E1 Keycloak/BFF/RBAC.
 
-- replace mock auth with real OIDC/OAuth2 and role-based access control.
+Цель:
+
+- заменить mock-ответы ассистента в web UI на реальные вызовы `/rag/chat`;
+- сделать model, tenant, bucket и uploaded-document context явными до Keycloak/RBAC.
 
 Scope:
 
-- Keycloak realm, clients, roles and test users;
-- BFF session layer using secure httpOnly cookies;
-- backend JWT validation or trusted BFF headers, depending on deployment mode;
-- `UserContext` and `TenantContext` in backend;
-- roles such as `admin`, `analyst`, `viewer`, `ingestion_manager`, `model_manager`;
-- tenant/bucket/document access enforcement before RAG prompt construction.
+- typed frontend API client для `/rag/chat`;
+- chat store actions для user messages, assistant messages, session id и context metadata;
+- chat sessions/messages в PostgreSQL, scoped по mock tenant/user headers;
+- loading/error states в chat composer и message stream;
+- реальные RAG sources в source/evidence panel;
+- правило context для текущей backend filter model: использовать `bucket_ids` при чате с выбранным bucket, использовать явные `document_ids`, когда есть indexed chat attachments.
 
 Definition of done:
 
-- users log in through Keycloak;
-- backend receives authenticated identity and roles;
-- bucket/document/chat access is filtered before retrieval;
-- unauthorized users cannot see other tenant/bucket data.
+- отправка chat message вызывает `/rag/chat`;
+- текст ответа и sources приходят из backend, а не из mock data;
+- выбранная model и mock tenant/user context передаются в backend;
+- indexed chat attachments можно использовать как явный document context;
+- chat history переживает reload frontend через `/chat/sessions` и `/chat/sessions/{session_id}/messages`;
+- frontend build/lint и backend tests проходят.
 
-## Stage E2: Model Gateway And External Providers
+## Этап E1: Keycloak, BFF And RBAC
 
-Goal:
+Цель:
 
-- support local Ollama and OpenAI-compatible external models behind one provider interface.
+- заменить mock auth на настоящий OIDC/OAuth2 и role-based access control.
 
 Scope:
 
-- `LLMProvider` abstraction;
+- Keycloak realm, clients, roles и test users;
+- BFF session layer на secure httpOnly cookies;
+- backend JWT validation или trusted BFF headers в зависимости от deployment mode;
+- `UserContext` и `TenantContext` в backend;
+- roles вроде `admin`, `analyst`, `viewer`, `ingestion_manager`, `model_manager`;
+- enforcement доступа tenant/bucket/document до построения RAG prompt.
+
+Definition of done:
+
+- пользователи входят через Keycloak;
+- backend получает authenticated identity и roles;
+- доступ к bucket/document/chat фильтруется до retrieval;
+- unauthorized пользователи не видят данные чужого tenant/bucket.
+
+## Этап E2: Model Gateway And External Providers
+
+Цель:
+
+- поддержать local Ollama и OpenAI-compatible external models за одним provider interface.
+
+Scope:
+
+- abstraction `LLMProvider`;
 - `OllamaProvider`;
 - `OpenAICompatibleProvider`;
-- model registry with capabilities: chat, embeddings, vision, JSON mode, tool calling;
+- model registry с capabilities: chat, embeddings, vision, JSON mode, tool calling;
 - provider fallback policy;
 - per-tenant model allowlist;
 - cost/latency/audit metadata.
 
-Fine-tuning notes:
+Заметки по fine-tuning:
 
-- local LoRA/QLoRA remains the right path for open-weight models;
-- closed external models generally cannot use LoRA because weights are unavailable;
-- external fine-tuning is provider-specific and should be handled through a separate provider adapter.
+- local LoRA/QLoRA остаётся правильным путём для open-weight models;
+- closed external models обычно нельзя дообучать через LoRA, потому что weights недоступны;
+- external fine-tuning provider-specific и должен идти через отдельный provider adapter.
 
 Definition of done:
 
-- user or backend policy can choose local/external model;
-- local model outage can fall back to an external provider when policy allows it;
-- all model calls are logged with provider/model/request id.
+- пользователь или backend policy может выбрать local/external model;
+- при outage local model возможен fallback на external provider, если policy это разрешает;
+- все model calls логируются с provider/model/request id.
 
-## Stage E3: Agents, Function Calling And Tool Use
+## Этап E3: Agents, Function Calling And Tool Use
 
-Goal:
+Цель:
 
-- expose existing backend capabilities as controlled tools.
+- вынести существующие backend-возможности как controlled tools.
 
 Candidate tools:
 
@@ -240,44 +242,44 @@ Candidate tools:
 - `generate_report`;
 - `send_email_summary`.
 
-Rules:
+Правила:
 
-- tools enforce RBAC and tenant filters internally;
-- tool inputs use Pydantic schemas;
-- tool calls are audited;
-- agent output remains grounded in retrieved/tool-produced evidence.
+- tools сами enforce RBAC и tenant filters;
+- tool inputs используют Pydantic schemas;
+- tool calls аудируются;
+- agent output остаётся grounded в retrieved/tool-produced evidence.
 
 Definition of done:
 
-- chat flow can call at least RAG and Text-to-SQL tools;
-- tool call trace is visible in logs or UI;
-- unauthorized tool calls fail before execution.
+- chat flow может вызвать как минимум tools RAG и Text-to-SQL;
+- tool call trace виден в logs или UI;
+- unauthorized tool calls падают до execution.
 
-## Stage E4: n8n And Email/Workflow Integration
+## Этап E4: n8n And Email/Workflow Integration
 
-Goal:
+Цель:
 
-- ingest external business content through workflow automation.
+- принимать внешний business content через workflow automation.
 
 Scope:
 
-- n8n workflows for email/webhook/document ingestion;
-- Gmail integration through OAuth2/Gmail API;
-- Yandex/corporate mail through IMAP/API where practical;
-- Outlook/Microsoft 365 through Microsoft Graph;
-- optional Outlook add-in as future UI extension.
+- n8n workflows для email/webhook/document ingestion;
+- Gmail integration через OAuth2/Gmail API;
+- Yandex/corporate mail через IMAP/API, где это практично;
+- Outlook/Microsoft 365 через Microsoft Graph;
+- optional Outlook add-in как future UI extension.
 
 Definition of done:
 
-- n8n can receive or fetch a document and call backend ingestion endpoint;
-- uploaded content lands in a tenant/bucket with traceable metadata;
-- ingestion status and errors are visible.
+- n8n может принять или скачать document и вызвать backend ingestion endpoint;
+- загруженный контент попадает в tenant/bucket с трассируемым metadata;
+- статус ingestion и ошибки видны.
 
-## Stage E5: Kafka And Event-Driven Ingestion
+## Этап E5: Kafka And Event-Driven Ingestion
 
-Goal:
+Цель:
 
-- support high-volume document and evaluation workloads with durable event streams.
+- поддержать high-volume document и evaluation workloads через durable event streams.
 
 Candidate events:
 
@@ -300,54 +302,54 @@ Consumers:
 
 Definition of done:
 
-- document ingestion can run asynchronously through events;
-- processing state remains persisted in PostgreSQL;
-- failed events can be retried or inspected;
-- Kafka is used for durable workflow events, while Redis remains useful for rate limits and lightweight coordination.
+- document ingestion может работать асинхронно через events;
+- processing state остаётся persisted в PostgreSQL;
+- failed events можно retry-ить или inspect-ить;
+- Kafka используется для durable workflow events, а Redis остаётся полезен для rate limits и lightweight coordination.
 
-## Stage E6: Framework Adapters
+## Этап E6: Framework Adapters
 
-Goal:
+Цель:
 
-- selectively use LangGraph/LangChain/LlamaIndex/CrewAI where they add value.
+- точечно использовать LangGraph/LangChain/LlamaIndex/CrewAI там, где они дают ценность.
 
-Recommended approach:
+Рекомендуемый подход:
 
-- LangGraph for explicit agent workflows and tool routing;
-- LlamaIndex for connectors or retrieval experiments;
-- LangChain for provider/tool abstractions when useful;
-- CrewAI only for bounded multi-agent demos, not core backend ownership.
+- LangGraph для явных agent workflows и tool routing;
+- LlamaIndex для connectors или retrieval experiments;
+- LangChain для provider/tool abstractions, когда это полезно;
+- CrewAI только для ограниченных multi-agent demos, не для ownership core backend.
 
 Definition of done:
 
-- framework integration calls current backend services instead of replacing them;
-- evaluation scenarios confirm the framework layer does not bypass access controls.
+- framework integration вызывает текущие backend services, а не заменяет их;
+- evaluation scenarios подтверждают, что framework layer не обходит access controls.
 
-## Stage E7: Product Hardening
+## Этап E7: Product Hardening
 
-Goal:
+Цель:
 
-- make the app demoable as a product rather than a collection of backend scripts.
+- сделать приложение demoable как продукт, а не как набор backend scripts.
 
 Scope:
 
 - deployment profiles;
-- object storage for uploaded files;
-- stronger admin/tenant management;
+- object storage для uploaded files;
+- более сильное admin/tenant management;
 - observability dashboards;
 - audit export;
 - user-facing report generation;
-- regression suite covering UI, auth, RAG, Text-to-SQL and ingestion.
+- regression suite, покрывающий UI, auth, RAG, Text-to-SQL и ingestion.
 
-## Recommended Order
+## Рекомендуемый порядок
 
 1. E0 UI Skeleton.
 2. E1 Keycloak/BFF/RBAC.
-3. E2 Model Gateway and external providers.
+3. E2 Model Gateway и external providers.
 4. E3 Tool-use/agents.
 5. E4 n8n/email workflows.
 6. E5 Kafka event backbone.
 7. E6 framework adapters.
 8. E7 product hardening.
 
-This order gives a visible product surface first, then gradually replaces mocks with enterprise-grade infrastructure.
+Такой порядок сначала даёт видимую product surface, а затем постепенно заменяет mocks enterprise-grade инфраструктурой.
