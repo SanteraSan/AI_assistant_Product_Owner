@@ -1388,6 +1388,12 @@ python3 -m venv .venv-lora-pack
 
 Артефакты пишутся в `models/text_to_sql_lora/..._ollama/` (каталог `/models/` в `.gitignore`). После `ollama create` tag `qwen2_5_coder_7b_v5_projection_steps400` должен появиться в `ollama list`.
 
+## E4 Planned: n8n Disk + External DB Sync
+
+Статус: kickoff зафиксирован. MVP = n8n (disk file) + synthetic external Postgres sync → Agent RAG/SQL.
+
+Перед реализацией установи зависимости из [research/E4_DEPENDENCIES.md](../research/E4_DEPENDENCIES.md). План: `.cursor/plans/e4_n8n_integrations.plan.md`.
+
 ## Seed Corpus And E1 ACL
 
 `scripts/ingest_seed_data.py` индексирует `data/raw` в Qdrant (`bucket_id=taskflow_seed`, path-based chunk ids). После E1 `/rag/chat` режет retrieval по доступным `document_assets`.

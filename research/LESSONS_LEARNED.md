@@ -31,6 +31,24 @@
 - как это влияет на проект.
 ```
 
+## 2026-07-14: E4 Kickoff — Disk + External DB (not email-first)
+
+Контекст:
+- pre-E4 regression зелёный; следующий enterprise слой — интеграции;
+- цель E4 в портфолио: доказать seam «внешний оркестратор → TaskFlow → Agent», не «ещё один inbox».
+
+Решение (согласовано):
+- hero: n8n забирает **файл с диска** + **строки из synthetic/external DB** → TaskFlow ingest/sync → Agent RAG + SQL;
+- n8n только доставляет; indexing/ACL/SQL validator остаются в backend;
+- DB path = sync slice → allowlisted `external_*`, не прямой agent→foreign DB в MVP;
+- Gmail/IMAP/Outlook и Jira — **E4.x later** (Jira желателен, но не блокер);
+- план: `research/ENTERPRISE_PRODUCT_EXPANSION_PLAN.md` § E4 + `.cursor/plans/e4_n8n_integrations.plan.md`;
+- зависимости до кода: `research/E4_DEPENDENCIES.md` (n8n, postgres-external :5433, inbox dir).
+
+Вывод:
+- диск вместо личной почты снижает friction без потери demo-смысла канала ingestion;
+- synthetic DB хорошо стыкуется с уже готовым LoRA Text-to-SQL.
+
 ## 2026-07-14: Pre-E4 Full Project Regression Diff
 
 Контекст:

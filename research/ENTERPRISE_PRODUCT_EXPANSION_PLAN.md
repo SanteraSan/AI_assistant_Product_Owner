@@ -27,7 +27,7 @@ Qdrant
 Redis
 Kafka
 Object Storage
-n8n / Email / External Workflows
+n8n / Disk inbox / External DB sync / (Email|Jira later)
 ```
 
 ## Принципы
@@ -321,25 +321,47 @@ Definition of done:
 
 Почему не «просто Modelfile ADAPTER» на safetensors: V5 adapter — PEFT на **Qwen2.5-Coder**; Ollama safetensors-ADAPTER официально покрывает Llama/Mistral/Gemma, не Qwen. Рабочий путь: **adapter → GGUF LoRA** (`convert_lora_to_gguf.py`) + Modelfile `FROM qwen2.5-coder:7b` + `ADAPTER …lora.gguf` (скрипт `backend/scripts/package_text_to_sql_lora_ollama.py`; полный merge — fallback). Детали: `.cursor/plans/e3_tools_agents_201ce1e6.plan.md` § E3.4.
 
-## Этап E4: n8n And Email/Workflow Integration
+## Этап E4: n8n Integrations (Disk + External DB Slice)
 
-Цель:
+Статус: **planned / kickoff agreed (2026-07-14)**. Детали: `.cursor/plans/e4_n8n_integrations.plan.md`.
 
-- принимать внешний business content через workflow automation.
+### Цель (portfolio)
 
-Scope:
+Показать реальный интеграционный seam: внешний оркестратор (n8n) доставляет бизнес-контент в TaskFlow → индексация/sync → Agent отвечает grounded по **документам (RAG)** и **SQL (allowlist + LoRA)**.
 
-- n8n workflows для email/webhook/document ingestion;
-- Gmail integration через OAuth2/Gmail API;
-- Yandex/corporate mail через IMAP/API, где это практично;
-- Outlook/Microsoft 365 через Microsoft Graph;
-- optional Outlook add-in как future UI extension.
+n8n **не** заменяет backend: он только доставляет. ACL, indexing, Text-to-SQL validator остаются в TaskFlow.
 
-Definition of done:
+### Согласованный hero-сценарий
 
-- n8n может принять или скачать document и вызвать backend ingestion endpoint;
-- загруженный контент попадает в tenant/bucket с трассируемым metadata;
-- статус ingestion и ошибки видны.
+```text
+n8n: файл с диска + строки из внешней/синтетической БД
+  -> TaskFlow: document ingest + DB sync в allowlist
+  -> Agent: RAG по документу + text_to_sql / execute_readonly_sql
+```
+
+### Scope E4.1 (MVP)
+
+- inbound API (service JWT): document ingest + optional structured sync job;
+- n8n workflow: **disk / local folder** (или manual binary upload) → backend ingest в tenant/bucket;
+- **synthetic external Postgres** (docker) + sync slice → таблицы `external_*` в нашем allowlist;
+- traceable metadata: `source=n8n|disk|db_sync`, tenant/bucket/document ids, job status/errors;
+- smoke: Agent видит новый документ и отвечает SQL по sync-данным;
+- docs: compose/README + regression note.
+
+### Out of scope / later (E4.x / hardening)
+
+- личный Gmail/Yandex/Outlook OAuth и IMAP (канал тот же, что disk; narrative «email» можно добавить позже);
+- Jira/Confluence/GitHub connectors (желательно, но отдельный подэтап: аккаунт + webhooks);
+- прямой agent query во внешнюю БД без sync (threat model шире; MVP = sync → allowlist);
+- Kafka (это E5); Outlook add-in.
+
+### Definition of done (E4.1)
+
+- n8n (или curl-эквивалент) кладёт файл с диска в TaskFlow bucket с трассируемым metadata;
+- sync из synthetic external DB наполняет allowlisted analytics tables;
+- Agent: grounded ответ по новому документу **и** SQL по sync-данным;
+- viewer/analyst RBAC на SQL tools сохраняется;
+- статус/ошибки ingestion или sync видны (API и/или UI minimally).
 
 ## Этап E5: Kafka And Event-Driven Ingestion
 
@@ -413,7 +435,7 @@ Scope:
 2. E1 Keycloak/BFF/RBAC — **done** (2026-07-14).
 3. E2 Model Gateway и external providers — **blocked** (VPN / Gemini unreachable; kickoff сохранён).
 4. E3 Tool-use/agents — **done** (2026-07-14).
-5. E4 n8n/email workflows.
+5. E4 n8n integrations (disk + external DB slice) — **next** (email/Jira later).
 6. E5 Kafka event backbone.
 7. E6 framework adapters.
 8. E7 product hardening.
