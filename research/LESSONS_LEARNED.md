@@ -81,6 +81,36 @@ Future hardening:
 - OpenRouter по-прежнему optional (`openrouter_key_configured=false`);
 - UI `/rag/chat` по обычным документам всё ещё 403 — guard, не провайдер.
 
+## 2026-09-15: E2.1 этап B — SalesComposer + synthetic corpus
+
+Контекст:
+- live Gemini на `/chat` уже ходил, но External RAG оставался 403, потому что не было synthetic sales-корпуса и не было слоя «карточка SQL + договор RAG» в одном prompt;
+- `demo_deals` нельзя было отдавать в `execute_readonly_sql`: `SELECT *` увидел бы оба кабинета.
+
+Что изменили:
+- два кабинета `sales_northwind` / `sales_aurora`, ~20 markdown и 30 `demo_deals`; seed через Alembic `20260915_0009` + `scripts/seed_demo_deals.py`; документы — `scripts/render_sales_demo_docs.py` и `ingestion_manifest.json` с `synthetic=true`;
+- отдельный `SalesComposer` в `/rag/chat`: резолв `deal_code` (`lowercase` / trim / `[\\s_-]+` → `-`), карточка параметризованным SQL с `tenant_id`+`bucket_id`, договор через `RagService.search(features=["sales"])`, один `generate()`;
+- `demo_deals` **не** в SQL-tool allowlist; upload `synthetic` с клиента снимается, в том числе из `document_metadata`;
+- guard читает и top-level `synthetic`, и вложенный `document_metadata.synthetic` — иначе seed Qdrant payload не проходил бы как synthetic.
+
+Проверки:
+- unit: normalize/resolve, Northwind prompt без маркеров Aurora, allowlist deny, nested synthetic, `/rag/chat` на sales-bucket зовёт composer;
+- live seed: alembic `20260915_0009`, 2 бакета / 30 `demo_deals`, ingest 1682 chunks, sync `sales_northwind: 10` + `sales_aurora: 10`;
+- ручной RAG на Northwind + `qwen3.5:9b`: `nw-104` 1 250 000 vs 1 180 000 с явным расхождением слоёв; `nw-110` письмо не отправлено; `Aurora Polar Rebate` на Northwind без утечки 777000.
+
+Наблюдение:
+- плитка бакета показывает `0 documents`, пока не отработал `sync_seed_document_registry`: счётчик из Postgres registry, не из Qdrant. После синка — 10+10;
+- договоры видны в модалке документов, CRM-карточки `demo_deals` в UI по-прежнему не рендерятся (это не баг retrieval).
+
+Вывод:
+- gold eval (этап C) ещё впереди: runner `--suite/--approach`, 4 gold через `/rag/chat`;
+- следующий продуктовый срез — скачивание файлов из бакета (один / несколько zip / все), не CRM и не in-browser preview.
+
+Future hardening:
+- RLS/AST вокруг SQL-tool; consistency-слой в Qdrant не обязателен;
+- refetch списка бакетов после seed/sync, чтобы не держать stale `0 documents`;
+- витрина `deal_card` в источниках ответа.
+
 ## 2026-07-15: E6 Decision — Handwritten Primary, LangGraph Lab Kept
 
 Контекст:

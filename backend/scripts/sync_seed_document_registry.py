@@ -30,6 +30,8 @@ BUCKET_NAMES = {
     "taskflow_seed": "TaskFlow seed corpus",
     "bucket_alpha": "Bucket Alpha isolation fixture",
     "bucket_beta": "Bucket Beta isolation fixture",
+    "sales_northwind": "Northwind Sales Demo",
+    "sales_aurora": "Aurora Sales Demo",
 }
 
 

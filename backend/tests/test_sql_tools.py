@@ -34,6 +34,19 @@ def test_parse_allowed_tables_default_and_override() -> None:
     assert parse_allowed_tables("a, b") == frozenset({"a", "b"})
 
 
+def test_demo_deals_is_not_in_sql_tool_allowlist() -> None:
+    assert "demo_deals" not in DEFAULT_SQL_TOOL_ALLOWED_TABLES
+    card = build_schema_card(allowed_tables=DEFAULT_SQL_TOOL_ALLOWED_TABLES)
+    assert "demo_deals(" not in card
+    service = SqlExecutionService(
+        postgres_dsn="postgresql+asyncpg://u:p@localhost:5432/db",
+        allowed_tables=DEFAULT_SQL_TOOL_ALLOWED_TABLES,
+    )
+    denied = service.validate("SELECT * FROM demo_deals")
+    assert not denied.valid
+    assert denied.error and "unknown_tables" in denied.error
+
+
 def test_validate_rejects_destructive_and_unknown_table() -> None:
     service = SqlExecutionService(
         postgres_dsn="postgresql+asyncpg://u:p@localhost:5432/db",

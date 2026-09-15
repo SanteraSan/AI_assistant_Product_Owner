@@ -5,7 +5,9 @@
       "tenant_id": "local_demo",
       "bucket_id": "bucket_alpha",
       "source_type": "bucket_fixture",
-      "features": ["notifications"],
+      "features": [
+        "notifications"
+      ],
       "metadata": {
         "fixture": "bucket_isolation",
         "bucket_name": "Alpha workspace"
@@ -16,10 +18,282 @@
       "tenant_id": "local_demo",
       "bucket_id": "bucket_beta",
       "source_type": "bucket_fixture",
-      "features": ["notifications"],
+      "features": [
+        "notifications"
+      ],
       "metadata": {
         "fixture": "bucket_isolation",
         "bucket_name": "Beta workspace"
+      }
+    },
+    {
+      "path": "sales_northwind/northwind-overview.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_northwind",
+      "source_type": "sales_note",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "northwind"
+      }
+    },
+    {
+      "path": "sales_northwind/northwind-playbook.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_northwind",
+      "source_type": "sales_playbook",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "northwind"
+      }
+    },
+    {
+      "path": "sales_northwind/northwind-pricing.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_northwind",
+      "source_type": "sales_note",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "northwind"
+      }
+    },
+    {
+      "path": "sales_northwind/nw-104-contract.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_northwind",
+      "source_type": "sales_contract",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "northwind",
+        "deal_code": "nw-104"
+      }
+    },
+    {
+      "path": "sales_northwind/nw-104-email.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_northwind",
+      "source_type": "sales_email",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "northwind",
+        "deal_code": "nw-104"
+      }
+    },
+    {
+      "path": "sales_northwind/nw-110-draft-letter.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_northwind",
+      "source_type": "sales_email",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "northwind",
+        "deal_code": "nw-110"
+      }
+    },
+    {
+      "path": "sales_northwind/nw-101-contract.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_northwind",
+      "source_type": "sales_contract",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "northwind",
+        "deal_code": "nw-101"
+      }
+    },
+    {
+      "path": "sales_northwind/nw-108-msa.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_northwind",
+      "source_type": "sales_contract",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "northwind",
+        "deal_code": "nw-108"
+      }
+    },
+    {
+      "path": "sales_northwind/northwind-legal.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_northwind",
+      "source_type": "sales_note",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "northwind"
+      }
+    },
+    {
+      "path": "sales_northwind/northwind-renewal.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_northwind",
+      "source_type": "sales_playbook",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "northwind"
+      }
+    },
+    {
+      "path": "sales_aurora/aurora-overview.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_aurora",
+      "source_type": "sales_note",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "aurora"
+      }
+    },
+    {
+      "path": "sales_aurora/aurora-playbook.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_aurora",
+      "source_type": "sales_playbook",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "aurora"
+      }
+    },
+    {
+      "path": "sales_aurora/aurora-pricing.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_aurora",
+      "source_type": "sales_note",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "aurora"
+      }
+    },
+    {
+      "path": "sales_aurora/au-207-contract.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_aurora",
+      "source_type": "sales_contract",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "aurora",
+        "deal_code": "au-207"
+      }
+    },
+    {
+      "path": "sales_aurora/au-207-email.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_aurora",
+      "source_type": "sales_email",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "aurora",
+        "deal_code": "au-207"
+      }
+    },
+    {
+      "path": "sales_aurora/au-201-rebate.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_aurora",
+      "source_type": "sales_contract",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "aurora",
+        "deal_code": "au-201"
+      }
+    },
+    {
+      "path": "sales_aurora/au-208-franchise.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_aurora",
+      "source_type": "sales_contract",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "aurora",
+        "deal_code": "au-208"
+      }
+    },
+    {
+      "path": "sales_aurora/aurora-legal.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_aurora",
+      "source_type": "sales_note",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "aurora"
+      }
+    },
+    {
+      "path": "sales_aurora/aurora-seasonal.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_aurora",
+      "source_type": "sales_note",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "aurora"
+      }
+    },
+    {
+      "path": "sales_aurora/au-212-marketplace.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_aurora",
+      "source_type": "sales_contract",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "aurora",
+        "deal_code": "au-212"
       }
     }
   ]

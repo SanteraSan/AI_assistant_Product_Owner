@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -454,3 +454,29 @@ class ExternalSupportTicket(Base):
         DateTime(timezone=True),
         server_default=func.now(),
     )
+
+
+class DemoDeal(Base):
+    """Synthetic sales-demo cards. Read only via SalesComposer, not SQL tools."""
+
+    __tablename__ = "demo_deals"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "bucket_id",
+            "deal_code",
+            name="uq_demo_deals_tenant_bucket_code",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(255), index=True)
+    bucket_id: Mapped[str] = mapped_column(String(36), index=True)
+    deal_code: Mapped[str] = mapped_column(String(64), index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    amount: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(8), default="RUB")
+    status: Mapped[str] = mapped_column(String(32), default="proposed")
+    close_date: Mapped[date] = mapped_column(Date)
+    owner: Mapped[str] = mapped_column(String(255), default="")
+    aliases_json: Mapped[list[str]] = mapped_column(JSONB, default=list)

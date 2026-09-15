@@ -20,7 +20,26 @@ class ExternalScopeDecision:
 def is_synthetic_metadata(metadata: Mapping[str, object] | None) -> bool:
     if not metadata:
         return False
-    return metadata.get("synthetic") is True
+    if metadata.get("synthetic") is True:
+        return True
+    nested = metadata.get("document_metadata")
+    if isinstance(nested, Mapping) and nested.get("synthetic") is True:
+        return True
+    return False
+
+
+def strip_client_synthetic_flag(metadata: Mapping[str, object] | None) -> dict[str, object]:
+    """Uploads must never carry synthetic=true from the client."""
+    if not metadata:
+        return {}
+    cleaned = dict(metadata)
+    cleaned.pop("synthetic", None)
+    nested = cleaned.get("document_metadata")
+    if isinstance(nested, Mapping):
+        nested_cleaned = dict(nested)
+        nested_cleaned.pop("synthetic", None)
+        cleaned["document_metadata"] = nested_cleaned
+    return cleaned
 
 
 def sources_include_non_synthetic(sources: Sequence[object]) -> bool:

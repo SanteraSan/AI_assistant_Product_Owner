@@ -16,6 +16,7 @@ from app.db.models import (
     StagedDocumentUpload,
 )
 from app.services.access_policy import UserContext, can_manage_document, can_read_document
+from app.services.external_scope import strip_client_synthetic_flag
 from app.services.object_storage import LocalFilesystemStorage, ObjectStorage, resolve_upload_root
 
 
@@ -441,7 +442,7 @@ class BucketService:
                 "content_sha256": content_sha256,
             }
             if extra_metadata:
-                metadata_json.update(extra_metadata)
+                metadata_json.update(strip_client_synthetic_flag(extra_metadata))
 
             upload = StagedDocumentUpload(
                 id=upload_id,
@@ -624,7 +625,7 @@ class BucketService:
                     visibility=visibility,
                     allowed_roles=normalized_allowed_roles,
                     size_bytes=upload.size_bytes,
-                    metadata_json=dict(upload.metadata_json),
+                    metadata_json=strip_client_synthetic_flag(upload.metadata_json),
                 )
                 session.add(document)
                 await self._ensure_bucket_document_link(
@@ -721,7 +722,7 @@ class BucketService:
                     visibility=visibility,
                     allowed_roles=normalized_allowed_roles,
                     size_bytes=upload.size_bytes,
-                    metadata_json=dict(upload.metadata_json),
+                    metadata_json=strip_client_synthetic_flag(upload.metadata_json),
                 )
                 session.add(document)
                 job_id = str(uuid4())

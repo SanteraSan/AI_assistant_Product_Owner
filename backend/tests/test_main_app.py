@@ -457,6 +457,77 @@ def test_rag_chat_passes_targeted_image_source_to_rag(monkeypatch) -> None:
     assert captured["rag_kwargs"]["additional_sources"] == [targeted_source]
 
 
+def test_rag_chat_sales_bucket_uses_composer(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeComposer:
+        async def answer(self, **kwargs):
+            captured["composer_kwargs"] = kwargs
+            return RagChatResponse(
+                model="qwen3.5:9b",
+                response="карточка 1250000, договор 1180000",
+                latency_ms=1,
+                collection="documents",
+                sources=[],
+                retrieval={"mode": "sales_composer"},
+            )
+
+    class _FakeRagService:
+        async def answer(self, **_kwargs):
+            raise AssertionError("RagService must not answer sales-bucket chats")
+
+    async def _fake_build_context(*, session_id: str | None, message: str):
+        del session_id
+        return {"retrieval_query": message, "prompt_memory": {"used": False}}
+
+    async def _no_seen(**_kwargs):
+        return False
+
+    async def _fake_save_exchange(**_kwargs):
+        return None
+
+    class _FakeRagLogService:
+        async def log_response(self, **_kwargs):
+            return None
+
+    async def _fake_bucket_documents(**_kwargs):
+        return []
+
+    async def _fake_resolve_rag_document_ids(**kwargs):
+        return list(kwargs.get("requested_document_ids") or [])
+
+    async def _fake_accessible_documents_for_rag(**_kwargs):
+        return []
+
+    monkeypatch.setattr(main_module, "_qdrant_collection_exists", lambda: True)
+    monkeypatch.setattr(main_module, "_build_conversation_context", _fake_build_context)
+    monkeypatch.setattr(main_module, "_session_seen_non_synthetic_flag", _no_seen)
+    monkeypatch.setattr(main_module, "sales_composer", _FakeComposer())
+    monkeypatch.setattr(main_module, "rag_service", _FakeRagService())
+    monkeypatch.setattr(main_module, "_try_save_chat_exchange", _fake_save_exchange)
+    monkeypatch.setattr(main_module, "rag_log_service", _FakeRagLogService())
+    monkeypatch.setattr(main_module, "_bucket_documents_for_context", _fake_bucket_documents)
+    monkeypatch.setattr(main_module, "resolve_rag_document_ids", _fake_resolve_rag_document_ids)
+    monkeypatch.setattr(
+        main_module,
+        "_accessible_documents_for_rag",
+        _fake_accessible_documents_for_rag,
+    )
+    client = TestClient(main_module.app)
+    response = client.post(
+        "/rag/chat",
+        headers=auth_headers(),
+        json={
+            "message": "Сравни сумму по nw-104",
+            "active_bucket_id": "sales_northwind",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["retrieval"]["mode"] == "sales_composer"
+    assert captured["composer_kwargs"]["bucket_ids"] == ["sales_northwind"]
+    assert captured["composer_kwargs"]["message"] == "Сравни сумму по nw-104"
+
+
 def test_limits_snapshot_contains_request_limits() -> None:
     limits = _limits_snapshot()
 

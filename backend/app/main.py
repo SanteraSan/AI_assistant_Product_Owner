@@ -75,6 +75,9 @@ from app.services.rate_limiter import RedisRateLimiter
 from app.services.rag_log_service import RagLogService
 from app.services.rag_service import RagService
 from app.services.redis_service import RedisService
+from app.services.sales_composer import SalesComposer
+from app.services.sales_deal_repository import PostgresDealCardRepository
+from app.services.sales_scope import is_sales_rag_scope
 from app.services.sql_execution_service import SqlExecutionService
 from app.services.sql_schema_card import parse_allowed_tables
 from app.services.text_to_sql_service import TextToSqlService
@@ -130,6 +133,16 @@ rag_service = RagService(
     excel_supplement_scroll_limit=settings.excel_supplement_scroll_limit,
     docx_supplement_scroll_limit=settings.docx_supplement_scroll_limit,
     model_gateway=model_gateway,
+)
+sales_composer = SalesComposer(
+    rag_service=rag_service,
+    deal_repository=PostgresDealCardRepository(db_session_factory),
+    model_gateway=model_gateway,
+    default_model=settings.default_rag_model,
+    generation_keep_alive=settings.rag_generation_keep_alive,
+    generation_temperature=settings.rag_generation_temperature,
+    generation_top_p=settings.rag_generation_top_p,
+    collection_name=settings.qdrant_collection,
 )
 rag_log_service = RagLogService(session_factory=db_session_factory)
 chat_history_service = ChatHistoryService(session_factory=db_session_factory)
@@ -704,7 +717,12 @@ async def rag_chat(
                     session_id=payload.session_id,
                 )
                 try:
-                    response = await rag_service.answer(
+                    answerer = (
+                        sales_composer
+                        if is_sales_rag_scope(effective_bucket_ids)
+                        else rag_service
+                    )
+                    response = await answerer.answer(
                         message=payload.message,
                         model=payload.model,
                         retrieval_query=str(

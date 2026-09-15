@@ -106,6 +106,7 @@ def _payload_for_chunk(chunk: DocumentChunk) -> dict[str, object]:
         "content": chunk.content,
         "feature": chunk.feature,
         "document_metadata": chunk.metadata,
+        "synthetic": chunk.metadata.get("synthetic") is True,
         "language": "ru",
     }
 

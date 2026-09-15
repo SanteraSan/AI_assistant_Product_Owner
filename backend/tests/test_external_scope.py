@@ -2,7 +2,9 @@ from app.core.errors import ErrorType, ProviderError
 from app.models.chat import SourceChunk
 from app.services.external_scope import (
     decide_external_scope,
+    is_synthetic_metadata,
     sources_include_non_synthetic,
+    strip_client_synthetic_flag,
 )
 
 
@@ -21,6 +23,31 @@ def test_missing_synthetic_flag_is_non_synthetic() -> None:
     assert sources_include_non_synthetic([_chunk(synthetic=None)]) is True
     assert sources_include_non_synthetic([_chunk(synthetic="true")]) is True
     assert sources_include_non_synthetic([_chunk(synthetic=True)]) is False
+
+
+def test_nested_document_metadata_synthetic_is_accepted() -> None:
+    nested = SourceChunk(
+        id="c1",
+        content="deal",
+        metadata={"document_metadata": {"synthetic": True, "file_name": "nw-104-contract.md"}},
+    )
+    assert is_synthetic_metadata(nested.metadata) is True
+    assert sources_include_non_synthetic([nested]) is False
+
+
+def test_strip_client_synthetic_removes_nested_flag() -> None:
+    cleaned = strip_client_synthetic_flag(
+        {
+            "synthetic": True,
+            "content_type": "text/plain",
+            "document_metadata": {"synthetic": True, "file_name": "upload.txt"},
+        }
+    )
+    assert "synthetic" not in cleaned
+    assert cleaned["content_type"] == "text/plain"
+    assert cleaned["document_metadata"]["file_name"] == "upload.txt"
+    assert "synthetic" not in cleaned["document_metadata"]
+    assert is_synthetic_metadata(cleaned) is False
 
 
 def test_external_non_synthetic_is_denied_before_provider() -> None:

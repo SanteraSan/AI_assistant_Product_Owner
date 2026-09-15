@@ -1759,7 +1759,7 @@ alembic upgrade head
 
 ## E2.1 Slice: ModelGateway (Ollama + Gemini/OpenRouter)
 
-Статус: **in progress** (unit/MockTransport зелёные; live Gemini — отдельный DoD).
+Статус: **in progress** (этап A: gateway + guard; этап B: SalesComposer + corpus; gold eval — этап C. Live Gemini на `/chat` уже подтверждался отдельно).
 
 Generation для `/chat` и `/rag/chat` идёт через `ModelGateway`. Embeddings, vision digest и conversation summary остаются на Ollama.
 
@@ -1783,4 +1783,30 @@ OPENROUTER_DEFAULT_MODEL=openai/gpt-4o-mini
 
 Цены: `app/core/model_pricing.py`. Нет строки в таблице → `estimated_cost_usd=null`.
 
-SalesComposer / `demo_deals` / gold eval — следующий подшаг, не этот.
+### Sales-демопетля (этап B)
+
+Gold-путь — `/rag/chat` + `SalesComposer`, не agent. Если выбран только бакет `sales_northwind` или `sales_aurora`, backend резолвит `deal_code`, читает карточку из `demo_deals` своим SQL (`tenant_id` + `bucket_id` + код) и достаёт договор из Qdrant. `RagService` про сделки не знает.
+
+`demo_deals` **не** входит в allowlist `execute_readonly_sql`. Agent по-прежнему ходит в `evaluation_runs` / `external_*`.
+
+Поднять корпус (Postgres должен быть доступен). Из папки `backend`, через venv проекта — не системные `python`/`alembic`:
+
+```bash
+cd /home/santera/Projects/backend
+source .venv/bin/activate
+alembic upgrade head
+python -m scripts.seed_demo_deals
+python -m scripts.render_sales_demo_docs
+python -m scripts.ingest_seed_data --recreate
+python -m scripts.sync_seed_document_registry
+```
+
+Без `activate` тот же путь: `.venv/bin/alembic` и `.venv/bin/python`. Если вы уже в `~/Projects/backend`, `cd backend` больше не нужен.
+
+`--recreate` пересобирает всю Qdrant-коллекцию, не только sales. После ingest в UI выбирайте бакет Northwind и спрашивайте канонический код, например `Сравни сумму карточки и договора по nw-104`.
+
+Намеренный рассинхрон для золота: `nw-104` сумма карточки 1250000 vs договор 1180000; `au-207` даты закрытия; `nw-110` в карточке `signed`, письмо — черновик и не отправлено. Маркер no-leak кабинета Aurora: `Aurora Polar Rebate`.
+
+Upload с клиента не может выставить `synthetic=true`. External на пользовательских файлах по-прежнему 403 — это guard.
+
+Gold eval / `--suite sales-gold` — следующий подшаг.

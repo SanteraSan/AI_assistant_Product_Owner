@@ -2,6 +2,8 @@
 
 ## Status
 
+**In progress (2026-09-15)** — этап A (gateway + synthetic guard) и этап B (SalesComposer + corpus) в коде. Live Gemini на `/chat` подтверждён (`gemini-3.6-flash`). Sales-gold eval — следующий срез. Историческая пометка «Blocked VPN» ниже сохранена как контекст июля 2026.
+
 **Blocked** 2026-07-14 — VPN / external Gemini API unreachable. Kickoff decisions below remain valid. Do **not** implement an empty ModelGateway stub while blocked. Resume E2.1 when Google AI Studio is reachable. Meanwhile proceed with **E3** (tools/agents).
 
 ## Decisions
