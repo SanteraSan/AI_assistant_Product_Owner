@@ -93,6 +93,16 @@ class Settings(BaseSettings):
     indexing_worker_health_port: int = 8002
     # E7: in-process Prometheus-style metrics (/metrics, /metrics/summary).
     metrics_enabled: bool = True
+    # E2.1: OpenAI-compatible external generation (Gemini AI Studio + OpenRouter).
+    gemini_api_key: str = ""
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    gemini_default_model: str = "gemini-3.6-flash"
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_default_model: str = "openai/gpt-4o-mini"
+    openrouter_http_referer: str = "http://localhost:5173"
+    openrouter_app_title: str = "TaskFlow AI"
+    external_request_timeout_seconds: float = 60.0
 
     @field_validator("rag_score_threshold", mode="before")
     @classmethod
@@ -120,6 +130,7 @@ class Settings(BaseSettings):
         "sql_tool_row_limit",
         "sql_tool_timeout_seconds",
         "agent_max_steps",
+        "external_request_timeout_seconds",
     )
     @classmethod
     def _positive_number(cls, value: int | float) -> int | float:
@@ -130,6 +141,8 @@ class Settings(BaseSettings):
     @field_validator(
         "ollama_base_url",
         "qdrant_url",
+        "gemini_base_url",
+        "openrouter_base_url",
     )
     @classmethod
     def _http_url(cls, value: str) -> str:

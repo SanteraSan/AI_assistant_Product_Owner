@@ -21,6 +21,7 @@ from app.main import (
     create_app,
 )
 from app.models.chat import ChatRequest, RagChatRequest, RagChatResponse, SourceChunk
+from app.services.llm.types import GenerationResult
 from tests.auth_helpers import auth_headers
 
 
@@ -500,3 +501,88 @@ def test_filter_values_limit_rejects_too_many_values() -> None:
         assert exc.status_code == 422
     else:
         raise AssertionError("expected HTTPException")
+
+
+def test_health_snapshot_exposes_external_key_flags() -> None:
+    snapshot = main_module.model_gateway.health_snapshot()
+
+    assert "gemini_key_configured" in snapshot
+    assert "openrouter_key_configured" in snapshot
+    assert isinstance(snapshot["models"], list)
+
+
+def test_chat_sends_approach_to_gateway_without_cloud_fallback(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeGateway:
+        async def generate(self, **kwargs):
+            captured.update(kwargs)
+            return GenerationResult(
+                response="local-ok",
+                model=str(kwargs["model"]),
+                provider="ollama",
+            )
+
+    async def _no_seen(**_kwargs):
+        return False
+
+    async def _no_save(**_kwargs):
+        return None
+
+    monkeypatch.setattr(main_module, "model_gateway", _FakeGateway())
+    monkeypatch.setattr(main_module, "_session_seen_non_synthetic_flag", _no_seen)
+    monkeypatch.setattr(main_module, "_try_save_chat_exchange", _no_save)
+    client = TestClient(main_module.app)
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(),
+        json={"message": "hello", "approach": "hybrid", "model": "qwen3.5:9b"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["response"] == "local-ok"
+    assert captured["endpoint"] == "chat"
+    assert captured["allow_external_fallback"] is False
+    assert captured["approach"] == "hybrid"
+
+
+def test_chat_external_blocked_by_session_flag(monkeypatch) -> None:
+    called = {"n": 0}
+
+    class _FakeGateway:
+        async def generate(self, **_kwargs):
+            called["n"] += 1
+            raise AssertionError("gateway must not be called")
+
+    async def _seen(**_kwargs):
+        return True
+
+    monkeypatch.setattr(main_module, "model_gateway", _FakeGateway())
+    monkeypatch.setattr(main_module, "_session_seen_non_synthetic_flag", _seen)
+    client = TestClient(main_module.app)
+
+    response = client.post(
+        "/chat",
+        headers=auth_headers(),
+        json={"message": "hello", "approach": "external", "model": "gemini-2.5-flash"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error_type"] == "external_scope_not_synthetic"
+    assert response.json()["reason"] == "session_memory"
+    assert called["n"] == 0
+
+
+def test_agent_external_returns_explicit_error() -> None:
+    client = TestClient(main_module.app)
+
+    response = client.post(
+        "/agent/chat",
+        headers=auth_headers(),
+        json={"message": "hello", "approach": "openapi"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_type"] == "external_agent_not_supported"
+

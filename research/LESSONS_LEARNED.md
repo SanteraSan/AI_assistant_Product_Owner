@@ -31,6 +31,56 @@
 - как это влияет на проект.
 ```
 
+## 2026-09-15: E2.1 этап A — ModelGateway + synthetic guard (без live Gemini)
+
+Контекст:
+- начали sales-демопетлю: нужен один generation-контракт для Ollama и облака, но VPN/ключи ещё не обязательны для написания кода;
+- нельзя оставлять пустой stub: routing, fallback и guard должны быть зелёными на MockTransport.
+
+Что изменили:
+- `OpenAICompatibleProvider` + `ModelGateway`: `openapi` → `external`; generation для `/chat` и `/rag/chat`; embeddings/vision/summary остаются на Ollama;
+- hybrid fallback **infra_only** и **только** `/rag/chat` при прошедшем synthetic-guard; `/chat` hybrid в облако не уходит; `/agent/chat` + external → `external_agent_not_supported` без HTTP к Gemini;
+- default-deny guard: `synthetic=true` строго boolean; `session_seen_non_synthetic` живёт с сессией, не NLP по summary; user message не классифицируем;
+- `error_type` для новых ошибок — `StrEnum`; цены — ручной dict, неизвестная модель → `null`, не 0;
+- UI: подход External, подсказка что запрос уйдёт провайдеру, `/health` отдаёт `*_key_configured`.
+
+Проверки:
+- `backend/.venv/bin/python -m pytest -q backend/tests/test_model_gateway.py backend/tests/test_openai_compatible_provider.py backend/tests/test_external_scope.py backend/tests/test_model_catalog.py backend/tests/test_finish_reason.py backend/tests/test_model_pricing.py backend/tests/test_main_app.py` → passed;
+- полный `backend/tests`: 205 passed; 3 failed не из этого среза (`object_storage` kwarg в indexing tests + `/chat/sessions` без Postgres в sandbox).
+
+Наблюдение:
+- MockTransport закрывает контракт провайдера (429 retry, `model_unavailable` только при «model not found», `SAFETY` не склеивается в invalid JSON);
+- live Gemini **не** делали: E2.1 done / live DoD ещё впереди. Нужен ключ AI Studio (и при желании OpenRouter) — без sudo, только env.
+
+Вывод:
+- можно параллельно собирать corpus/SalesComposer на Ollama, не дожидаясь VPN;
+- следующий шаг плана: B — `demo_deals` + SalesComposer, `demo_deals` вне SQL-tool allowlist.
+
+Future hardening:
+- стриминг, billing UI, ping провайдера на `/ready`, RLS на SQL, agent на том же gateway.
+
+## 2026-09-15: Live Gemini — 2.5-flash снят для новых ключей
+
+Контекст:
+- ключ AI Studio рабочий (`gemini_key_configured=true`), smoke `POST /chat` + `approach=external`.
+
+Наблюдение:
+- Google 404: `gemini-2.5-flash is no longer available to new users`, рекомендуют `gemini-3.6-flash`;
+- клиент отдал `external_provider_error`, потому что в теле не было маркера `model not found`;
+- повтор того же запроса через минуту мог уйти в timeout — сеть до Google отдельно от id модели.
+
+Решение:
+- дефолт каталога: `gemini-3.6-flash`; `gemini-2.5-flash` оставлен как legacy;
+- маркеры `no longer available` / `not available to new users` → `model_unavailable`.
+
+Вывод:
+- live smoke обязан проверять актуальный Flash id, а не зашитый в план зимний тег.
+
+Прогон (после смены id):
+- `POST /chat` `model=gemini-3.6-flash` `approach=external` → `provider=gemini`, `finish_reason=stop`, `response=pong`, `provider_response_model_id=gemini-3.6-flash`;
+- OpenRouter по-прежнему optional (`openrouter_key_configured=false`);
+- UI `/rag/chat` по обычным документам всё ещё 403 — guard, не провайдер.
+
 ## 2026-07-15: E6 Decision — Handwritten Primary, LangGraph Lab Kept
 
 Контекст:

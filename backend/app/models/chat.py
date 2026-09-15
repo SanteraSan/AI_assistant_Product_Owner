@@ -55,6 +55,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     model: str | None = None
     session_id: str | None = Field(default=None, min_length=1, max_length=36)
+    approach: str | None = Field(default=None, max_length=64)
 
 
 class ChatResponse(BaseModel):
@@ -65,6 +66,14 @@ class ChatResponse(BaseModel):
     session_id: str | None = None
     user_message_id: str | None = None
     assistant_message_id: str | None = None
+    provider_response_model_id: str | None = None
+    fallback_from: str | None = None
+    fallback_to: str | None = None
+    finish_reason: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    cost_estimated: bool | None = None
+    estimated_cost_usd: float | None = None
 
 
 class SourceChunk(BaseModel):

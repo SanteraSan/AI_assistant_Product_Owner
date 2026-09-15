@@ -48,6 +48,17 @@ export function ChatWorkspace({
               <Badge>{selectedModel?.label ?? 'Модель не выбрана'}</Badge>
               <Badge>{approach}</Badge>
             </div>
+            {approach === 'external' ? (
+              <p className="mt-3 text-sm text-amber-800">
+                Запрос уйдёт во внешнюю модель (Gemini/OpenRouter). Текст сообщения отправится
+                провайдеру.
+              </p>
+            ) : null}
+            {chatMode === 'agent' && approach === 'external' ? (
+              <p className="mt-2 text-sm text-amber-800">
+                Agent в этом срезе работает только на Ollama. Выберите Гибрид или Только локальные.
+              </p>
+            ) : null}
           </Card>
 
           {messages.map((message) => (

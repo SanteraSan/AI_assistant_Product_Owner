@@ -22,3 +22,6 @@ env/
 *.log
 
 /models/
+
+# Local job-search drafts (PII). Do not publish.
+.local-portfolio/

@@ -58,6 +58,8 @@ E5.1 smoke (Kafka indexing): при `KAFKA_ENABLED=true` + worker upload/commit 
 
 Важно: автоматические `quality_flags` являются быстрыми эвристиками, а не заменой ручной оценки. Они помогают найти очевидные регрессии: пустой ответ, неправильный router intent, отсутствие expected source type или нарушение простого negative constraint.
 
+E2.1 (2026-09-15): gateway + synthetic guard покрыты **unit/MockTransport**, не checklist regression. Sales-gold (`/rag/chat` + composer, `--suite/--approach`, skip≠failed) ещё не в этом срезе. Live Gemini — отдельный DoD, не смешивать с legacy ~49 Ollama сценариями.
+
 ## Базовые Критерии
 
 - `groundedness`: ответ не выдумывает факты вне context.

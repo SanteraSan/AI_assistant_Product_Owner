@@ -4,7 +4,12 @@ from time import perf_counter
 
 from app.clients.qdrant_store import QdrantStore
 from app.models.chat import RagChatResponse, SourceChunk
+from app.services.external_scope import (
+    decide_external_scope,
+    sources_include_non_synthetic,
+)
 from app.services.feature_extractor import FeatureExtractor
+from app.services.llm.gateway import ModelGateway
 from app.services.ollama_client import OllamaClient
 from app.services.query_router import QueryRouter
 
@@ -38,6 +43,7 @@ class RagService:
         generation_top_p: float,
         excel_supplement_scroll_limit: int,
         docx_supplement_scroll_limit: int,
+        model_gateway: ModelGateway | None = None,
     ) -> None:
         self._ollama_client = ollama_client
         self._qdrant_store = qdrant_store
@@ -53,6 +59,7 @@ class RagService:
         self._generation_top_p = generation_top_p
         self._excel_supplement_scroll_limit = excel_supplement_scroll_limit
         self._docx_supplement_scroll_limit = docx_supplement_scroll_limit
+        self._model_gateway = model_gateway
 
     async def search(
         self,
@@ -174,6 +181,8 @@ class RagService:
         max_sources_per_source_path: int | None = None,
         memory_context: dict[str, object] | None = None,
         additional_sources: list[SourceChunk] | None = None,
+        approach: str | None = None,
+        session_seen_non_synthetic: bool = False,
     ) -> RagChatResponse:
         selected_model = model or self._default_model
         selected_retrieval_query = retrieval_query or message
@@ -209,16 +218,56 @@ class RagService:
             extra_rules=extra_prompt_rules,
             memory_context=memory_context,
         )
-        result = await self._ollama_client.generate(
-            model=selected_model,
-            prompt=prompt,
-            keep_alive=self._generation_keep_alive,
-            options={
-                "temperature": self._generation_temperature,
-                "top_p": self._generation_top_p,
-            },
-            think=False,
+        retrieved_non_synthetic = sources_include_non_synthetic(sources)
+        scope_decision = decide_external_scope(
+            approach=approach,
+            endpoint="rag",
+            session_seen_non_synthetic_flag=session_seen_non_synthetic,
+            retrieved_non_synthetic=retrieved_non_synthetic,
         )
+        generation_options = {
+            "temperature": self._generation_temperature,
+            "top_p": self._generation_top_p,
+        }
+        if self._model_gateway is not None:
+            generation = await self._model_gateway.generate(
+                model=selected_model,
+                prompt=prompt,
+                approach=approach,
+                endpoint="rag",
+                allow_external_fallback=scope_decision.allow_external_fallback,
+                keep_alive=self._generation_keep_alive,
+                options=generation_options,
+                think=False,
+            )
+            response_text = generation.response
+            provider = generation.provider
+            provider_response_model_id = generation.provider_response_model_id
+            fallback_from = generation.fallback_from
+            fallback_to = generation.fallback_to
+            finish_reason = generation.finish_reason
+            prompt_tokens = generation.prompt_tokens
+            completion_tokens = generation.completion_tokens
+            cost_estimated = generation.cost_estimated
+            estimated_cost_usd = generation.estimated_cost_usd
+        else:
+            result = await self._ollama_client.generate(
+                model=selected_model,
+                prompt=prompt,
+                keep_alive=self._generation_keep_alive,
+                options=generation_options,
+                think=False,
+            )
+            response_text = str(result.get("response") or "")
+            provider = "ollama"
+            provider_response_model_id = str(result.get("model") or selected_model)
+            fallback_from = None
+            fallback_to = None
+            finish_reason = "stop"
+            prompt_tokens = None
+            completion_tokens = None
+            cost_estimated = True
+            estimated_cost_usd = None
 
         latency_ms = int((perf_counter() - started_at) * 1000)
         diversity = {
@@ -231,12 +280,28 @@ class RagService:
             "additional_source_count": len(targeted_sources),
             "additional_source_ids": [source.id for source in targeted_sources],
             "final_top_k": len(sources),
+            "external_scope": {
+                "allow_external_fallback": scope_decision.allow_external_fallback,
+                "persist_session_seen_non_synthetic": (
+                    scope_decision.persist_session_seen_non_synthetic
+                ),
+                "deny_reason": scope_decision.deny_reason,
+            },
         }
 
         return RagChatResponse(
             model=selected_model,
-            response=result.get("response", ""),
+            response=response_text,
             latency_ms=latency_ms,
+            provider=provider,
+            provider_response_model_id=provider_response_model_id,
+            fallback_from=fallback_from,
+            fallback_to=fallback_to,
+            finish_reason=finish_reason,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_estimated=cost_estimated,
+            estimated_cost_usd=estimated_cost_usd,
             collection=self._qdrant_store.collection_name,
             sources=sources,
             score_threshold=search.score_threshold,

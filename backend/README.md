@@ -1756,3 +1756,31 @@ curl -s -X PATCH http://localhost:8000/chat/sessions/<SESSION_ID> \
 cd backend
 alembic upgrade head
 ```
+
+## E2.1 Slice: ModelGateway (Ollama + Gemini/OpenRouter)
+
+Статус: **in progress** (unit/MockTransport зелёные; live Gemini — отдельный DoD).
+
+Generation для `/chat` и `/rag/chat` идёт через `ModelGateway`. Embeddings, vision digest и conversation summary остаются на Ollama.
+
+Подходы:
+
+- `local_only` — только Ollama; id вроде `gemini-3.6-flash` даёт `model_unavailable`, а не уезжает в локальный runtime;
+- `hybrid` — Ollama; облачный fallback **только** на `/rag/chat` и только если synthetic-guard прошёл (infra 429/5xx / overload / connect). `/chat` hybrid в облако не фоллбечит;
+- `external` (алиас `openapi`) — Gemini или OpenRouter по каталогу id. `/agent/chat` в этом срезе отвечает `external_agent_not_supported`.
+
+Guard: нет `metadata.synthetic === true` → cloud generation запрещён. Флаг `session_seen_non_synthetic` пишется в `chat_sessions.metadata_json` и живёт пока жива сессия. Текст summary не классифицируем. Вставленный пользователем текст не сканируется.
+
+Ключи (пустые = не настроено, `/health` отдаёт `gemini_key_configured` / `openrouter_key_configured`, без ping):
+
+```bash
+GEMINI_API_KEY=
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+GEMINI_DEFAULT_MODEL=gemini-3.6-flash
+OPENROUTER_API_KEY=
+OPENROUTER_DEFAULT_MODEL=openai/gpt-4o-mini
+```
+
+Цены: `app/core/model_pricing.py`. Нет строки в таблице → `estimated_cost_usd=null`.
+
+SalesComposer / `demo_deals` / gold eval — следующий подшаг, не этот.

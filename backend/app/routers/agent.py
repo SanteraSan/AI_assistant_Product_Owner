@@ -7,12 +7,14 @@ from uuid import uuid4
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from app.core.errors import ErrorType, ProviderError
 from app.dependencies.auth import get_current_user
 from app.models.chat import AgentChatRequest, AgentChatResponse
 from app.services.access_policy import UserContext
 from app.services.agent.orchestrator import AgentOrchestrator
 from app.services.agent.langgraph_adapter import LangGraphAgentAdapter
 from app.services.chat_history_service import ChatExchangeRecord
+from app.services.llm.types import normalize_approach
 from app.services.metrics import AppMetrics
 from app.services.ollama_load_guard import OllamaOverloadedError
 
@@ -43,6 +45,12 @@ def create_agent_router(
         user: UserContext = Depends(get_current_user),
     ) -> AgentChatResponse:
         await enforce_rate_limit(request=request, endpoint="agent_chat")
+        if normalize_approach(payload.approach) == "external":
+            raise ProviderError(
+                ErrorType.EXTERNAL_AGENT_NOT_SUPPORTED,
+                "External providers are not supported for /agent/chat in this slice. Use hybrid or local_only.",
+                status_code=400,
+            )
         request_id = request.headers.get("x-request-id") or f"agent_{uuid4().hex[:12]}"
         started_at = perf_counter()
         outcome = "error"

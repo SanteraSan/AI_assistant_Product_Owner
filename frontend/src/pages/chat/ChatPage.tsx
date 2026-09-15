@@ -26,8 +26,14 @@ import {
   stageDocument,
 } from '../../entities/document/api'
 import { mockDocuments } from '../../entities/document/model'
-import { localModels } from '../../entities/model/model'
-import type { ModelApproach } from '../../entities/model/model'
+import { fetchProviderCatalog } from '../../entities/model/api'
+import {
+  isModelApproach,
+  modelsForApproach,
+  normalizeApproach,
+  type ModelApproach,
+} from '../../entities/model/model'
+import { formatApiError } from '../../shared/api/httpClient'
 import { useAuthStore } from '../../entities/user/store'
 import { useWorkspaceStore } from '../../entities/workspace/store'
 import { BucketWorkspace } from '../../widgets/bucket-workspace/BucketWorkspace'
@@ -88,7 +94,17 @@ export function ChatPage() {
     ? activeBucketId
     : ''
   const activeBucket = buckets.find((bucket) => bucket.id === selectedBucketId)
-  const selectedModel = localModels.find((model) => model.id === selectedModelId)
+  const healthQuery = useQuery({
+    enabled: isAuthenticated,
+    queryKey: ['provider-catalog'],
+    queryFn: () => fetchProviderCatalog(),
+    retry: false,
+    staleTime: 60_000,
+  })
+  const approachModels = modelsForApproach(selectedApproach, healthQuery.data)
+  const selectedModel =
+    approachModels.find((model) => model.id === selectedModelId) ?? approachModels[0]
+  const effectiveModelId = selectedModel?.id ?? selectedModelId
   const messages = messagesByThreadId[activeThreadId] ?? []
   const activeThread = threads.find((thread) => thread.id === activeThreadId)
   const chatSessionsQuery = useQuery({
@@ -253,7 +269,7 @@ export function ChatPage() {
       createChatSession({
         title: 'Новый чат',
         activeBucketId: selectedBucketId,
-        modelId: selectedModelId,
+        modelId: effectiveModelId,
         approach: selectedApproach,
       }),
     onSuccess: (thread) => {
@@ -300,7 +316,7 @@ export function ChatPage() {
     mutationFn: (message: string) =>
       sendRagMessage({
         message,
-        model: selectedModelId,
+        model: effectiveModelId,
         approach: selectedApproach,
         activeBucketId: selectedBucketId,
         sessionId: activeThread?.sessionId,
@@ -321,7 +337,7 @@ export function ChatPage() {
       addAssistantMessage({
         id: `assistant-error-${Date.now()}`,
         role: 'assistant',
-        content: error instanceof Error ? error.message : 'Не удалось получить ответ от RAG.',
+        content: formatApiError(error, 'Не удалось получить ответ от RAG.'),
       })
     },
   })
@@ -329,7 +345,7 @@ export function ChatPage() {
     mutationFn: (message: string) =>
       sendAgentMessage({
         message,
-        model: selectedModelId,
+        model: effectiveModelId,
         approach: selectedApproach,
         activeBucketId: selectedBucketId,
         sessionId: activeThread?.sessionId,
@@ -350,7 +366,7 @@ export function ChatPage() {
       addAssistantMessage({
         id: `assistant-error-${Date.now()}`,
         role: 'assistant',
-        content: error instanceof Error ? error.message : 'Не удалось получить ответ агента.',
+        content: formatApiError(error, 'Не удалось получить ответ агента.'),
       })
     },
   })
@@ -402,8 +418,11 @@ export function ChatPage() {
     if (activeThread.modelId && activeThread.modelId !== selectedModelId) {
       selectModel(activeThread.modelId)
     }
-    if (isModelApproach(activeThread.approach) && activeThread.approach !== selectedApproach) {
-      selectApproach(activeThread.approach)
+    if (isModelApproach(activeThread.approach)) {
+      const nextApproach = normalizeApproach(activeThread.approach)
+      if (nextApproach !== selectedApproach) {
+        selectApproach(nextApproach)
+      }
     }
   }, [
     activeBucketId,
@@ -490,7 +509,7 @@ export function ChatPage() {
     setThreadContext(activeThreadId, {
       bucketIds,
       documentIds,
-      modelId: selectedModelId,
+      modelId: effectiveModelId,
       approach: selectedApproach,
     })
     if (selectedChatMode === 'agent') {
@@ -511,7 +530,7 @@ export function ChatPage() {
         const thread = await createChatSession({
           title: 'Новый чат',
           activeBucketId: selectedBucketId,
-          modelId: selectedModelId,
+          modelId: effectiveModelId,
           approach: selectedApproach,
         })
         upsertThread(thread)
@@ -588,15 +607,22 @@ export function ChatPage() {
   }
 
   function handleChangeApproach(approach: ModelApproach) {
+    const nextModels = modelsForApproach(approach, healthQuery.data)
+    const nextModelId = nextModels.some((model) => model.id === selectedModelId)
+      ? selectedModelId
+      : nextModels[0]?.id ?? selectedModelId
     setThreadContext(activeThreadId, {
       bucketId: selectedBucketId,
       bucketIds: selectedBucketId ? [selectedBucketId] : [],
       documentIds: [],
-      modelId: selectedModelId,
+      modelId: nextModelId,
       approach,
     })
     selectApproach(approach)
-    syncActiveSessionContext({ approach })
+    if (nextModelId !== selectedModelId) {
+      selectModel(nextModelId)
+    }
+    syncActiveSessionContext({ approach, modelId: nextModelId })
   }
 
   function handleSelectBucketFromCard(bucketId: string) {
@@ -604,7 +630,7 @@ export function ChatPage() {
       bucketId,
       bucketIds: [bucketId],
       documentIds: [],
-      modelId: selectedModelId,
+      modelId: effectiveModelId,
       approach: selectedApproach,
     })
     selectBucketAndOpenChat(bucketId)
@@ -635,7 +661,9 @@ export function ChatPage() {
               sessionId: thread.sessionId,
               title,
               activeBucketId: thread.bucketId,
-              approach: isModelApproach(thread.approach) ? thread.approach : selectedApproach,
+              approach: isModelApproach(thread.approach)
+                ? normalizeApproach(thread.approach)
+                : selectedApproach,
               modelId: thread.modelId ?? selectedModelId,
             })
           }
@@ -649,7 +677,7 @@ export function ChatPage() {
           activeView={activeView}
           buckets={buckets}
           grafanaUrl={GRAFANA_URL}
-          models={localModels}
+          models={approachModels}
           onChangeApproach={handleChangeApproach}
           onChangeChatMode={handleChangeChatMode}
           onChangeBucket={handleChangeBucket}
@@ -668,7 +696,7 @@ export function ChatPage() {
           }}
           selectedApproach={selectedApproach}
           selectedChatMode={selectedChatMode}
-          selectedModelId={selectedModelId}
+          selectedModelId={effectiveModelId}
           user={currentUser}
         />
 
@@ -751,10 +779,6 @@ function asksAllAvailableDocuments(message: string): boolean {
     normalized.includes('по всем документ') ||
     normalized.includes('all available')
   )
-}
-
-function isModelApproach(value: string | undefined): value is ModelApproach {
-  return value === 'hybrid' || value === 'local_only' || value === 'openapi'
 }
 
 function normalizeDocumentName(value: string): string {

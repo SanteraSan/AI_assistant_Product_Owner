@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 
 from app.clients.qdrant_store import QdrantStore
 from app.core.config import get_settings
+from app.core.errors import ProviderError
 from app.db.models import ChatMessage, ChatSession, DocumentAsset
 from app.db.session import (
     create_engine,
@@ -48,11 +49,17 @@ from app.services.conversation_memory_service import ConversationMemoryService
 from app.services.conversation_summary_service import ConversationSummaryService
 from app.services.document_indexing_service import IMAGE_SOURCE_TYPES, DocumentIndexingService
 from app.services.external_db_sync_service import ExternalDbSyncService
+from app.services.external_scope import (
+    SESSION_SEEN_NON_SYNTHETIC,
+    decide_external_scope,
+    session_seen_non_synthetic,
+)
 from app.services.feature_extractor import FeatureExtractor
 from app.services.image_digest_service import build_targeted_image_digest
 from app.services.indexing_event_publisher import IndexingEventPublisher
 from app.services.indexing_job_dispatcher import IndexingJobDispatcher
 from app.services.integration_ingest_service import IntegrationIngestService
+from app.services.llm import build_model_gateway
 from app.services.metrics import AppMetrics, metrics_http_middleware, prometheus_response
 from app.services.object_storage import build_object_storage, display_name_from_ref, resolve_upload_root
 from app.services.ollama_client import OllamaClient
@@ -99,6 +106,7 @@ ollama_client = OllamaClient(
     timeout_seconds=settings.request_timeout_seconds,
     load_guard=ollama_load_guard,
 )
+model_gateway = build_model_gateway(settings=settings, ollama_client=ollama_client)
 qdrant_store = QdrantStore(
     url=settings.qdrant_url,
     collection_name=settings.qdrant_collection,
@@ -121,6 +129,7 @@ rag_service = RagService(
     generation_top_p=settings.rag_generation_top_p,
     excel_supplement_scroll_limit=settings.excel_supplement_scroll_limit,
     docx_supplement_scroll_limit=settings.docx_supplement_scroll_limit,
+    model_gateway=model_gateway,
 )
 rag_log_service = RagLogService(session_factory=db_session_factory)
 chat_history_service = ChatHistoryService(session_factory=db_session_factory)
@@ -256,6 +265,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if indexing_event_publisher is not None:
             await indexing_event_publisher.stop()
         await ollama_client.aclose()
+        await model_gateway.aclose()
         if redis_service is not None:
             await redis_service.aclose()
         await db_engine.dispose()
@@ -338,6 +348,26 @@ async def validation_exception_handler(
     )
 
 
+@app.exception_handler(ProviderError)
+async def provider_exception_handler(request: Request, exc: ProviderError) -> JSONResponse:
+    request_id = _request_id_from_request(request)
+    extra = {
+        key: value
+        for key, value in exc.extra.items()
+        if key != "persist_session_seen_non_synthetic"
+    }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.detail,
+            "error_type": exc.error_type.value,
+            "request_id": request_id,
+            **extra,
+        },
+        headers={"X-Request-ID": request_id},
+    )
+
+
 @app.exception_handler(OllamaOverloadedError)
 async def ollama_overloaded_exception_handler(
     request: Request,
@@ -387,6 +417,7 @@ async def health() -> dict[str, object]:
         "postgres_available": readiness["dependencies"]["postgres_available"],
         "database_auto_create_tables": settings.database_auto_create_tables,
         "limits": _limits_snapshot(),
+        **model_gateway.health_snapshot(),
     }
 
 
@@ -527,11 +558,24 @@ async def chat(
     await _enforce_rate_limit(request=request, endpoint="chat")
     model = payload.model or settings.default_model
     started_at = perf_counter()
+    seen = await _session_seen_non_synthetic_flag(
+        user=user,
+        session_id=payload.session_id,
+    )
+    decide_external_scope(
+        approach=payload.approach,
+        endpoint="chat",
+        session_seen_non_synthetic_flag=seen,
+        retrieved_non_synthetic=False,
+    )
 
     try:
-        result = await ollama_client.generate(
+        result = await model_gateway.generate(
             model=model,
             prompt=payload.message,
+            approach=payload.approach,
+            endpoint="chat",
+            allow_external_fallback=False,
             think=False,
         )
     except httpx.ConnectError as exc:
@@ -551,8 +595,17 @@ async def chat(
 
     response = ChatResponse(
         model=model,
-        response=result.get("response", ""),
+        response=result.response,
         latency_ms=latency_ms,
+        provider=result.provider,
+        provider_response_model_id=result.provider_response_model_id,
+        fallback_from=result.fallback_from,
+        fallback_to=result.fallback_to,
+        finish_reason=result.finish_reason,
+        prompt_tokens=result.prompt_tokens,
+        completion_tokens=result.completion_tokens,
+        cost_estimated=result.cost_estimated,
+        estimated_cost_usd=result.estimated_cost_usd,
     )
     chat_exchange = await _try_save_chat_exchange(
         session_id=payload.session_id,
@@ -560,7 +613,7 @@ async def chat(
         user_id=user.user_id,
         user_message=payload.message,
         response=response,
-        metadata={"endpoint": "/chat", "model_id": model},
+        metadata={"endpoint": "/chat", "model_id": model, "approach": payload.approach},
     )
     _attach_chat_exchange(response, chat_exchange)
     return response
@@ -646,37 +699,57 @@ async def rag_chat(
                     bucket_ids=effective_bucket_ids,
                     bucket_documents=bucket_documents,
                 )
-                response = await rag_service.answer(
-                    message=payload.message,
-                    model=payload.model,
-                    retrieval_query=str(
-                        conversation_context.get("retrieval_query") or payload.message
-                    ),
-                    top_k=payload.top_k,
-                    score_threshold=payload.score_threshold,
-                    tenant_id=user.tenant_id,
-                    bucket_ids=effective_bucket_ids,
-                    features=payload.features,
-                    source_types=payload.source_types,
-                    document_ids=scoped_document_ids,
-                    source_paths=payload.source_paths,
-                    allowed_source_paths=[
-                        document.source_path
-                        for document in accessible_documents
-                        if document.source_path
-                        and (
-                            not scoped_document_ids
-                            or document.id in set(scoped_document_ids)
-                        )
-                    ],
-                    max_sources_per_title=payload.max_sources_per_title,
-                    max_sources_per_source_type=payload.max_sources_per_source_type,
-                    max_sources_per_source_path=payload.max_sources_per_source_path,
-                    memory_context=_as_dict(conversation_context.get("prompt_memory")),
-                    additional_sources=targeted_image_sources,
+                session_seen = await _session_seen_non_synthetic_flag(
+                    user=user,
+                    session_id=payload.session_id,
                 )
+                try:
+                    response = await rag_service.answer(
+                        message=payload.message,
+                        model=payload.model,
+                        retrieval_query=str(
+                            conversation_context.get("retrieval_query") or payload.message
+                        ),
+                        top_k=payload.top_k,
+                        score_threshold=payload.score_threshold,
+                        tenant_id=user.tenant_id,
+                        bucket_ids=effective_bucket_ids,
+                        features=payload.features,
+                        source_types=payload.source_types,
+                        document_ids=scoped_document_ids,
+                        source_paths=payload.source_paths,
+                        allowed_source_paths=[
+                            document.source_path
+                            for document in accessible_documents
+                            if document.source_path
+                            and (
+                                not scoped_document_ids
+                                or document.id in set(scoped_document_ids)
+                            )
+                        ],
+                        max_sources_per_title=payload.max_sources_per_title,
+                        max_sources_per_source_type=payload.max_sources_per_source_type,
+                        max_sources_per_source_path=payload.max_sources_per_source_path,
+                        memory_context=_as_dict(conversation_context.get("prompt_memory")),
+                        additional_sources=targeted_image_sources,
+                        approach=payload.approach,
+                        session_seen_non_synthetic=session_seen,
+                    )
+                except ProviderError as exc:
+                    if exc.extra.get("persist_session_seen_non_synthetic"):
+                        await _persist_session_seen_non_synthetic(
+                            user=user,
+                            session_id=payload.session_id,
+                        )
+                    raise
                 effective_document_ids = scoped_document_ids
         response.conversation_context = conversation_context
+        scope = response.retrieval.get("external_scope")
+        if isinstance(scope, dict) and scope.get("persist_session_seen_non_synthetic") is True:
+            await _persist_session_seen_non_synthetic(
+                user=user,
+                session_id=payload.session_id,
+            )
         chat_exchange = await _try_save_chat_exchange(
             session_id=payload.session_id,
             tenant_id=user.tenant_id,
@@ -1402,6 +1475,41 @@ def _as_dict(value: object) -> dict[str, object]:
     if isinstance(value, dict):
         return value
     return {}
+
+
+async def _session_seen_non_synthetic_flag(
+    *,
+    user: UserContext,
+    session_id: str | None,
+) -> bool:
+    try:
+        metadata = await chat_history_service.get_session_metadata(
+            tenant_id=user.tenant_id,
+            user_id=user.user_id,
+            session_id=session_id,
+        )
+    except Exception:
+        logger.exception("Failed to read chat session metadata for external scope")
+        return False
+    return session_seen_non_synthetic(metadata)
+
+
+async def _persist_session_seen_non_synthetic(
+    *,
+    user: UserContext,
+    session_id: str | None,
+) -> None:
+    if not session_id:
+        return
+    try:
+        await chat_history_service.update_session(
+            tenant_id=user.tenant_id,
+            user_id=user.user_id,
+            session_id=session_id,
+            metadata={SESSION_SEEN_NON_SYNTHETIC: True},
+        )
+    except Exception:
+        logger.exception("Failed to persist session_seen_non_synthetic")
 
 
 app.include_router(

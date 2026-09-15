@@ -15,6 +15,11 @@ def test_settings_rejects_invalid_urls() -> None:
         Settings(ollama_base_url="localhost:11434")
 
 
+def test_settings_rejects_invalid_gemini_url() -> None:
+    with pytest.raises(ValidationError):
+        Settings(gemini_base_url="generativelanguage.googleapis.com")
+
+
 def test_settings_rejects_invalid_redis_url() -> None:
     with pytest.raises(ValidationError):
         Settings(redis_url="localhost:6379")

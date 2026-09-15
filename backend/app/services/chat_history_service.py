@@ -313,6 +313,26 @@ class ChatHistoryService:
             await session.refresh(chat_session)
             return chat_session
 
+    async def get_session_metadata(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str | None,
+        session_id: str | None,
+    ) -> dict[str, object]:
+        if not session_id:
+            return {}
+        async with self._session_factory() as session:
+            chat_session = await self._session_for_user(
+                session=session,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            if chat_session is None:
+                return {}
+            return dict(chat_session.metadata_json or {})
+
     async def _get_or_create_session(
         self,
         *,
