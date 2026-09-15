@@ -58,7 +58,18 @@ E5.1 smoke (Kafka indexing): при `KAFKA_ENABLED=true` + worker upload/commit 
 
 Важно: автоматические `quality_flags` являются быстрыми эвристиками, а не заменой ручной оценки. Они помогают найти очевидные регрессии: пустой ответ, неправильный router intent, отсутствие expected source type или нарушение простого negative constraint.
 
-E2.1 (2026-09-15): этап A (gateway + guard) покрыт unit/MockTransport. Этап B: sales-корпус + `SalesComposer` в `/rag/chat` (карточка SQL + договор RAG). Sales-gold (`--suite/--approach`, skip≠failed) — этап C, не этот срез. Live Gemini на sales-gold — отдельный DoD, не смешивать с legacy ~49 Ollama сценариями.
+E2.1 (2026-09-16): этап C — `--suite sales-gold`. Ollama gold зелёный (`3abc0b52-…`). Gemini с текущего IP: skip `User location is not supported` → `external_provider_unavailable`, не failed. Live Gemini gold — DoD, когда AI Studio доступен.
+
+## Sales Gold (E2.1 C)
+
+Прогон только через `/rag/chat` + `SalesComposer`, не agent. Канонический `deal_code` в промпте.
+
+1. `sales_gold_nw104_amount` — карточка 1250000 vs договор 1180000, оба числа, mismatch и слой без требования слов SQL/RAG.
+2. `sales_gold_au207_dates` — 2026-11-01 vs 2026-12-15 (допустимы «1 ноября» / «15 декабря»).
+3. `sales_gold_nw110_draft` — в карточке signed, письмо черновик, не утверждать отправку.
+4. `sales_gold_northwind_noleak` — в ответе нет 777000 / au-201; карточка Aurora не в sources/SQL isolation.
+
+Каталог: `--suite sales-catalog` (парафраз, aligned nw-101, draft, in-scope rebate, unknown code).
 
 ## Базовые Критерии
 

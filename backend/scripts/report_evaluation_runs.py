@@ -151,13 +151,19 @@ def _print_model_summary(results: list[dict[str, Any]]) -> None:
             if row["latency_ms"] is not None
         ]
         source_counts = [row["source_count"] or 0 for row in rows]
-        error_count = sum(1 for row in rows if row["error"])
-        failed_flag_count = sum(_count_failed_flags(row["quality_flags"] or {}) for row in rows)
+        skip_count = sum(1 for row in rows if _is_skipped(row))
+        error_count = sum(1 for row in rows if row["error"] and not _is_skipped(row))
+        failed_flag_count = sum(
+            _count_failed_flags(row["quality_flags"] or {})
+            for row in rows
+            if not _is_skipped(row)
+        )
         avg_latency = int(mean(latencies)) if latencies else None
         avg_sources = round(mean(source_counts), 2) if source_counts else 0
         print(
             f"- {model}: results={len(rows)}, avg_latency_ms={avg_latency}, "
-            f"avg_sources={avg_sources}, errors={error_count}, failed_flags={failed_flag_count}"
+            f"avg_sources={avg_sources}, errors={error_count}, skips={skip_count}, "
+            f"failed_flags={failed_flag_count}"
         )
 
 
@@ -168,18 +174,25 @@ def _print_scenario_summary(results: list[dict[str, Any]]) -> None:
 
     print("By scenario:")
     for scenario_id, rows in sorted(grouped.items()):
-        error_count = sum(1 for row in rows if row["error"])
+        error_count = sum(1 for row in rows if row["error"] and not _is_skipped(row))
+        skip_count = sum(1 for row in rows if _is_skipped(row))
         zero_source_count = sum(1 for row in rows if (row["source_count"] or 0) == 0)
-        failed_flag_count = sum(_count_failed_flags(row["quality_flags"] or {}) for row in rows)
+        failed_flag_count = sum(
+            _count_failed_flags(row["quality_flags"] or {})
+            for row in rows
+            if not _is_skipped(row)
+        )
         print(
             f"- {scenario_id}: results={len(rows)}, zero_sources={zero_source_count}, "
-            f"errors={error_count}, failed_flags={failed_flag_count}"
+            f"errors={error_count}, skips={skip_count}, failed_flags={failed_flag_count}"
         )
 
 
 def _print_flag_failures(results: list[dict[str, Any]]) -> None:
     failures = []
     for row in results:
+        if _is_skipped(row):
+            continue
         quality_flags = row["quality_flags"] or {}
         failed_flags = [
             key
@@ -206,6 +219,11 @@ def _count_failed_flags(quality_flags: dict[str, Any]) -> int:
         for value in quality_flags.values()
         if isinstance(value, bool) and value is False
     )
+
+
+def _is_skipped(row: dict[str, Any]) -> bool:
+    quality_flags = row.get("quality_flags") or {}
+    return quality_flags.get("skipped") is True
 
 
 if __name__ == "__main__":

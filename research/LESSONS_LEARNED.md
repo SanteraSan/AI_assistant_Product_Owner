@@ -103,7 +103,7 @@ Future hardening:
 - договоры видны в модалке документов, CRM-карточки `demo_deals` в UI по-прежнему не рендерятся (это не баг retrieval).
 
 Вывод:
-- gold eval (этап C) ещё впереди: runner `--suite/--approach`, 4 gold через `/rag/chat`.
+- gold eval (этап C) закрыт в коде: runner `--suite/--approach/--provider`, skip≠failed, 4 gold + каталог 8–15 через `/rag/chat`.
 
 Future hardening:
 - RLS/AST вокруг SQL-tool; consistency-слой в Qdrant не обязателен;
@@ -131,6 +131,34 @@ Future hardening:
 
 Future hardening:
 - лимит размера zip.
+
+## 2026-09-16: E2.1 этап C — sales-gold eval runner
+
+Контекст:
+- composer и корпус уже отвечали вручную на `nw-104` / `nw-110` / no-leak, но runner всегда бил в legacy `/rag/chat` без approach и любой HTTP красил run как failed.
+
+Что изменили:
+- `--suite sales-gold|sales-catalog|legacy`, `--approach`, `--provider`; payload ходит в `/rag/chat` как раньше, gold — через `SalesComposer` за счёт `bucket_ids`;
+- skip: `model_unavailable`, `external_scope_not_synthetic`, `external_provider_unavailable`, rate-limit. Skip пишет `quality_flags.skipped` и **не** ставит `evaluation_status=failed`;
+- mismatch-флаги: `both_values_present`, `mismatch_flagged`, `layer_attribution_ok` (без требования слов SQL/RAG); no-leak проверяет 777000 и SQL/card isolation, не имя программы в отказе;
+- 4 gold + 10 catalog сценариев в `scripts/sales_evaluation_scenarios.py`;
+- `User location is not supported` от Gemini → `external_provider_unavailable` (skip), не `external_provider_error`.
+
+Проверки:
+- unit: suite sizes, skip≠failed, numeric/date mismatch flags, isolation leak, `format_close_date`;
+- live `qwen3.5:9b` `--suite sales-gold --approach local_only --provider ollama --top-k 8`:
+  - `a8446f53-…` HTTP 4/4; nw-110 верный, но `mismatch_flagged` требовал «расходятся» — убрали, оставили signed/черновик;
+  - no-leak верный отказ «в предоставленном контексте нет» — добавили маркер `контексте нет`, не имя программы;
+  - `2e793e92-…` / `92a1b640-…`: au-207 читал ISO `2026-11-01` как «1 января» — evaluator правильно красный; в карточку добавили `1 ноября 2026 (2026-11-01)`;
+  - `763aef6e-2fd0-47ff-acdd-e1d07449f4f3` и повтор `3abc0b52-dc12-47d4-bfa4-44fdc8a090a5` — gold 4/4, `failed_flags=0`;
+  - catalog `55e9063e-1b7d-4407-b623-3f4c3613497b` — 9/10, unknown `xyz-000` отказ верный («данных нет»), маркер `отсутству`/`контексте нет` добавлен после прогона;
+  - Gemini `fbd4730e-…` сначала 4 failed: Google 400 `User location is not supported for the API use` мапился в `external_provider_error`. После фикса — `3abd0ee3-43b2-437f-9691-060e68ac500a` skip=4, `evaluation_status=completed`, failed_flags=0.
+
+Вывод:
+- качество петли закрыто Ollama gold. Gemini с этого IP недоступен (geo/FAILED_PRECONDITION) — это skip инфраструктуры, не провал сценария. Live Gemini gold остаётся DoD, когда сеть/VPN пускает AI Studio. OpenRouter ключа нет.
+
+Future hardening:
+- ~80–100 sales кейсов перед хостингом; Gemini/OpenRouter sample, не полная матрица.
 
 ## 2026-07-15: E6 Decision — Handwritten Primary, LangGraph Lab Kept
 

@@ -19,6 +19,11 @@ MODEL_NOT_FOUND_MARKERS = (
     "no longer available",
     "not available to new users",
 )
+LOCATION_UNAVAILABLE_MARKERS = (
+    "user location is not supported",
+    "location is not supported for the api",
+    "not supported for the api use",
+)
 
 
 class OpenAICompatibleProvider:
@@ -144,6 +149,12 @@ class OpenAICompatibleProvider:
                 ErrorType.MODEL_UNAVAILABLE,
                 body or f"Model is unavailable on {self._provider_name}.",
                 status_code=404,
+            )
+        if any(marker in lowered for marker in LOCATION_UNAVAILABLE_MARKERS):
+            return ProviderError(
+                ErrorType.EXTERNAL_PROVIDER_UNAVAILABLE,
+                body or f"{self._provider_name} is not available from this location.",
+                status_code=503,
             )
         if response.status_code >= 500:
             return ProviderError(

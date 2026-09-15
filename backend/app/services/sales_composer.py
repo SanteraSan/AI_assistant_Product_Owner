@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from time import perf_counter
 
 from app.models.chat import RagChatResponse, SourceChunk
@@ -24,6 +25,25 @@ SALES_PROMPT_RULES = [
         "и привяжи каждое значение к слою (карточка или документ)."
     ),
 ]
+
+_RU_MONTHS = (
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
+)
+
+
+def format_close_date(value: date) -> str:
+    return f"{value.day} {_RU_MONTHS[value.month - 1]} {value.year} ({value.isoformat()})"
 
 
 class SalesComposer:
@@ -214,7 +234,7 @@ def build_deal_card_source(deal: DemoDealRecord) -> SourceChunk:
             f"Название: {deal.title}",
             f"Сумма: {deal.amount} {deal.currency}",
             f"Статус: {deal.status}",
-            f"Дата закрытия: {deal.close_date.isoformat()}",
+            f"Дата закрытия: {format_close_date(deal.close_date)}",
             f"Владелец: {deal.owner}",
             f"Кабинет: {deal.bucket_id}",
         ]

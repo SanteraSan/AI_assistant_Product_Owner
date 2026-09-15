@@ -40,6 +40,11 @@ class EvaluationScenario:
     expected_prompt_memory_used: bool | None = None
     expected_metric_intent: bool | None = None
     expected_negative_metric_marker: bool | None = None
+    expected_card_value: str | None = None
+    expected_contract_value: str | None = None
+    expect_mismatch: bool = False
+    expect_layer_attribution: bool = False
+    required_source_types: tuple[str, ...] = ()
 
 
 SCENARIOS = [
@@ -711,11 +716,86 @@ SCENARIOS = [
 ]
 
 
+SUITE_LEGACY = "legacy"
+SUITE_SALES_GOLD = "sales-gold"
+SUITE_SALES_CATALOG = "sales-catalog"
+EVAL_SUITES = (SUITE_LEGACY, SUITE_SALES_GOLD, SUITE_SALES_CATALOG)
+SKIP_ERROR_TYPES = frozenset(
+    {
+        "model_unavailable",
+        "external_scope_not_synthetic",
+        "external_provider_unavailable",
+        "external_provider_rate_limited",
+    }
+)
+_MISMATCH_MARKERS = (
+    "расхожд",
+    "не совпад",
+    "не совпадает",
+    "отлича",
+    "разн",
+    "конфликт",
+    "versus",
+    " vs ",
+    "не одинаков",
+    "не сходится",
+    "расходятся",
+    "не равен",
+    "не равны",
+)
+_CARD_LAYER_MARKERS = ("карточк", "crm", "demo_deals")
+_DOC_LAYER_MARKERS = ("договор", "документ", "письм", "контракт")
+_DATE_VALUE_VARIANTS = {
+    "2026-11-01": ("2026-11-01", "1 ноября 2026", "01.11.2026", "1.11.2026"),
+    "2026-12-15": ("2026-12-15", "15 декабря 2026", "15.12.2026"),
+}
+
+
+class EvalSkip(Exception):
+    def __init__(self, reason: str, detail: str = "") -> None:
+        super().__init__(detail or reason)
+        self.reason = reason
+        self.detail = detail
+
+
+class EvalFailure(Exception):
+    def __init__(self, reason: str, detail: str = "") -> None:
+        super().__init__(detail or reason)
+        self.reason = reason
+        self.detail = detail
+
+
+def aggregate_run_status(outcomes: list[str]) -> str:
+    if "fail" in outcomes:
+        return "failed"
+    return "completed"
+
+
+def eval_outcome_from_response(response: httpx.Response) -> EvalSkip | EvalFailure:
+    payload = _error_payload_from_response(response)
+    error_type = str(payload.get("error_type") or "http_error")
+    detail = str(payload.get("detail") or response.text or f"HTTP {response.status_code}")
+    if error_type in SKIP_ERROR_TYPES:
+        return EvalSkip(error_type, detail)
+    return EvalFailure(error_type, detail)
+
+
+def _error_payload_from_response(response: httpx.Response) -> dict[str, Any]:
+    try:
+        payload = response.json()
+    except ValueError:
+        return {"error_type": "http_error", "detail": response.text}
+    if not isinstance(payload, dict):
+        return {"error_type": "http_error", "detail": str(payload)}
+    return payload
+
+
 async def main() -> None:
     args = _parse_args()
     settings = get_settings()
     selected_models = args.models or [settings.default_rag_model]
-    selected_scenarios = _select_scenarios(args.scenarios, args.limit_scenarios)
+    selected_scenarios = _select_scenarios(args.suite, args.scenarios, args.limit_scenarios)
+    selected_approach = args.approach
 
     engine = create_engine(settings.postgres_dsn)
     try:
@@ -726,7 +806,7 @@ async def main() -> None:
         evaluation_service = EvaluationService(session_factory=session_factory)
 
         run_id = await evaluation_service.create_run(
-            name=args.name or _default_run_name(),
+            name=args.name or _default_run_name(suite=args.suite),
             checklist_version=args.checklist_version,
             models=selected_models,
             scenario_count=len(selected_scenarios),
@@ -734,12 +814,16 @@ async def main() -> None:
             metadata={
                 "base_url": args.base_url,
                 "top_k": args.top_k,
+                "suite": args.suite,
+                "approach": selected_approach,
+                "provider": args.provider,
                 "scenario_ids": [scenario.id for scenario in selected_scenarios],
             },
         )
         print(f"evaluation_run_id={run_id}")
 
-        settings = get_settings()
+        pair_count = max(1, len(selected_scenarios) * len(selected_models))
+        ttl_seconds = max(3600, int(args.timeout_seconds) * pair_count + 300)
         eval_auth_headers = {
             "Authorization": (
                 "Bearer "
@@ -751,12 +835,12 @@ async def main() -> None:
                     issuer=settings.service_jwt_issuer,
                     audience=settings.service_jwt_audience,
                     email="eval@local",
-                    ttl_seconds=3600,
+                    ttl_seconds=ttl_seconds,
                 )
             )
         }
 
-        status = "completed"
+        outcomes: list[str] = []
         async with httpx.AsyncClient(
             base_url=args.base_url,
             timeout=args.timeout_seconds,
@@ -769,6 +853,7 @@ async def main() -> None:
                             scenario=scenario,
                             model=model,
                             top_k=args.top_k,
+                            approach=selected_approach,
                             auth_headers=eval_auth_headers,
                         )
                         await evaluation_service.add_result(
@@ -786,16 +871,40 @@ async def main() -> None:
                             retrieval=_build_retrieval_snapshot(data),
                             query_hints=data.get("query_hints") or {},
                             context_policy=data.get("context_policy") or {},
-                            quality_flags=_build_quality_flags(scenario, data),
+                            quality_flags=_build_quality_flags(
+                                scenario,
+                                data,
+                                expected_provider=args.provider,
+                            ),
                         )
+                        outcomes.append("ok")
                         print(
                             "ok "
                             f"scenario={scenario.id} model={model} "
+                            f"provider={data.get('provider')} "
                             f"latency_ms={data.get('latency_ms')} "
                             f"sources={len(data.get('sources') or [])}"
                         )
+                    except EvalSkip as exc:
+                        outcomes.append("skip")
+                        await evaluation_service.add_result(
+                            run_id=run_id,
+                            scenario_id=scenario.id,
+                            scenario_name=scenario.name,
+                            prompt=scenario.prompt,
+                            model=model,
+                            quality_flags={
+                                "skipped": True,
+                                "skip_reason": exc.reason,
+                            },
+                        )
+                        print(
+                            "skip "
+                            f"scenario={scenario.id} model={model} "
+                            f"reason={exc.reason}"
+                        )
                     except Exception as exc:
-                        status = "failed"
+                        outcomes.append("fail")
                         await evaluation_service.add_result(
                             run_id=run_id,
                             scenario_id=scenario.id,
@@ -807,8 +916,13 @@ async def main() -> None:
                         )
                         print(f"error scenario={scenario.id} model={model}: {exc}")
 
+        status = aggregate_run_status(outcomes)
         await evaluation_service.complete_run(run_id=run_id, status=status)
-        print(f"evaluation_status={status}")
+        print(
+            "evaluation_status="
+            f"{status} ok={outcomes.count('ok')} "
+            f"skip={outcomes.count('skip')} fail={outcomes.count('fail')}"
+        )
     finally:
         await engine.dispose()
 
@@ -821,6 +935,22 @@ def _parse_args() -> argparse.Namespace:
         help="Backend base URL.",
     )
     parser.add_argument(
+        "--suite",
+        choices=EVAL_SUITES,
+        default=SUITE_LEGACY,
+        help="Scenario suite. Default: legacy TaskFlow checklist.",
+    )
+    parser.add_argument(
+        "--approach",
+        default=None,
+        help="Chat approach sent to /rag/chat: local_only, hybrid, or external.",
+    )
+    parser.add_argument(
+        "--provider",
+        default=None,
+        help="Expected provider name in the response, e.g. ollama or gemini.",
+    )
+    parser.add_argument(
         "--models",
         nargs="+",
         help="Ollama model names. Defaults to DEFAULT_RAG_MODEL.",
@@ -828,7 +958,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--scenarios",
         nargs="+",
-        help="Scenario ids to run. Defaults to all scenarios.",
+        help="Scenario ids to run. Defaults to all scenarios in the suite.",
     )
     parser.add_argument(
         "--limit-scenarios",
@@ -845,10 +975,11 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _select_scenarios(
+    suite: str,
     scenario_ids: list[str] | None,
     limit: int | None,
 ) -> list[EvaluationScenario]:
-    scenarios = SCENARIOS
+    scenarios = list(_scenarios_for_suite(suite))
     if scenario_ids:
         requested_ids = set(scenario_ids)
         scenarios = [scenario for scenario in scenarios if scenario.id in requested_ids]
@@ -860,6 +991,20 @@ def _select_scenarios(
     return scenarios
 
 
+def _scenarios_for_suite(suite: str) -> list[EvaluationScenario]:
+    if suite == SUITE_LEGACY:
+        return list(SCENARIOS)
+    if suite == SUITE_SALES_GOLD:
+        from scripts.sales_evaluation_scenarios import sales_gold_scenarios
+
+        return sales_gold_scenarios()
+    if suite == SUITE_SALES_CATALOG:
+        from scripts.sales_evaluation_scenarios import sales_catalog_scenarios
+
+        return sales_catalog_scenarios()
+    raise ValueError(f"Unknown suite: {suite}. Choose from {list(EVAL_SUITES)}.")
+
+
 async def _run_scenario(
     *,
     client: httpx.AsyncClient,
@@ -867,38 +1012,62 @@ async def _run_scenario(
     model: str,
     top_k: int,
     auth_headers: dict[str, str],
+    approach: str | None = None,
 ) -> dict[str, Any]:
     session_id: str | None = None
     data: dict[str, Any] | None = None
     turns = scenario.turns or (scenario.prompt,)
     for turn in turns:
-        payload = {
-            "message": turn,
-            "model": model,
-            "top_k": top_k,
-        }
-        if scenario.tenant_id:
-            payload["tenant_id"] = scenario.tenant_id
-        if scenario.bucket_ids:
-            payload["bucket_ids"] = list(scenario.bucket_ids)
-        if scenario.source_types:
-            payload["source_types"] = list(scenario.source_types)
-        if scenario.document_ids:
-            payload["document_ids"] = list(scenario.document_ids)
-        if scenario.source_paths:
-            payload["source_paths"] = list(scenario.source_paths)
-        if scenario.score_threshold is not None:
-            payload["score_threshold"] = scenario.score_threshold
-        if session_id:
-            payload["session_id"] = session_id
+        payload = build_eval_payload(
+            scenario=scenario,
+            model=model,
+            top_k=top_k,
+            approach=approach,
+            message=turn,
+            session_id=session_id,
+        )
         response = await client.post("/rag/chat", json=payload, headers=auth_headers)
-        response.raise_for_status()
+        if response.status_code >= 400:
+            raise eval_outcome_from_response(response)
         data = response.json()
         session_id = data.get("session_id") or session_id
 
     if data is None:
         raise RuntimeError(f"Scenario has no turns: {scenario.id}")
     return data
+
+
+def build_eval_payload(
+    *,
+    scenario: EvaluationScenario,
+    model: str,
+    top_k: int,
+    approach: str | None,
+    message: str,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "message": message,
+        "model": model,
+        "top_k": top_k,
+    }
+    if approach:
+        payload["approach"] = approach
+    if scenario.tenant_id:
+        payload["tenant_id"] = scenario.tenant_id
+    if scenario.bucket_ids:
+        payload["bucket_ids"] = list(scenario.bucket_ids)
+    if scenario.source_types:
+        payload["source_types"] = list(scenario.source_types)
+    if scenario.document_ids:
+        payload["document_ids"] = list(scenario.document_ids)
+    if scenario.source_paths:
+        payload["source_paths"] = list(scenario.source_paths)
+    if scenario.score_threshold is not None:
+        payload["score_threshold"] = scenario.score_threshold
+    if session_id:
+        payload["session_id"] = session_id
+    return payload
 
 
 def _summarize_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -926,6 +1095,8 @@ def _build_retrieval_snapshot(data: dict[str, Any]) -> dict[str, object]:
 def _build_quality_flags(
     scenario: EvaluationScenario,
     data: dict[str, Any],
+    *,
+    expected_provider: str | None = None,
 ) -> dict[str, object]:
     response = (data.get("response") or "").lower()
     sources = data.get("sources") or []
@@ -1506,6 +1677,46 @@ def _build_quality_flags(
             tuple(marker.lower() for marker in scenario.forbidden_response_markers),
         )
 
+    if scenario.required_source_types:
+        flags["required_source_types_present"] = set(scenario.required_source_types) <= source_types
+
+    card_present = True
+    contract_present = True
+    if scenario.expected_card_value:
+        card_present = _sales_value_present(response, scenario.expected_card_value)
+        flags["card_value_present"] = card_present
+    if scenario.expected_contract_value:
+        contract_present = _sales_value_present(response, scenario.expected_contract_value)
+        flags["contract_value_present"] = contract_present
+    if scenario.expected_card_value and scenario.expected_contract_value:
+        flags["both_values_present"] = card_present and contract_present
+    if scenario.expect_mismatch:
+        flags["mismatch_flagged"] = _sales_mismatch_flagged(response)
+    if scenario.expect_layer_attribution:
+        values_ok = True
+        if scenario.expected_card_value and scenario.expected_contract_value:
+            values_ok = card_present and contract_present
+        flags["layer_attribution_ok"] = values_ok and _sales_layer_markers_present(response)
+    if scenario.forbidden_bucket_ids:
+        retrieval = data.get("retrieval") or {}
+        isolation_ids = {
+            item
+            for item in (
+                retrieval.get("prompt_isolation_bucket_ids") or retrieval.get("bucket_ids") or []
+            )
+            if item
+        }
+        forbidden_buckets = set(scenario.forbidden_bucket_ids)
+        flags["sales_sql_isolation_ok"] = not (isolation_ids & forbidden_buckets)
+        deal_buckets = {
+            (source.get("metadata") or {}).get("bucket_id")
+            for source in sources
+            if source.get("source_type") == "deal_card"
+        }
+        flags["sales_card_isolation_ok"] = not (deal_buckets & forbidden_buckets)
+    if expected_provider:
+        flags["provider_matches"] = data.get("provider") == expected_provider
+
     if scenario.id.startswith("memory_"):
         prompt_memory = conversation_context.get("prompt_memory") or {}
         flags["prompt_memory_budget_ok"] = int(
@@ -1563,6 +1774,27 @@ def _has_context_feature(
 
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     return any(marker in text for marker in markers)
+
+
+def _sales_value_present(response: str, value: str) -> bool:
+    if _has_required_numeric_values(response, (value,)):
+        return True
+    haystack = response.lower()
+    if value.lower() in haystack:
+        return True
+    return any(variant.lower() in haystack for variant in _DATE_VALUE_VARIANTS.get(value, ()))
+
+
+def _sales_mismatch_flagged(response: str) -> bool:
+    return _contains_any(response.lower(), _MISMATCH_MARKERS)
+
+
+def _sales_layer_markers_present(response: str) -> bool:
+    haystack = response.lower()
+    return _contains_any(haystack, _CARD_LAYER_MARKERS) and _contains_any(
+        haystack,
+        _DOC_LAYER_MARKERS,
+    )
 
 
 def _has_required_marker_groups(
@@ -1655,9 +1887,11 @@ def _structured_summary_ok(value: object) -> bool:
     return isinstance(summary, str) and bool(summary.strip())
 
 
-def _default_run_name() -> str:
+def _default_run_name(*, suite: str = SUITE_LEGACY) -> str:
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-    return f"RAG evaluation {timestamp}"
+    if suite == SUITE_LEGACY:
+        return f"RAG evaluation {timestamp}"
+    return f"RAG evaluation {suite} {timestamp}"
 
 
 if __name__ == "__main__":

@@ -91,7 +91,10 @@ def test_northwind_prompt_does_not_contain_aurora_markers() -> None:
         assert marker not in prompt
 
 
-def test_deal_card_source_is_synthetic() -> None:
+def test_format_close_date_keeps_iso_and_russian_month() -> None:
+    from app.services.sales_composer import format_close_date
+
+    assert format_close_date(date(2026, 11, 1)) == "1 ноября 2026 (2026-11-01)"
     deal = DemoDealRecord(
         tenant_id="local_demo",
         bucket_id=SALES_NORTHWIND_BUCKET_ID,
@@ -106,6 +109,7 @@ def test_deal_card_source_is_synthetic() -> None:
     source = build_deal_card_source(deal)
     assert source.source_type == "deal_card"
     assert source.metadata["synthetic"] is True
+    assert "20 октября 2026 (2026-10-20)" in source.content
 
 
 @pytest.mark.anyio

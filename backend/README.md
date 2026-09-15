@@ -456,6 +456,35 @@ python -m scripts.run_rag_evaluation \
   --notes "Manual full checklist run"
 ```
 
+Sales-gold (этап C, 4 сценария через `/rag/chat` + `SalesComposer`). `skip` (`model_unavailable`, нет ключа, `external_scope_not_synthetic`) не красит `evaluation_status=failed`:
+
+```bash
+python -m scripts.run_rag_evaluation \
+  --suite sales-gold \
+  --approach local_only \
+  --provider ollama \
+  --models qwen3.5:9b \
+  --top-k 8 \
+  --notes "Sales gold Ollama"
+
+python -m scripts.run_rag_evaluation \
+  --suite sales-gold \
+  --approach external \
+  --provider gemini \
+  --models gemini-3.6-flash \
+  --top-k 8 \
+  --notes "Sales gold Gemini"
+
+python -m scripts.run_rag_evaluation \
+  --suite sales-catalog \
+  --approach local_only \
+  --models qwen3.5:9b \
+  --top-k 8 \
+  --notes "Sales catalog Ollama"
+```
+
+Legacy checklist без `--suite` ведёт себя как раньше (`--suite legacy`).
+
 Посмотреть последние evaluation runs:
 
 ```bash
@@ -1766,7 +1795,7 @@ alembic upgrade head
 
 ## E2.1 Slice: ModelGateway (Ollama + Gemini/OpenRouter)
 
-Статус: **in progress** (этап A: gateway + guard; этап B: SalesComposer + corpus; gold eval — этап C. Live Gemini на `/chat` уже подтверждался отдельно).
+Статус: **in progress** (этапы A–C в коде: gateway, SalesComposer, `--suite sales-gold`. Ollama gold зелёный. Live Gemini gold с текущего IP — skip `location not supported`; E2.1 done после успешного Gemini gold, не после skip).
 
 Generation для `/chat` и `/rag/chat` идёт через `ModelGateway`. Embeddings, vision digest и conversation summary остаются на Ollama.
 
@@ -1816,4 +1845,11 @@ python -m scripts.sync_seed_document_registry
 
 Upload с клиента не может выставить `synthetic=true`. External на пользовательских файлах по-прежнему 403 — это guard.
 
-Gold eval / `--suite sales-gold` — следующий подшаг.
+Gold и каталог:
+
+```bash
+python -m scripts.run_rag_evaluation --suite sales-gold --approach local_only --models qwen3.5:9b --top-k 8
+python -m scripts.run_rag_evaluation --suite sales-catalog --approach local_only --models qwen3.5:9b --top-k 8
+```
+
+Четыре gold: `nw-104` суммы, `au-207` даты, `nw-110` draft vs signed, no-leak `Aurora Polar Rebate` на Northwind (в ответе запрещён `777000`, не название программы — модель может честно сказать, что в контексте её нет). Skip по `model_unavailable` / нет ключа / `external_scope_not_synthetic` / `external_provider_unavailable` (в том числе Gemini `User location is not supported`) не делает `evaluation_status=failed`.

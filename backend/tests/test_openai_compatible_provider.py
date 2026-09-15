@@ -155,6 +155,29 @@ def test_retired_model_body_maps_to_model_unavailable() -> None:
     _run(run())
 
 
+def test_location_precondition_maps_to_provider_unavailable() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            text=(
+                '[{"error":{"code":400,'
+                '"message":"User location is not supported for the API use.",'
+                '"status":"FAILED_PRECONDITION"}}]'
+            ),
+        )
+
+    provider = _provider(handler)
+
+    async def run() -> None:
+        with pytest.raises(ProviderError) as exc:
+            await provider.generate(model="gemini-3.6-flash", prompt="hi")
+        assert exc.value.error_type == ErrorType.EXTERNAL_PROVIDER_UNAVAILABLE
+        assert exc.value.status_code == 503
+        await provider.aclose()
+
+    _run(run())
+
+
 def test_generic_404_is_provider_error_not_model_unavailable() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, text="no route to host path")
