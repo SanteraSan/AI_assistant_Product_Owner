@@ -22,6 +22,7 @@ import {
   DocumentDeleteConflictError,
   fetchAvailableDocuments,
   fetchBucketDocuments,
+  downloadBucketDocuments,
   retryDocumentIndexing,
   stageDocument,
 } from '../../entities/document/api'
@@ -730,6 +731,9 @@ export function ChatPage() {
             }}
             onCreateBucket={() => createBucketMutation.mutate()}
             onDeleteBucket={(bucketId) => deleteBucketMutation.mutateAsync(bucketId)}
+            onDownloadDocuments={async (bucketId, documentIds, fallbackFileName) => {
+              await downloadBucketDocuments(bucketId, documentIds, fallbackFileName)
+            }}
             onDeleteDocument={async (documentId) => {
               try {
                 await deleteDocumentMutation.mutateAsync(documentId)

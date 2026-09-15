@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.routers.buckets import create_bucket_router
-from app.services.bucket_service import DocumentDeleteResult
+from app.services.bucket_service import BucketDownloadFile, BucketDownloadResult, DocumentDeleteResult
 from tests.auth_helpers import auth_headers
 
 
@@ -71,6 +71,8 @@ class _FakeBucketService:
         self.document: _FakeDocument | None = None
         self.bucket_link = _FakeBucketDocument()
         self.staged_upload: _FakeStagedUpload | None = None
+        self.download_files: dict[str, tuple[str, bytes]] = {}
+        self.forbidden_download_ids: set[str] = set()
 
     async def list_buckets(self, *, tenant_id: str):
         assert tenant_id == "tenant-a"
@@ -103,6 +105,27 @@ class _FakeBucketService:
         if bucket_id != self.bucket.id:
             return None
         return [(self.document, self.bucket_link)] if self.document else []
+
+    async def collect_bucket_download(self, *, user, bucket_id: str, document_ids: list[str]):
+        assert user.tenant_id == "tenant-a"
+        if bucket_id != self.bucket.id:
+            return BucketDownloadResult(not_found=True)
+        files: list[BucketDownloadFile] = []
+        for document_id in document_ids:
+            if document_id in self.forbidden_download_ids:
+                return BucketDownloadResult(forbidden=True)
+            item = self.download_files.get(document_id)
+            if item is None:
+                return BucketDownloadResult(not_found=True)
+            file_name, content = item
+            files.append(
+                BucketDownloadFile(
+                    document_id=document_id,
+                    file_name=file_name,
+                    content=content,
+                )
+            )
+        return BucketDownloadResult(bucket_name=self.bucket.name, files=tuple(files))
 
     async def get_document(self, *, user, document_id: str):
         assert user.tenant_id == "tenant-a"
@@ -512,3 +535,96 @@ def test_retry_document_indexing() -> None:
     assert response.status_code == 200
     assert response.json()["documents"][0]["status"] == "indexing"
     assert response.json()["indexing_job_ids"] == ["job-retry"]
+
+
+def test_download_single_bucket_document() -> None:
+    app = FastAPI()
+    service = _FakeBucketService()
+    service.download_files["document-1"] = ("aurora-legal.md", b"legal notes")
+    app.include_router(
+        create_bucket_router(
+            bucket_service=service,  # type: ignore[arg-type]
+            default_tenant_id="tenant-a",
+        )
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/buckets/bucket-1/documents/document-1/download",
+        headers=auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]),
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"legal notes"
+    assert "aurora-legal.md" in response.headers["content-disposition"]
+
+
+def test_download_multiple_bucket_documents_as_zip() -> None:
+    import zipfile
+    from io import BytesIO
+
+    app = FastAPI()
+    service = _FakeBucketService()
+    service.download_files = {
+        "document-1": ("aurora-legal.md", b"legal"),
+        "document-2": ("aurora-playbook.md", b"playbook"),
+    }
+    app.include_router(
+        create_bucket_router(
+            bucket_service=service,  # type: ignore[arg-type]
+            default_tenant_id="tenant-a",
+        )
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/buckets/bucket-1/documents/download",
+        headers=auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]),
+        json={"document_ids": ["document-1", "document-2"]},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(BytesIO(response.content)) as archive:
+        assert archive.read("aurora-legal.md") == b"legal"
+        assert archive.read("aurora-playbook.md") == b"playbook"
+
+
+def test_download_unknown_document_is_not_found() -> None:
+    app = FastAPI()
+    app.include_router(
+        create_bucket_router(
+            bucket_service=_FakeBucketService(),  # type: ignore[arg-type]
+            default_tenant_id="tenant-a",
+        )
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/buckets/bucket-1/documents/missing/download",
+        headers=auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]),
+    )
+
+    assert response.status_code == 404
+
+
+def test_download_forbidden_document_is_denied() -> None:
+    app = FastAPI()
+    service = _FakeBucketService()
+    service.download_files["document-1"] = ("secret.md", b"nope")
+    service.forbidden_download_ids.add("document-1")
+    app.include_router(
+        create_bucket_router(
+            bucket_service=service,  # type: ignore[arg-type]
+            default_tenant_id="tenant-a",
+        )
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/buckets/bucket-1/documents/download",
+        headers=auth_headers(sub="user-a", tenant_id="tenant-a", roles=["analyst"]),
+        json={"document_ids": ["document-1"]},
+    )
+
+    assert response.status_code == 403

@@ -1,4 +1,4 @@
-import { apiRequest } from '../../shared/api/httpClient'
+import { apiRequest, apiRequestBlob, saveBlob } from '../../shared/api/httpClient'
 import type { DocumentItem, StagedDocumentItem } from './model'
 
 type DocumentDto = {
@@ -33,6 +33,34 @@ export async function fetchBucketDocuments(
 ): Promise<DocumentItem[]> {
   const documents = await apiRequest<DocumentDto[]>(`/api/buckets/${bucketId}/documents`)
   return documents.map(mapDocument)
+}
+
+export async function downloadBucketDocument(
+  bucketId: string,
+  documentId: string,
+  fallbackFileName: string,
+): Promise<void> {
+  const result = await apiRequestBlob(
+    `/api/buckets/${bucketId}/documents/${documentId}/download`,
+    { json: false },
+  )
+  saveBlob(result.blob, result.fileName || fallbackFileName)
+}
+
+export async function downloadBucketDocuments(
+  bucketId: string,
+  documentIds: string[],
+  fallbackFileName: string,
+): Promise<void> {
+  if (documentIds.length === 1) {
+    await downloadBucketDocument(bucketId, documentIds[0], fallbackFileName)
+    return
+  }
+  const result = await apiRequestBlob(`/api/buckets/${bucketId}/documents/download`, {
+    method: 'POST',
+    body: JSON.stringify({ document_ids: documentIds }),
+  })
+  saveBlob(result.blob, result.fileName || fallbackFileName)
 }
 
 export async function fetchAvailableDocuments(): Promise<DocumentItem[]> {

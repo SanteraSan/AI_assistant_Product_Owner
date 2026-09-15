@@ -7,14 +7,18 @@ type ModalProps = {
   isOpen: boolean
   children: ReactNode
   bodyClassName?: string
+  className?: string
   onClose: () => void
   size?: 'default' | 'lg'
+  nested?: boolean
 }
 
 export function Modal({
   bodyClassName,
   children,
+  className,
   isOpen,
+  nested = false,
   onClose,
   size = 'default',
   title,
@@ -24,11 +28,17 @@ export function Modal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+    <div
+      className={clsx(
+        'fixed inset-0 flex items-center justify-center bg-slate-950/40 p-4',
+        nested ? 'z-[60]' : 'z-50',
+      )}
+    >
       <div
         className={clsx(
-          'flex w-full flex-col rounded-3xl bg-white shadow-2xl',
+          'flex w-full flex-col overflow-hidden rounded-3xl bg-white shadow-2xl',
           size === 'lg' ? 'h-[80vh] max-w-4xl' : 'max-w-2xl',
+          className,
         )}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4">

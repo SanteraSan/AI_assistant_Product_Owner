@@ -16,6 +16,7 @@ from app.db.models import (
     StagedDocumentUpload,
 )
 from app.services.access_policy import UserContext, can_manage_document, can_read_document
+from app.services.document_download import read_ref_bytes
 from app.services.external_scope import strip_client_synthetic_flag
 from app.services.object_storage import LocalFilesystemStorage, ObjectStorage, resolve_upload_root
 
@@ -29,6 +30,22 @@ class DocumentDeleteResult:
     not_found: bool = False
     forbidden: bool = False
     in_use_buckets: list[tuple[str, str]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class BucketDownloadFile:
+    document_id: str
+    file_name: str
+    content: bytes
+
+
+@dataclass(frozen=True)
+class BucketDownloadResult:
+    bucket_name: str = ""
+    files: tuple[BucketDownloadFile, ...] = ()
+    not_found: bool = False
+    forbidden: bool = False
+    missing_file: bool = False
 
 
 class BucketService:
@@ -145,6 +162,68 @@ class BucketService:
                     acl_entries=document.acl_entries,
                 )
             ]
+
+    async def collect_bucket_download(
+        self,
+        *,
+        user: UserContext,
+        bucket_id: str,
+        document_ids: list[str],
+    ) -> BucketDownloadResult:
+        requested_ids: list[str] = []
+        seen: set[str] = set()
+        for raw_id in document_ids:
+            document_id = raw_id.strip()
+            if not document_id or document_id in seen:
+                continue
+            seen.add(document_id)
+            requested_ids.append(document_id)
+        if not requested_ids:
+            return BucketDownloadResult(not_found=True)
+
+        async with self._session_factory() as session:
+            bucket = await self._get_bucket(
+                session=session,
+                tenant_id=user.tenant_id,
+                bucket_id=bucket_id,
+            )
+            if bucket is None:
+                return BucketDownloadResult(not_found=True)
+            result = await session.execute(
+                select(DocumentAsset, BucketDocument)
+                .join(BucketDocument, BucketDocument.document_id == DocumentAsset.id)
+                .options(selectinload(DocumentAsset.acl_entries))
+                .where(
+                    BucketDocument.tenant_id == user.tenant_id,
+                    BucketDocument.bucket_id == bucket_id,
+                    DocumentAsset.tenant_id == user.tenant_id,
+                    DocumentAsset.id.in_(requested_ids),
+                )
+            )
+            rows = {document.id: document for document, _link in result.all()}
+            files: list[BucketDownloadFile] = []
+            for document_id in requested_ids:
+                document = rows.get(document_id)
+                if document is None:
+                    return BucketDownloadResult(not_found=True)
+                if not can_read_document(
+                    document=document,
+                    user=user,
+                    acl_entries=document.acl_entries,
+                ):
+                    return BucketDownloadResult(forbidden=True)
+                try:
+                    content = read_ref_bytes(self._storage, document.source_path)
+                except FileNotFoundError:
+                    return BucketDownloadResult(missing_file=True)
+                files.append(
+                    BucketDownloadFile(
+                        document_id=document.id,
+                        file_name=document.file_name,
+                        content=content,
+                    )
+                )
+            return BucketDownloadResult(bucket_name=bucket.name, files=tuple(files))
 
     async def get_document(
         self,

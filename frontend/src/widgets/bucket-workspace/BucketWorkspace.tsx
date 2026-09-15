@@ -1,6 +1,6 @@
-import { FileText, Folder, Pencil, Plus, RotateCcw, Trash2, Upload } from 'lucide-react'
+import { Download, FileText, Folder, Pencil, Plus, RotateCcw, Trash2, Upload } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Bucket } from '../../entities/bucket/model'
 import type { DocumentItem, StagedDocumentItem } from '../../entities/document/model'
 import { Badge, Button, Card, Modal } from '../../shared/ui'
@@ -23,6 +23,11 @@ type BucketWorkspaceProps = {
   onCreateBucket: () => void
   onDeleteBucket: (bucketId: string) => Promise<void>
   onDeleteDocument: (documentId: string) => Promise<void>
+  onDownloadDocuments: (
+    bucketId: string,
+    documentIds: string[],
+    fallbackFileName: string,
+  ) => Promise<void>
   onInspectBucket: (bucketId: string) => void
   onRetryIndexing: (documentId: string, bucketId?: string) => Promise<void>
   onSelectBucket: (bucketId: string) => void
@@ -50,6 +55,7 @@ export function BucketWorkspace({
   onCreateBucket,
   onDeleteBucket,
   onDeleteDocument,
+  onDownloadDocuments,
   onInspectBucket,
   onRetryIndexing,
   onSelectBucket,
@@ -69,6 +75,10 @@ export function BucketWorkspace({
   const [retryingDocumentId, setRetryingDocumentId] = useState<string | null>(null)
   const [documentToDelete, setDocumentToDelete] = useState<DocumentItem | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [downloadPickerOpen, setDownloadPickerOpen] = useState(false)
+  const [selectedDownloadIds, setSelectedDownloadIds] = useState<string[]>([])
+  const [isDownloading, setIsDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
   const [draftError, setDraftError] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [bucketActionError, setBucketActionError] = useState<string | null>(null)
@@ -119,6 +129,7 @@ export function BucketWorkspace({
       return
     }
     resetDraft()
+    closeDownloadPicker()
     setOpenedBucket(null)
   }
 
@@ -238,6 +249,7 @@ export function BucketWorkspace({
       await onDeleteBucket(bucketToDelete.id)
       if (openedBucket?.id === bucketToDelete.id) {
         resetDraft()
+        closeDownloadPicker()
         setOpenedBucket(null)
       }
       setBucketToDelete(null)
@@ -253,6 +265,54 @@ export function BucketWorkspace({
     setRemovedDocumentIds([])
     setStagedUploads([])
     setDraftError(null)
+  }
+
+  function closeDownloadPicker() {
+    setDownloadPickerOpen(false)
+    setSelectedDownloadIds([])
+    setDownloadError(null)
+  }
+
+  function openDownloadPicker() {
+    setSelectedDownloadIds(visibleDocuments.map((document) => document.id))
+    setDownloadError(null)
+    setDownloadPickerOpen(true)
+  }
+
+  function toggleDownloadId(documentId: string) {
+    setSelectedDownloadIds((current) =>
+      current.includes(documentId)
+        ? current.filter((item) => item !== documentId)
+        : [...current, documentId],
+    )
+  }
+
+  function toggleSelectAllDownloads() {
+    const allIds = visibleDocuments.map((document) => document.id)
+    setSelectedDownloadIds((current) =>
+      current.length === allIds.length ? [] : allIds,
+    )
+  }
+
+  async function handleDownload(documentIds: string[]) {
+    if (openedBucket === null || documentIds.length === 0) {
+      return
+    }
+    const fallbackFileName =
+      documentIds.length === 1
+        ? (visibleDocuments.find((document) => document.id === documentIds[0])?.fileName ??
+          'document')
+        : `${openedBucket.name.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-') || 'bucket'}-documents.zip`
+    setIsDownloading(true)
+    setDownloadError(null)
+    try {
+      await onDownloadDocuments(openedBucket.id, documentIds, fallbackFileName)
+      closeDownloadPicker()
+    } catch (error) {
+      setDownloadError(error instanceof Error ? error.message : 'Не удалось скачать документы.')
+    } finally {
+      setIsDownloading(false)
+    }
   }
 
   return (
@@ -343,14 +403,23 @@ export function BucketWorkspace({
             ref={uploadInputRef}
             type="file"
           />
-          <Button
-            disabled={!canMutateDocuments}
-            onClick={() => uploadInputRef.current?.click()}
-            variant="primary"
-          >
-            <Upload size={18} />
-            Загрузить документ
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              disabled={visibleDocuments.length === 0 || isDownloading}
+              onClick={openDownloadPicker}
+            >
+              <Download size={18} />
+              Скачать документы
+            </Button>
+            <Button
+              disabled={!canMutateDocuments}
+              onClick={() => uploadInputRef.current?.click()}
+              variant="primary"
+            >
+              <Upload size={18} />
+              Загрузить документ
+            </Button>
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-hidden px-6 py-4">
@@ -362,6 +431,11 @@ export function BucketWorkspace({
           {draftError ? (
             <p className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
               {draftError}
+            </p>
+          ) : null}
+          {downloadError && !downloadPickerOpen ? (
+            <p className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              {downloadError}
             </p>
           ) : null}
 
@@ -396,6 +470,14 @@ export function BucketWorkspace({
                                 {retryingDocumentId === document.id ? 'Повтор...' : 'Повторить'}
                               </Button>
                             ) : null}
+                            <Button
+                              disabled={isDownloading}
+                              onClick={() => void handleDownload([document.id])}
+                              variant="ghost"
+                            >
+                              <Download size={14} />
+                              Скачать
+                            </Button>
                             <Button
                               disabled={!canMutateDocuments}
                               onClick={() => handleDraftRemoveDocument(document.id)}
@@ -510,6 +592,30 @@ export function BucketWorkspace({
             {isSaving ? 'Сохраняем...' : 'Сохранить'}
           </Button>
         </div>
+      </Modal>
+
+      <Modal
+        bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden p-0"
+        className="h-[80vh]"
+        isOpen={downloadPickerOpen}
+        nested
+        onClose={() => {
+          if (!isDownloading) {
+            closeDownloadPicker()
+          }
+        }}
+        title="Скачать документы"
+      >
+        <DownloadPicker
+          documents={visibleDocuments}
+          error={downloadError}
+          isDownloading={isDownloading}
+          onCancel={closeDownloadPicker}
+          onDownload={() => void handleDownload(selectedDownloadIds)}
+          onToggle={toggleDownloadId}
+          onToggleAll={toggleSelectAllDownloads}
+          selectedIds={selectedDownloadIds}
+        />
       </Modal>
 
       <Modal
@@ -651,6 +757,90 @@ export function BucketWorkspace({
 
 function canDeleteAvailableDocument(document: DocumentItem, currentUserId: string): boolean {
   return document.ownerUserId === currentUserId && document.visibility === 'private'
+}
+
+function DownloadPicker({
+  documents,
+  error,
+  isDownloading,
+  onCancel,
+  onDownload,
+  onToggle,
+  onToggleAll,
+  selectedIds,
+}: {
+  documents: DocumentItem[]
+  error: string | null
+  isDownloading: boolean
+  onCancel: () => void
+  onDownload: () => void
+  onToggle: (documentId: string) => void
+  onToggleAll: () => void
+  selectedIds: string[]
+}) {
+  const selectAllRef = useRef<HTMLInputElement>(null)
+  const selectedIdSet = new Set(selectedIds)
+  const allSelected = documents.length > 0 && selectedIds.length === documents.length
+  const noneSelected = selectedIds.length === 0
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = !allSelected && !noneSelected
+    }
+  }, [allSelected, noneSelected])
+
+  return (
+    <>
+      <div className="shrink-0 border-b border-slate-100 px-6 py-4">
+        <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-900">
+          <input
+            checked={allSelected}
+            className="h-4 w-4 shrink-0 rounded border-slate-300"
+            onChange={onToggleAll}
+            ref={selectAllRef}
+            type="checkbox"
+          />
+          Выбрать все
+        </label>
+      </div>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-4">
+        {documents.map((document) => (
+          <label
+            className="flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800"
+            key={document.id}
+          >
+            <input
+              checked={selectedIdSet.has(document.id)}
+              className="h-4 w-4 shrink-0 rounded border-slate-300"
+              onChange={() => onToggle(document.id)}
+              type="checkbox"
+            />
+            <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+              <span className="truncate font-medium text-slate-950" title={document.fileName}>
+                {document.fileName}
+              </span>
+              <span className="shrink-0 text-xs text-slate-500">{document.sourceType}</span>
+            </span>
+          </label>
+        ))}
+        {error ? (
+          <p className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>
+        ) : null}
+      </div>
+      <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 px-6 py-4">
+        <Button disabled={isDownloading} onClick={onCancel}>
+          Отменить
+        </Button>
+        <Button
+          disabled={noneSelected || isDownloading}
+          onClick={onDownload}
+          variant="primary"
+        >
+          {isDownloading ? 'Скачиваем...' : 'Скачать'}
+        </Button>
+      </div>
+    </>
+  )
 }
 
 function StagedDocumentRow({

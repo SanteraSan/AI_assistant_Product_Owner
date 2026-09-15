@@ -1589,6 +1589,13 @@ curl -s http://localhost:8000/buckets/<BUCKET_ID>/documents \
   -H "X-Tenant-ID: local_demo" | jq
 ```
 
+Скачивание исходного файла идёт через backend (ACL: документ должен быть в бакете и `can_read`). Один id — исходный файл; несколько — zip. UI: кнопка в строке и «Скачать документы» с пикером (выбрать все / снять один / zip).
+
+```bash
+curl -s -D - "http://localhost:8000/buckets/<BUCKET_ID>/documents/<DOCUMENT_ID>/download" \
+  -H "Authorization: Bearer <service-jwt>" -o aurora-legal.md
+```
+
 Baseline upload пока принимает raw body, чтобы не вводить `python-multipart` в системное Python окружение:
 
 ```bash

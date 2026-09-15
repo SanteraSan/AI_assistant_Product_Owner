@@ -63,20 +63,10 @@ export async function apiRequest<TResponse>(
   path: string,
   options: RequestOptions = {},
 ): Promise<TResponse> {
-  const headers = new Headers(options.headers)
-  if (options.json !== false) {
-    headers.set('Content-Type', headers.get('Content-Type') ?? 'application/json')
-  }
+  const headers = applyRequestHeaders(options)
 
   const method = (options.method ?? 'GET').toUpperCase()
-  if (!SAFE_METHODS.has(method)) {
-    // Lazy import avoids circular dependency with entities/user/store.
-    const { useAuthStore } = await import('../../entities/user/store')
-    const csrfToken = useAuthStore.getState().csrfToken
-    if (csrfToken) {
-      headers.set('X-CSRF-Token', csrfToken)
-    }
-  }
+  await applyCsrfHeader(headers, method)
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
@@ -118,4 +108,98 @@ export async function apiRequest<TResponse>(
   }
 
   return response.json() as Promise<TResponse>
+}
+
+function applyRequestHeaders(options: RequestOptions): Headers {
+  const headers = new Headers(options.headers)
+  if (options.json !== false) {
+    headers.set('Content-Type', headers.get('Content-Type') ?? 'application/json')
+  }
+  return headers
+}
+
+async function applyCsrfHeader(headers: Headers, method: string): Promise<void> {
+  if (SAFE_METHODS.has(method)) {
+    return
+  }
+  const { useAuthStore } = await import('../../entities/user/store')
+  const csrfToken = useAuthStore.getState().csrfToken
+  if (csrfToken) {
+    headers.set('X-CSRF-Token', csrfToken)
+  }
+}
+
+export function filenameFromContentDisposition(header: string | null): string | null {
+  if (!header) {
+    return null
+  }
+  const utfMatch = /filename\*=UTF-8''([^;]+)/i.exec(header)
+  if (utfMatch?.[1]) {
+    return decodeURIComponent(utfMatch[1])
+  }
+  const quotedMatch = /filename="([^"]+)"/i.exec(header)
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1]
+  }
+  return null
+}
+
+export function saveBlob(blob: Blob, fileName: string): void {
+  const objectUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = fileName
+  document.body.append(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(objectUrl)
+}
+
+export async function apiRequestBlob(
+  path: string,
+  options: RequestOptions = {},
+): Promise<{ blob: Blob; fileName: string | null }> {
+  const headers = applyRequestHeaders(options)
+  const method = (options.method ?? 'GET').toUpperCase()
+  await applyCsrfHeader(headers, method)
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers,
+    credentials: 'include',
+  })
+
+  if (!response.ok) {
+    const details = await response.text()
+    let message = details || `Request failed with status ${response.status}`
+    let errorType: string | undefined
+    let reason: string | undefined
+    let detail: unknown = details
+    try {
+      const parsed = JSON.parse(details) as {
+        detail?: unknown
+        error_type?: string
+        reason?: string
+      }
+      errorType = parsed.error_type
+      reason = parsed.reason
+      detail = parsed.detail ?? details
+      if (typeof parsed.detail === 'string' && parsed.detail.trim()) {
+        message = parsed.detail
+      }
+    } catch {
+      // Keep raw text for non-JSON error bodies.
+    }
+    throw new ApiError(message, {
+      status: response.status,
+      errorType,
+      reason,
+      detail,
+    })
+  }
+
+  return {
+    blob: await response.blob(),
+    fileName: filenameFromContentDisposition(response.headers.get('Content-Disposition')),
+  }
 }

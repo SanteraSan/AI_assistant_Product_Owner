@@ -103,13 +103,34 @@ Future hardening:
 - договоры видны в модалке документов, CRM-карточки `demo_deals` в UI по-прежнему не рендерятся (это не баг retrieval).
 
 Вывод:
-- gold eval (этап C) ещё впереди: runner `--suite/--approach`, 4 gold через `/rag/chat`;
-- следующий продуктовый срез — скачивание файлов из бакета (один / несколько zip / все), не CRM и не in-browser preview.
+- gold eval (этап C) ещё впереди: runner `--suite/--approach`, 4 gold через `/rag/chat`.
 
 Future hardening:
 - RLS/AST вокруг SQL-tool; consistency-слой в Qdrant не обязателен;
 - refetch списка бакетов после seed/sync, чтобы не держать stale `0 documents`;
 - витрина `deal_card` в источниках ответа.
+
+## 2026-09-16: Скачивание документов из бакета
+
+Контекст:
+- после sales-демо стало ясно, что договоры в registry есть, но пользователь не мог открыть исходник из UI;
+- in-browser preview PDF/DOCX — отдельный кусок; скачивание закрывает проверку ответа модели.
+
+Что изменили:
+- `GET /buckets/{id}/documents/{document_id}/download` и `POST .../documents/download` с `document_ids`; один файл — как есть, несколько — zip;
+- ACL до чтения байт: бакет + `can_read`; чужой id → 404, без can_read → 403;
+- UI: «Скачать» в строке; «Скачать документы» открывает пикер на `80vh`: «Выбрать все» закреплена сверху, скроллится только список; имя и `sourceType` в одной строке по краям блока. Staging в пикер не входит.
+
+Проверки:
+- unit: unique zip names, content-disposition, router 200/403/404;
+- `frontend` `tsc -b` зелёный;
+- live UI на Aurora: один файл, пикер «Выбрать все» / снятие части / zip.
+
+Вывод:
+- preview в браузере и CRM-карточки `demo_deals` по-прежнему future; скачивание — достаточный слой доверия к evidence.
+
+Future hardening:
+- лимит размера zip.
 
 ## 2026-07-15: E6 Decision — Handwritten Primary, LangGraph Lab Kept
 

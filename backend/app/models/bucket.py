@@ -83,3 +83,7 @@ class CommitPersonalDocumentsRequest(BaseModel):
     staged_upload_ids: list[str] = Field(default_factory=list, max_length=50)
     visibility: str = Field(default="private", pattern="^(private|role|tenant|team|public)$")
     allowed_roles: list[str] = Field(default_factory=list, max_length=20)
+
+
+class DownloadBucketDocumentsRequest(BaseModel):
+    document_ids: list[str] = Field(..., min_length=1, max_length=100)

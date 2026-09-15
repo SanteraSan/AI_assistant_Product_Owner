@@ -1,6 +1,7 @@
 from urllib.parse import unquote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+from fastapi.responses import Response
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import DocumentAsset, KnowledgeBucket, StagedDocumentUpload
@@ -13,10 +14,18 @@ from app.models.bucket import (
     CommitBucketDocumentsResponse,
     CommitPersonalDocumentsRequest,
     DocumentResponse,
+    DownloadBucketDocumentsRequest,
     StagedDocumentResponse,
 )
 from app.services.access_policy import UserContext, parse_roles
-from app.services.bucket_service import BucketService
+from app.services.bucket_service import BucketDownloadResult, BucketService
+from app.services.document_download import (
+    archive_filename,
+    build_zip_bytes,
+    content_disposition,
+    guess_media_type,
+    safe_download_name,
+)
 from app.services.document_indexing_service import DocumentIndexingService
 from app.services.indexing_job_dispatcher import IndexingJobDispatcher
 
@@ -139,6 +148,32 @@ def create_bucket_router(
             _document_response(document, bucket_id=bucket_id, bucket_link=bucket_link)
             for document, bucket_link in documents
         ]
+
+    @router.get("/buckets/{bucket_id}/documents/{document_id}/download")
+    async def download_bucket_document(
+        bucket_id: str,
+        document_id: str,
+        user: UserContext = Depends(get_current_user),
+    ) -> Response:
+        result = await bucket_service.collect_bucket_download(
+            user=user,
+            bucket_id=bucket_id,
+            document_ids=[document_id],
+        )
+        return _download_http_response(result)
+
+    @router.post("/buckets/{bucket_id}/documents/download")
+    async def download_bucket_documents(
+        bucket_id: str,
+        payload: DownloadBucketDocumentsRequest,
+        user: UserContext = Depends(get_current_user),
+    ) -> Response:
+        result = await bucket_service.collect_bucket_download(
+            user=user,
+            bucket_id=bucket_id,
+            document_ids=payload.document_ids,
+        )
+        return _download_http_response(result)
 
     @router.get("/documents/my", response_model=list[DocumentResponse])
     async def list_my_documents(
@@ -405,6 +440,32 @@ def create_bucket_router(
         return _document_response(document)
 
     return router
+
+
+def _download_http_response(result: BucketDownloadResult) -> Response:
+    if result.forbidden:
+        raise HTTPException(status_code=403, detail="Document is not readable.")
+    if result.not_found:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    if result.missing_file:
+        raise HTTPException(status_code=404, detail="Document file is missing.")
+    if not result.files:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    if len(result.files) == 1:
+        item = result.files[0]
+        file_name = safe_download_name(item.file_name)
+        return Response(
+            content=item.content,
+            media_type=guess_media_type(file_name),
+            headers={"Content-Disposition": content_disposition(file_name)},
+        )
+    payload = build_zip_bytes([(item.file_name, item.content) for item in result.files])
+    zip_name = archive_filename(result.bucket_name)
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": content_disposition(zip_name)},
+    )
 
 
 def _bucket_response(*, bucket: KnowledgeBucket, document_count: int) -> BucketResponse:
