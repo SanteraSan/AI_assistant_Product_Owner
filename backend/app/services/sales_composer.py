@@ -17,12 +17,24 @@ SALES_PROMPT_RULES = [
         "договора или письма — различай слои. Не смешивай числа и даты между слоями."
     ),
     (
+        "Если среди источников есть source_type=deal_card, его сумма, статус и дата "
+        "закрытия — факты. Назови их цифрами из этого источника. Не утверждай, что "
+        "суммы или даты карточки нет в контексте, пока этот источник присутствует."
+    ),
+    (
+        "Пожелание, ориентир, комфортная дата или промежуточный пилот в договоре "
+        "или письме не являются значениями карточки. Даже если месяц или сумма "
+        "рядом похожи, копируй карточку только из источника deal_card."
+    ),
+    (
         "Не утверждай, что письмо уже отправлено, если в контексте нет явного "
         "факта отправки."
     ),
     (
-        "Если суммы или даты в карточке и в договоре расходятся — скажи это явно "
-        "и привяжи каждое значение к слою (карточка или документ)."
+        "Если вопрос про сумму, дату или статус сделки, начни ответ с двух коротких "
+        "строк: «карточка — <значение из deal_card>»; «документ — <значение из "
+        "договора или письма>». Потом коротко сравни слои. Если значения не "
+        "совпадают, напиши что слои различны."
     ),
 ]
 
@@ -44,6 +56,91 @@ _RU_MONTHS = (
 
 def format_close_date(value: date) -> str:
     return f"{value.day} {_RU_MONTHS[value.month - 1]} {value.year} ({value.isoformat()})"
+
+
+def deal_card_layer_rule(deal: DemoDealRecord) -> str:
+    formatted_close = format_close_date(deal.close_date)
+    return (
+        "Слой карточки "
+        f"{deal.deal_code}: сумма {deal.amount} {deal.currency}, "
+        f"статус {deal.status}, дата закрытия {formatted_close}. "
+        "Назови эти значения как карточку. Значения из договоров и писем называй отдельно. "
+        "Пожелание, ориентир, комфортная дата или пилот в документе их не заменяют. "
+        "Если документ содержит другое значение — назови оба слоя и напиши, что они различны."
+    )
+
+
+def deal_card_closing_reminder(deal: DemoDealRecord) -> str:
+    formatted_close = format_close_date(deal.close_date)
+    return (
+        f"Карточка {deal.deal_code}: сумма {deal.amount} {deal.currency}; "
+        f"статус {deal.status}; дата закрытия {formatted_close}. "
+        "Копируй сумму, статус и дату карточки из этого напоминания дословно. "
+        "Не подменяй их пожеланием или ориентиром из договора или письма. "
+        "Если в документе другая дата или сумма — слои различны."
+    )
+
+
+def prefer_deal_document_sources(
+    sources: list[SourceChunk],
+    deal_code: str,
+    *,
+    limit: int,
+) -> list[SourceChunk]:
+    """Keep the resolved deal's files first.
+
+    Cabinet playbooks may follow. Other deals' contracts stay out so they cannot
+    drown the gold facts of the asked code.
+    """
+    code = deal_code.strip().lower()
+    matched: list[SourceChunk] = []
+    playbookish: list[SourceChunk] = []
+    rest: list[SourceChunk] = []
+    for source in sources:
+        if _source_matches_deal_code(source, code):
+            matched.append(source)
+        elif (source.source_type or "") in {"sales_playbook", "sales_note"}:
+            playbookish.append(source)
+        else:
+            rest.append(source)
+    preferred = matched + playbookish if matched else rest + playbookish
+    merged: list[SourceChunk] = []
+    seen: set[str] = set()
+    for source in preferred:
+        if source.id in seen:
+            continue
+        merged.append(source)
+        seen.add(source.id)
+        if len(merged) >= limit:
+            break
+    return merged
+
+
+def _merge_unique_sources(*groups: list[SourceChunk]) -> list[SourceChunk]:
+    merged: list[SourceChunk] = []
+    seen: set[str] = set()
+    for group in groups:
+        for source in group:
+            if source.id in seen:
+                continue
+            merged.append(source)
+            seen.add(source.id)
+    return merged
+
+
+def _source_matches_deal_code(source: SourceChunk, deal_code: str) -> bool:
+    if not deal_code:
+        return False
+    path = (source.source_path or "").lower()
+    if deal_code in path:
+        return True
+    metadata = source.metadata or {}
+    if str(metadata.get("deal_code") or "").strip().lower() == deal_code:
+        return True
+    nested = metadata.get("document_metadata")
+    if isinstance(nested, dict) and str(nested.get("deal_code") or "").strip().lower() == deal_code:
+        return True
+    return False
 
 
 class SalesComposer:
@@ -100,6 +197,12 @@ class SalesComposer:
         selected_tenant_id = (tenant_id or "").strip()
         selected_bucket_ids = [item.strip() for item in (bucket_ids or []) if item.strip()]
         selected_top_k = top_k or self._default_top_k
+        selected_max_per_title = (
+            max_sources_per_title if max_sources_per_title is not None else 2
+        )
+        selected_max_per_path = (
+            max_sources_per_source_path if max_sources_per_source_path is not None else 2
+        )
         selected_score_threshold = (
             score_threshold if score_threshold is not None else self._default_score_threshold
         )
@@ -120,9 +223,10 @@ class SalesComposer:
                 deal_code=resolved.deal_code,
             )
 
+        selected_search_top_k = max(selected_top_k * 2, selected_top_k)
         search = await self._rag_service.search(
             query=selected_retrieval_query,
-            top_k=selected_top_k,
+            top_k=selected_search_top_k,
             score_threshold=selected_score_threshold,
             tenant_id=selected_tenant_id or None,
             bucket_ids=selected_bucket_ids,
@@ -131,26 +235,53 @@ class SalesComposer:
             document_ids=document_ids,
             source_paths=source_paths,
             allowed_source_paths=allowed_source_paths,
-            max_sources_per_title=max_sources_per_title,
+            max_sources_per_title=selected_max_per_title,
             max_sources_per_source_type=max_sources_per_source_type,
-            max_sources_per_source_path=max_sources_per_source_path,
+            max_sources_per_source_path=selected_max_per_path,
         )
-
-        sources: list[SourceChunk] = []
-        if deal_card is not None:
-            sources.append(build_deal_card_source(deal_card))
-        sources.extend(search.sources)
+        document_sources = list(search.sources)
         extra_rules = list(SALES_PROMPT_RULES)
-        if deal_card is None:
+        if deal_card is not None:
+            targeted = await self._rag_service.search(
+                query=f"{deal_card.deal_code} {deal_card.title}",
+                top_k=selected_top_k,
+                score_threshold=selected_score_threshold,
+                tenant_id=selected_tenant_id or None,
+                bucket_ids=selected_bucket_ids,
+                features=SALES_RETRIEVAL_FEATURES,
+                source_types=SALES_RETRIEVAL_SOURCE_TYPES,
+                document_ids=document_ids,
+                source_paths=source_paths,
+                allowed_source_paths=allowed_source_paths,
+                max_sources_per_title=selected_max_per_title,
+                max_sources_per_source_type=max_sources_per_source_type,
+                max_sources_per_source_path=selected_max_per_path,
+            )
+            document_sources = prefer_deal_document_sources(
+                _merge_unique_sources(targeted.sources, document_sources),
+                deal_card.deal_code,
+                limit=selected_top_k,
+            )
+            extra_rules.append(deal_card_layer_rule(deal_card))
+        else:
+            document_sources = document_sources[:selected_top_k]
             extra_rules.append(
                 "Карточка сделки по каноническому коду не найдена. "
                 "Не выдумывай сумму, статус и дату карточки."
             )
+
+        sources: list[SourceChunk] = []
+        closing_instructions = None
+        if deal_card is not None:
+            sources.append(build_deal_card_source(deal_card))
+            closing_instructions = deal_card_closing_reminder(deal_card)
+        sources.extend(document_sources)
         prompt = build_rag_prompt(
             question=message,
             sources=sources,
             extra_rules=extra_rules,
             memory_context=memory_context,
+            closing_instructions=closing_instructions,
         )
         retrieved_non_synthetic = sources_include_non_synthetic(sources)
         scope_decision = decide_external_scope(
@@ -211,9 +342,9 @@ class SalesComposer:
             features=search.features,
             source_types=search.source_types,
             diversity={
-                "max_sources_per_title": max_sources_per_title,
+                "max_sources_per_title": selected_max_per_title,
                 "max_sources_per_source_type": max_sources_per_source_type,
-                "max_sources_per_source_path": max_sources_per_source_path,
+                "max_sources_per_source_path": selected_max_per_path,
             },
             retrieval=retrieval,
             query_hints={
@@ -227,14 +358,22 @@ class SalesComposer:
 
 
 def build_deal_card_source(deal: DemoDealRecord) -> SourceChunk:
+    formatted_close = format_close_date(deal.close_date)
     content = "\n".join(
         [
             "Слой: карточка сделки (demo_deals)",
             f"Код: {deal.deal_code}",
             f"Название: {deal.title}",
+            (
+                "ФАКТЫ КАРТОЧКИ — назови эти цифры отдельно от договора: "
+                f"сумма {deal.amount} {deal.currency}; "
+                f"статус {deal.status}; "
+                f"дата закрытия {formatted_close}. "
+                "Пожелание или ориентир в договоре эти факты не заменяют."
+            ),
             f"Сумма: {deal.amount} {deal.currency}",
             f"Статус: {deal.status}",
-            f"Дата закрытия: {format_close_date(deal.close_date)}",
+            f"Дата закрытия: {formatted_close}",
             f"Владелец: {deal.owner}",
             f"Кабинет: {deal.bucket_id}",
         ]
@@ -268,8 +407,11 @@ def build_sales_prompt_preview(
 ) -> str:
     sources: list[SourceChunk] = []
     extra_rules = list(SALES_PROMPT_RULES)
+    closing_instructions = None
     if deal is not None:
         sources.append(build_deal_card_source(deal))
+        extra_rules.append(deal_card_layer_rule(deal))
+        closing_instructions = deal_card_closing_reminder(deal)
     else:
         extra_rules.append(
             "Карточка сделки по каноническому коду не найдена. "
@@ -280,4 +422,5 @@ def build_sales_prompt_preview(
         question=question,
         sources=sources,
         extra_rules=extra_rules,
+        closing_instructions=closing_instructions,
     )

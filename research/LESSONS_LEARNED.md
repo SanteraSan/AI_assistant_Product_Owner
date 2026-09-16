@@ -152,13 +152,108 @@ Future hardening:
   - `2e793e92-…` / `92a1b640-…`: au-207 читал ISO `2026-11-01` как «1 января» — evaluator правильно красный; в карточку добавили `1 ноября 2026 (2026-11-01)`;
   - `763aef6e-2fd0-47ff-acdd-e1d07449f4f3` и повтор `3abc0b52-dc12-47d4-bfa4-44fdc8a090a5` — gold 4/4, `failed_flags=0`;
   - catalog `55e9063e-1b7d-4407-b623-3f4c3613497b` — 9/10, unknown `xyz-000` отказ верный («данных нет»), маркер `отсутству`/`контексте нет` добавлен после прогона;
-  - Gemini `fbd4730e-…` сначала 4 failed: Google 400 `User location is not supported for the API use` мапился в `external_provider_error`. После фикса — `3abd0ee3-43b2-437f-9691-060e68ac500a` skip=4, `evaluation_status=completed`, failed_flags=0.
+  - Gemini `fbd4730e-…` сначала 4 failed: Google 400 `User location is not supported for the API use` мапился в `external_provider_error`. После фикса — `3abd0ee3-43b2-437f-9691-060e68ac500a` skip=4;
+  - после того как ping `/chat` снова дал `pong`: `073408bd-cc41-45bf-a43c-05a65f49ec6e` Gemini gold 4/4, `failed_flags=0`, avg ~5.3s, `provider=gemini`.
 
 Вывод:
-- качество петли закрыто Ollama gold. Gemini с этого IP недоступен (geo/FAILED_PRECONDITION) — это skip инфраструктуры, не провал сценария. Live Gemini gold остаётся DoD, когда сеть/VPN пускает AI Studio. OpenRouter ключа нет.
+- петля закрыта на двух runtime: Ollama `3abc0b52-…` и Gemini `073408bd-…`. Skip по geo остаётся правильным, когда AI Studio недоступен. OpenRouter ключа нет, live gold на нём не делали.
 
 Future hardening:
 - ~80–100 sales кейсов перед хостингом; Gemini/OpenRouter sample, не полная матрица.
+
+## 2026-09-16: Жирный sales-корпус перед повторным gold
+
+Контекст:
+- короткие шпаргалки закрыли gold 4/4, но для демо «вот договоры» выглядели фальшиво;
+- сгенерировали 22 markdown (добавились `nw-104-appendix.md` и `au-207-spec-table.md`), ingest/eval ещё не гоняли.
+
+Что проверили и поправили:
+- золотые факты на месте: nw-104 договор/приложение 1 180 000, карточка 1 250 000 живёт в SQL и во внутренней почте; au-207 юрдата 2026-12-15; nw-110 черновик; Northwind без Aurora Polar Rebate / 777000 / au-201;
+- playbook цитировал точные forbidden-строки gold (`уже отправлено`) — переписали перифразом, иначе модель могла процитировать список и упасть;
+- письмо nw-104 дублировало обе суммы — оставили в почте только цифру карточки, договорную читают из contract/appendix;
+- `render_sales_demo_docs` больше не затирает существующие md короткими Python-fallback'ами.
+
+Проверки:
+- unit `test_sales_corpus.py`: 22 спеки, файлы на диске, слои сумм, no-leak кабинетов;
+- live gold/catalog — в следующей записи журнала (ingest `--recreate` + deal-scoped retrieval).
+
+Вывод:
+- сложность корпуса контролируемая, не «запутать любой ценой»: факт есть, рядом чужие суммы/даты другой сделки;
+- fat-файлы режутся chunker'ом по 1800 символов, top_k=8 теснее, чем на шпаргалках.
+
+Future hardening:
+- если retrieval начнёт терять договор среди playbook/прайса — фильтр по `deal_code`, не ослаблять evaluator.
+
+## 2026-09-16: Жирный sales-корпус — live gold и catalog
+
+Контекст:
+- короткие шпаргалки давали gold 4/4, 22 жирных файла после review уже лежали на диске;
+- первый ingest без `--recreate` оставлял в Qdrant короткий `nw-104`; playbook/overview учили модель фразе «цифр в этом файле нет», а `max_sources_per_title=1` забирал преамбулу договора вместо chunk 0 с золотом.
+
+Что изменили:
+- ingest `--recreate` (1729 chunks) + targeted reindex sales; gold-факты в lead-in chunk 0 у `nw-104-contract`/`appendix` и `au-207-contract`/`spec-table`;
+- `SalesComposer`: внутренний search `top_k*2` с diversity 2, второй запрос `{deal_code} {title}`, `prefer_deal_document_sources` оставляет файлы сделки, затем playbook/notes, чужие договоры выкидывает;
+- в prompt: две стартовые строки «карточка / документ», громкий блок фактов `deal_card`, `format_close_date`;
+- evaluator: даты «1 ноября» / «различн»; mismatch «не меняет» (формулировка Gemini про юрсрок); catalog no-leak без `777000` в вопросе; unknown-deal принимает «в них нет». Bare «ноябрь» как `2026-11-01` не принимаем.
+
+Проверки:
+- unit: `test_sales_corpus.py` + composer (два search, prefer_deal) + eval helpers — 31 passed;
+- Ollama gold `176d3614-9418-4a1f-8b49-60d31c00ef8a` `qwen3.5:9b` top_k=8: HTTP 4/4, quality **3/4**. Зелёные: nw-104, nw-110, no-leak. Красный только au-207 (`card_value_present` и связанные флаги): модель называет договор `2026-12-15`, карточку подменяет «ноябрьским ориентиром» из текста договора и не копирует SQL `1 ноября 2026 (2026-11-01)`. По пути: `47989436` (11 failed_flags, chunk 0=преамбула), `d0e602b5`/`08ccf863` (чужие сделки в top_k), `8cb6ae56` уже 3/4 как финальный gold;
+- Ollama catalog `a852da28-1866-4268-99cc-b4dd620b1780`: HTTP 10/10, quality **9/10**, `failed_flags=4` только на `sales_catalog_au207_paraphrase` — та же путаница слоёв. Unknown `xyz-000` зелёный после маркера «в них нет» (`8be70420-…`);
+- Gemini gold `54322d54-429c-4fb4-8e9f-702cef30fefc` `gemini-3.6-flash`: HTTP 4/4, quality **3/4**, failed только `mismatch_flagged`. Ответ при этом называет оба слоя: «карточка — 1 ноября 2026 (2026-11-01) / документ — 15 декабря 2026 (2026-12-15)» и «ориентир не меняет официальный срок». Повтор `0582887d-…` — skip `external_provider_unavailable` / rate-limit, 4/4 live не переснимали.
+
+Вывод:
+- жирный корпус ломает не длину файла, а retrieval+attention: cabinet playbook — магнит, золото должно сидеть в chunk 0, composer обязан держать файлы спрошенной сделки;
+- `qwen3.5:9b` на au-207 путает SQL-карточку с пожеланием ноября внутри договора; Gemini слои называет. Evaluator не ослабляли до «ноябрь» = `2026-11-01`;
+- шпаргалочный 4/4 (`3abc0b52` / `073408bd`) остаётся валидным для короткого корпуса, не для демо-договоров.
+
+Future hardening:
+- жёстче отделить факты `deal_card` от «ориентира» в договоре — сделано в следующей записи;
+- live Gemini gold после стабильного VPN, без авто-pass mismatch только потому что названы две даты;
+- не коммитить raw uploads / lock-файлы / `.env`.
+
+## 2026-09-16: au-207 слой внимания — closing reminder deal_card
+
+Контекст:
+- флаги уже показали слой: retrieval зелёный (`contract_value_present`), красный `card_value_present`. `qwen3.5:9b` брал «ноябрьский ориентир» из прозы договора и не копировал SQL `1 ноября 2026 (2026-11-01)`;
+- факты карточки были в extra_rules *до* длинного контекста, а вопрос — в конце. Модель смотрела на договор.
+
+Что изменили:
+- универсальное правило: пожелание/ориентир/пилот в документе ≠ значения карточки (без fixture-дат в product prompt);
+- `deal_card_closing_reminder` вставляется в `build_rag_prompt(..., closing_instructions=)` *после* контекста и *перед* вопросом — recency;
+- evaluator: «различаются» (`различа`), иначе catalog ловил обе даты, но не слово «различны».
+
+Проверки:
+- unit 54 passed (`test_sales_prompt_repeats_card_facts_after_context`, `различаются`);
+- Ollama gold `a6c47b20-2947-4f90-b003-168933017303` — quality **4/4**, `failed_flags=0`;
+- Ollama catalog `ff6c4f43-f234-4275-96d2-e7d05092953f` — quality **10/10**. Промежуточный `bd429d96-…` был 9/10: обе даты названы, «различаются» не матчило `различн`.
+
+Gemini console (скриншоты в git не кладём, только цифры порядка UTC-8):
+- пик 15 сентября: ~20–30 запросов Gemini 3.6 Flash, input ≈ 71k tokens, output ≈ 8k;
+- success rate на пике падал примерно до трети: смесь 400 geo (`User location is not supported`), 404 на `gemini-2.5-flash` для нового ключа, 429 rate-limit и редкий 503;
+- 16 сентября в консоли уже почти 0 — повторный fat-gold на Gemini в этом шаге не гоняли, чтобы не жечь квоту. Предыдущий live `54322d54-…` слои уже называл.
+
+Вывод:
+- диагностика слоями сработала: чинили prompt/attention, не Qdrant и не gold-даты;
+- напоминание перед вопросом дешевле, чем вырезать ловушку из корпуса. Ловушка в договоре остаётся — модель должна её переживать.
+
+Future hardening:
+- если 9b снова смешает слои на новом файле — отдельный короткий evidence-блок `deal_card` в UI, не ослаблять evaluator;
+- Gemini fat-gold 4/4 снять, когда VPN/квота спокойные.
+
+## 2026-09-16: Gemini fat-gold 4/4 на новом free-tier ключе
+
+Контекст:
+- после closing reminder Ollama уже 4/4 / catalog 10/10; Gemini упирался в `GenerateRequestsPerDayPerProjectPerModel-FreeTier` = 20 на `gemini-3.6-flash`. Skip `7f298925` / `1f5a1982` и ping `429` — не VPN.
+- новый AI Studio project + ключ в `.env`; uvicorn перезапущен, иначе `get_settings()` держит старый ключ.
+
+Проверки:
+- `--suite sales-gold --approach external --provider gemini --models gemini-3.6-flash --top-k 8`
+- run `e7af95dc-ace4-486c-8332-fa30f3beef40`: HTTP 4/4, quality **4/4**, `failed_flags=0`, `provider=gemini`. au-207: «карточка — 1 ноября 2026 (2026-11-01) / документ — 15 декабря 2026», «Слои различны», ориентир не подменяет юрсрок. Первый вызов ~36s (прогрев), дальше 5–8s.
+
+Вывод:
+- жирный корпус зелёный на двух runtime: Ollama `a6c47b20-…` и Gemini `e7af95dc-…`. 9b не «гарантирует» облако, но после фикса слоя карточки оба прошли один evaluator.
+- ключ и `.env` в git не попадают.
 
 ## 2026-07-15: E6 Decision — Handwritten Primary, LangGraph Lab Kept
 

@@ -188,6 +188,19 @@ def test_rag_prompt_asks_for_compact_answers() -> None:
     assert "1–3 реально использованных источника" not in prompt
 
 
+def test_rag_prompt_appends_closing_instructions_before_question() -> None:
+    prompt = build_rag_prompt(
+        question="Сравни даты.",
+        sources=[_source("doc", content="Договор: 15 декабря 2026.")],
+        closing_instructions="Карточка: 1 ноября 2026 (2026-11-01).",
+    )
+    reminder_at = prompt.find("Напоминание перед ответом:")
+    question_at = prompt.find("Вопрос пользователя:")
+    assert reminder_at != -1
+    assert reminder_at < question_at
+    assert "1 ноября 2026 (2026-11-01)" in prompt[reminder_at:question_at]
+
+
 def test_metadata_string_list_dedupes_and_skips_invalid_values() -> None:
     from app.services.chat_history_service import _metadata_string_list
 

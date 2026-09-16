@@ -612,6 +612,7 @@ def build_rag_prompt(
     sources: list[SourceChunk],
     extra_rules: list[str] | None = None,
     memory_context: dict[str, object] | None = None,
+    closing_instructions: str | None = None,
 ) -> str:
     context_blocks = []
     for index, source in enumerate(sources, start=1):
@@ -685,6 +686,13 @@ def build_rag_prompt(
         ]
     ).strip()
 
+    closing = ""
+    if closing_instructions and closing_instructions.strip():
+        closing = (
+            "\nНапоминание перед ответом:\n"
+            f"{closing_instructions.strip()}\n"
+        )
+
     return f"""Ты — AI-ассистент для Product Owner, который отвечает по пользовательским документам.
 
 Твоя задача: дать короткий grounded-ответ на вопрос пользователя строго на основе предоставленного контекста.
@@ -699,7 +707,7 @@ def build_rag_prompt(
 Память диалога:
 
 {memory_text or "Память диалога не используется."}
-
+{closing}
 Вопрос пользователя:
 {question}
 """

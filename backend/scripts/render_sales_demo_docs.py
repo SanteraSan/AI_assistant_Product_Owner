@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Write sales markdown fixtures and merge synthetic=true into ingestion_manifest.json."""
+"""Register sales fixtures in ingestion_manifest.json.
+
+Markdown on disk is the source of truth. This script writes `spec.body` only
+when the target file is missing, so a later render cannot wipe edited demos.
+"""
 
 from __future__ import annotations
 
@@ -14,10 +18,18 @@ def main() -> None:
     raw_dir = repo_root / "data" / "raw"
     manifest_path = raw_dir / "ingestion_manifest.json"
 
+    written = 0
+    preserved = 0
     for spec in SALES_DOCUMENT_SPECS:
         target = raw_dir / spec.relative_path
         target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            preserved += 1
+            continue
+        if not spec.body.strip():
+            raise SystemExit(f"missing sales fixture body for {spec.relative_path}")
         target.write_text(spec.body.strip() + "\n", encoding="utf-8")
+        written += 1
 
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     documents = payload.get("documents")
@@ -40,7 +52,8 @@ def main() -> None:
         }
     payload["documents"] = list(by_path.values())
     manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"Wrote {len(SALES_DOCUMENT_SPECS)} sales documents")
+    print(f"Preserved {preserved} existing sales documents")
+    print(f"Wrote {written} new sales documents")
     print(f"Manifest entries: {len(payload['documents'])}")
 
 

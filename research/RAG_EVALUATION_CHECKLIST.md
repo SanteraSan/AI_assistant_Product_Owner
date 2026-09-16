@@ -58,7 +58,7 @@ E5.1 smoke (Kafka indexing): при `KAFKA_ENABLED=true` + worker upload/commit 
 
 Важно: автоматические `quality_flags` являются быстрыми эвристиками, а не заменой ручной оценки. Они помогают найти очевидные регрессии: пустой ответ, неправильный router intent, отсутствие expected source type или нарушение простого negative constraint.
 
-E2.1 (2026-09-16): этап C — `--suite sales-gold`. Ollama gold зелёный (`3abc0b52-…`). Gemini с текущего IP: skip `User location is not supported` → `external_provider_unavailable`, не failed. Live Gemini gold — DoD, когда AI Studio доступен.
+E2.1 (2026-09-16): `--suite sales-gold` на коротком корпусе закрыт. Ollama `3abc0b52-dc12-47d4-bfa4-44fdc8a090a5` 4/4; Gemini `073408bd-cc41-45bf-a43c-05a65f49ec6e` 4/4. Жирный корпус: Ollama gold `a6c47b20-2947-4f90-b003-168933017303` 4/4; catalog `ff6c4f43-f234-4275-96d2-e7d05092953f` 10/10; Gemini `e7af95dc-ace4-486c-8332-fa30f3beef40` 4/4. Geo-skip / 429 free-tier 20/day → `external_provider_unavailable` / `rate_limited`. OpenRouter live gold не гоняли.
 
 ## Sales Gold (E2.1 C)
 
@@ -70,6 +70,8 @@ E2.1 (2026-09-16): этап C — `--suite sales-gold`. Ollama gold зелёны
 4. `sales_gold_northwind_noleak` — в ответе нет 777000 / au-201; карточка Aurora не в sources/SQL isolation.
 
 Каталог: `--suite sales-catalog` (парафраз, aligned nw-101, draft, in-scope rebate, unknown code).
+
+Корпус после 2026-09-16: 22 markdown. Live на жирных файлах: Ollama gold `a6c47b20-…` 4/4, catalog `ff6c4f43-…` 10/10, Gemini gold `e7af95dc-…` 4/4. Ловушка au-207 закрыта closing reminder слоя `deal_card`, не ослаблением дат. Не принимать bare «ноябрь» как `2026-11-01`.
 
 ## Базовые Критерии
 

@@ -201,6 +201,80 @@ def test_sales_gold_flags_accept_russian_dates() -> None:
     assert flags["layer_attribution_ok"] is True
 
 
+def test_sales_gold_flags_accept_razlichny_and_short_november() -> None:
+    scenario = EvaluationScenario(
+        id="sales_gold_au207_dates",
+        name="Sales gold dates",
+        prompt="Сравни даты au-207.",
+        expected_card_value="2026-11-01",
+        expected_contract_value="2026-12-15",
+        expect_mismatch=True,
+        expect_layer_attribution=True,
+    )
+    flags = _build_quality_flags(
+        scenario,
+        {
+            "response": (
+                "В карточке ориентир 1 ноября, в договоре 15 декабря 2026. "
+                "Даты различны."
+            ),
+            "sources": [],
+        },
+    )
+    assert flags["card_value_present"] is True
+    assert flags["contract_value_present"] is True
+    assert flags["mismatch_flagged"] is True
+
+
+def test_sales_mismatch_flagged_accepts_razlichayutsya() -> None:
+    scenario = EvaluationScenario(
+        id="sales_gold_au207_dates",
+        name="Sales gold dates",
+        prompt="Сравни даты au-207.",
+        expected_card_value="2026-11-01",
+        expected_contract_value="2026-12-15",
+        expect_mismatch=True,
+    )
+    flags = _build_quality_flags(
+        scenario,
+        {
+            "response": (
+                "По карточке 1 ноября 2026 (2026-11-01), "
+                "по договору 15 декабря 2026 (2026-12-15). "
+                "Даты закрытия различаются в зависимости от слоя."
+            ),
+            "sources": [],
+        },
+    )
+    assert flags["mismatch_flagged"] is True
+
+
+def test_sales_mismatch_flagged_when_legal_date_does_not_change() -> None:
+    scenario = EvaluationScenario(
+        id="sales_gold_au207_dates",
+        name="Sales gold dates",
+        prompt="Сравни даты au-207.",
+        expected_card_value="2026-11-01",
+        expected_contract_value="2026-12-15",
+        expect_mismatch=True,
+        expect_layer_attribution=True,
+    )
+    flags = _build_quality_flags(
+        scenario,
+        {
+            "response": (
+                "карточка — 1 ноября 2026 (2026-11-01)\n"
+                "документ — 15 декабря 2026 (2026-12-15)\n"
+                "Ноябрьский ориентир не меняет официальный срок договора."
+            ),
+            "sources": [],
+        },
+    )
+    assert flags["both_values_present"] is True
+    assert flags["mismatch_flagged"] is True
+    assert flags["layer_attribution_ok"] is True
+
+
 def test_sales_noleak_accepts_grounded_refusal_wording() -> None:
     scenario = EvaluationScenario(
         id="sales_gold_northwind_noleak",
@@ -224,6 +298,42 @@ def test_sales_noleak_accepts_grounded_refusal_wording() -> None:
             "response": (
                 "Программы «Aurora Polar Rebate» в предоставленном контексте нет, "
                 "поэтому информацию о её существовании или сумме дать невозможно."
+            ),
+            "sources": [
+                {
+                    "source_type": "sales_note",
+                    "metadata": {"bucket_id": "sales_northwind"},
+                }
+            ],
+            "retrieval": {"prompt_isolation_bucket_ids": ["sales_northwind"]},
+        },
+    )
+    assert flags["response_has_required_marker_groups"] is True
+    assert flags["response_no_forbidden_fact"] is True
+
+
+def test_sales_noleak_accepts_otsutstvuet_wording() -> None:
+    scenario = EvaluationScenario(
+        id="sales_gold_northwind_noleak",
+        name="No leak",
+        prompt="Что такое Aurora Polar Rebate?",
+        required_marker_groups=(
+            (
+                "нет в контексте",
+                "контексте нет",
+                "отсутству",
+                "в них нет",
+            ),
+        ),
+        forbidden_response_markers=("777000", "au-201"),
+        forbidden_bucket_ids=("sales_aurora",),
+    )
+    flags = _build_quality_flags(
+        scenario,
+        {
+            "response": (
+                "На основе предоставленных фрагментов информации о программе "
+                "Aurora Polar Rebate в них нет. Программа отсутствует."
             ),
             "sources": [
                 {
@@ -278,3 +388,29 @@ def test_sales_noleak_rejects_aurora_amount() -> None:
     assert ok_flags["response_no_forbidden_fact"] is True
     assert ok_flags["sales_card_isolation_ok"] is True
     assert ok_flags["sales_sql_isolation_ok"] is True
+
+
+def test_sales_unknown_deal_accepts_v_nih_net_wording() -> None:
+    scenario = EvaluationScenario(
+        id="sales_catalog_unknown_deal",
+        name="Unknown deal",
+        prompt="Сравни сумму карточки и договора по xyz-000.",
+        required_marker_groups=(
+            (
+                "не найден",
+                "нет карточки",
+                "в них нет",
+                "в источниках нет",
+            ),
+        ),
+    )
+    flags = _build_quality_flags(
+        scenario,
+        {
+            "response": (
+                "договора или карточки с кодом сделки xyz-000 в них нет"
+            ),
+            "sources": [],
+        },
+    )
+    assert flags["response_has_required_marker_groups"] is True

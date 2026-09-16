@@ -295,6 +295,34 @@
         "cabinet": "aurora",
         "deal_code": "au-212"
       }
+    },
+    {
+      "path": "sales_northwind/nw-104-appendix.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_northwind",
+      "source_type": "sales_contract",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "northwind",
+        "deal_code": "nw-104"
+      }
+    },
+    {
+      "path": "sales_aurora/au-207-spec-table.md",
+      "tenant_id": "local_demo",
+      "bucket_id": "sales_aurora",
+      "source_type": "sales_contract",
+      "features": [
+        "sales"
+      ],
+      "metadata": {
+        "synthetic": true,
+        "cabinet": "aurora",
+        "deal_code": "au-207"
+      }
     }
   ]
 }

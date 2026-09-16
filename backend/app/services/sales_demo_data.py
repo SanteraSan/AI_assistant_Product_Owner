@@ -317,6 +317,8 @@ DEMO_DEAL_SPECS: tuple[DemoDealSpec, ...] = (
 )
 
 
+# Тела ниже — fallback, если файла ещё нет на диске.
+# Жирные markdown в data/raw/sales_* — источник истины; render их не затирает.
 SALES_DOCUMENT_SPECS: tuple[SalesDocumentSpec, ...] = (
     SalesDocumentSpec(
         "sales_northwind/northwind-overview.md",
@@ -373,6 +375,17 @@ SALES_DOCUMENT_SPECS: tuple[SalesDocumentSpec, ...] = (
 Плановая дата закрытия по договору: 20 октября 2026 (2026-10-20).
 
 Оплата: два этапа, без премий за досрочный запуск.
+""",
+        metadata={"cabinet": "northwind", "deal_code": "nw-104"},
+    ),
+    SalesDocumentSpec(
+        "sales_northwind/nw-104-appendix.md",
+        SALES_NORTHWIND_BUCKET_ID,
+        "sales_contract",
+        """# Приложение. Спецификация nw-104
+
+Итого по договору nw-104: 1180000 RUB.
+Строки соседних сделок в итог не входят.
 """,
         metadata={"cabinet": "northwind", "deal_code": "nw-104"},
     ),
@@ -507,6 +520,18 @@ SALES_DOCUMENT_SPECS: tuple[SalesDocumentSpec, ...] = (
 
 Клиент просит не стартовать внедрение до согласования витрины отчётов.
 Про перенос даты в этом письме решения нет — ориентир только договор.
+""",
+        metadata={"cabinet": "aurora", "deal_code": "au-207"},
+    ),
+    SalesDocumentSpec(
+        "sales_aurora/au-207-spec-table.md",
+        SALES_AURORA_BUCKET_ID,
+        "sales_contract",
+        """# Спецификация состава au-207
+
+Цена состава: 890000 RUB.
+Юридическая дата закрытия остаётся 15 декабря 2026 (2026-12-15) по договору.
+Настоящий файл дату не меняет.
 """,
         metadata={"cabinet": "aurora", "deal_code": "au-207"},
     ),

@@ -1795,7 +1795,7 @@ alembic upgrade head
 
 ## E2.1 Slice: ModelGateway (Ollama + Gemini/OpenRouter)
 
-Статус: **in progress** (этапы A–C в коде: gateway, SalesComposer, `--suite sales-gold`. Ollama gold зелёный. Live Gemini gold с текущего IP — skip `location not supported`; E2.1 done после успешного Gemini gold, не после skip).
+Статус: **done** (2026-09-16) — gateway + SalesComposer + `--suite sales-gold`. На **коротком** корпусе Ollama `3abc0b52-…` и Gemini `073408bd-…` оба 4/4. На **жирном** (22 md): Ollama gold `a6c47b20-…` **4/4**, catalog `ff6c4f43-…` **10/10**; Gemini fat-gold `e7af95dc-…` **4/4**. OpenRouter ключа нет. Geo/rate-limit skip остаётся валидным (free tier 20 req/day на `gemini-3.6-flash`).
 
 Generation для `/chat` и `/rag/chat` идёт через `ModelGateway`. Embeddings, vision digest и conversation summary остаются на Ollama.
 
@@ -1825,6 +1825,8 @@ Gold-путь — `/rag/chat` + `SalesComposer`, не agent. Если выбра
 
 `demo_deals` **не** входит в allowlist `execute_readonly_sql`. Agent по-прежнему ходит в `evaluation_runs` / `external_*`.
 
+Корпус сейчас **22 markdown** (11 Northwind + 11 Aurora), плюс 30 SQL-карточек. Жирные файлы в `data/raw/sales_*` — источник истины. `python -m scripts.render_sales_demo_docs` дописывает манифест и создаёт файл **только если его ещё нет**; повторный render короткие Python-fallback'и поверх демо не кладёт. `SalesComposer` для sales-бакетов делает второй поиск по `{deal_code} {title}`, предпочитает файлы спрошенной сделки и перед вопросом повторяет факты карточки (`closing_instructions`): пожелание/ориентир в договоре не заменяют слой `deal_card`.
+
 Поднять корпус (Postgres должен быть доступен). Из папки `backend`, через venv проекта — не системные `python`/`alembic`:
 
 ```bash
@@ -1853,3 +1855,5 @@ python -m scripts.run_rag_evaluation --suite sales-catalog --approach local_only
 ```
 
 Четыре gold: `nw-104` суммы, `au-207` даты, `nw-110` draft vs signed, no-leak `Aurora Polar Rebate` на Northwind (в ответе запрещён `777000`, не название программы — модель может честно сказать, что в контексте её нет). Skip по `model_unavailable` / нет ключа / `external_scope_not_synthetic` / `external_provider_unavailable` (в том числе Gemini `User location is not supported`) не делает `evaluation_status=failed`.
+
+Жирный корпус (2026-09-16): после closing reminder Ollama gold `a6c47b20-2947-4f90-b003-168933017303` — 4/4; catalog `ff6c4f43-f234-4275-96d2-e7d05092953f` — 10/10; Gemini fat-gold `e7af95dc-ace4-486c-8332-fa30f3beef40` — 4/4. Диагностика слоями: сначала retrieval, затем внимание (карточка vs «ориентир» в договоре). Bare «ноябрь» как золото карточки не принимаем. Free tier `gemini-3.6-flash`: 20 generate/day на проект; 429 — skip, не failed.

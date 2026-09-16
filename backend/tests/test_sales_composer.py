@@ -8,6 +8,7 @@ from app.services.sales_composer import (
     SalesComposer,
     build_deal_card_source,
     build_sales_prompt_preview,
+    prefer_deal_document_sources,
 )
 from app.services.sales_deal_code import DealIdentity, normalize_deal_code, resolve_deal_from_message
 from app.services.sales_deal_repository import DemoDealRecord
@@ -24,6 +25,46 @@ from app.services.sales_scope import (
     is_sales_rag_scope,
 )
 from app.services.llm.types import GenerationResult
+
+
+def test_prefer_deal_document_sources_keeps_matching_paths_first() -> None:
+    playbook = SourceChunk(
+        id="p",
+        source_type="sales_playbook",
+        source_path="sales_northwind/northwind-playbook.md",
+        content="rules",
+    )
+    other = SourceChunk(
+        id="o",
+        source_type="sales_contract",
+        source_path="sales_northwind/nw-101-contract.md",
+        content="320000",
+    )
+    contract = SourceChunk(
+        id="c",
+        source_type="sales_contract",
+        source_path="sales_northwind/nw-104-contract.md",
+        content="1180000",
+        metadata={"document_metadata": {"deal_code": "nw-104"}},
+    )
+    email = SourceChunk(
+        id="e",
+        source_type="sales_email",
+        source_path="sales_northwind/nw-104-email.md",
+        content="card",
+    )
+    ranked = prefer_deal_document_sources(
+        [playbook, other, contract, email],
+        "nw-104",
+        limit=3,
+    )
+    assert [item.id for item in ranked] == ["c", "e", "p"]
+    ranked_full = prefer_deal_document_sources(
+        [playbook, other, contract, email],
+        "nw-104",
+        limit=8,
+    )
+    assert "o" not in [item.id for item in ranked_full]
 
 
 def test_normalize_deal_code_collapses_separators() -> None:
@@ -110,6 +151,51 @@ def test_format_close_date_keeps_iso_and_russian_month() -> None:
     assert source.source_type == "deal_card"
     assert source.metadata["synthetic"] is True
     assert "20 октября 2026 (2026-10-20)" in source.content
+    assert "Пожелание или ориентир в договоре эти факты не заменяют" in source.content
+
+
+def test_sales_prompt_repeats_card_facts_after_context() -> None:
+    deal = DemoDealRecord(
+        tenant_id="local_demo",
+        bucket_id=SALES_AURORA_BUCKET_ID,
+        deal_code="au-207",
+        title="Storefront analytics pack",
+        amount=890_000,
+        currency="RUB",
+        status="proposed",
+        close_date=date(2026, 11, 1),
+        owner="Igor Smirnov",
+    )
+    contract = SourceChunk(
+        id="c1",
+        title="au-207 contract",
+        source_type="sales_contract",
+        source_path="sales_aurora/au-207-contract.md",
+        feature=["sales"],
+        content=(
+            "Юридическая дата закрытия: 15 декабря 2026 (2026-12-15). "
+            "Пожелание заказчика — ориентир ноября. Это не дата карточки."
+        ),
+        metadata={"synthetic": True},
+    )
+    prompt = build_sales_prompt_preview(
+        question="Сравни дату закрытия в карточке и в договоре по au-207.",
+        deal=deal,
+        document_sources=[contract],
+    )
+    reminder_at = prompt.find("Напоминание перед ответом:")
+    question_at = prompt.find("Вопрос пользователя:")
+    context_at = prompt.find("Контекст:")
+    assert context_at != -1
+    assert reminder_at != -1
+    assert question_at != -1
+    assert context_at < reminder_at < question_at
+    reminder = prompt[reminder_at:question_at]
+    assert "1 ноября 2026 (2026-11-01)" in reminder
+    assert "дословно" in reminder
+    assert "слои различны" in reminder
+    assert "ориентир ноября" in prompt
+    assert "не являются значениями карточки" in prompt
 
 
 @pytest.mark.anyio
@@ -149,6 +235,7 @@ async def test_composer_search_stays_in_selected_sales_bucket() -> None:
 
     class _Rag:
         async def search(self, **kwargs):
+            captured.setdefault("searches", []).append(kwargs)
             captured["search_kwargs"] = kwargs
             return RagSearchResult(
                 sources=[
@@ -192,6 +279,11 @@ async def test_composer_search_stays_in_selected_sales_bucket() -> None:
         bucket_ids=[SALES_NORTHWIND_BUCKET_ID],
         approach="local_only",
     )
+    searches = captured["searches"]
+    assert isinstance(searches, list) and len(searches) == 2
+    assert searches[0]["top_k"] == 16
+    assert searches[1]["top_k"] == 8
+    assert "nw-104" in str(searches[1]["query"])
     search_kwargs = captured["search_kwargs"]
     assert search_kwargs["bucket_ids"] == [SALES_NORTHWIND_BUCKET_ID]
     assert search_kwargs["features"] == SALES_RETRIEVAL_FEATURES
@@ -201,5 +293,12 @@ async def test_composer_search_stays_in_selected_sales_bucket() -> None:
     assert SALES_AURORA_BUCKET_ID not in str(captured["prompt"])
     for marker in AURORA_LEAK_MARKERS:
         assert marker not in str(captured["prompt"])
+    assert "source_type=deal_card" in str(captured["prompt"])
+    assert "1250000" in str(captured["prompt"])
+    assert "Слой карточки nw-104" in str(captured["prompt"])
+    assert "Напоминание перед ответом:" in str(captured["prompt"])
+    assert "20 октября 2026 (2026-10-20)" in str(captured["prompt"])
+    assert search_kwargs["max_sources_per_title"] == 2
+    assert search_kwargs["max_sources_per_source_path"] == 2
     assert response.retrieval["mode"] == "sales_composer"
     assert response.sources[0].source_type == "deal_card"

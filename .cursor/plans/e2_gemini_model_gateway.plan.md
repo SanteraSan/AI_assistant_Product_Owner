@@ -2,7 +2,7 @@
 
 ## Status
 
-**In progress (2026-09-16)** — этапы A–C в коде. Ollama sales-gold зелёный. Gemini gold с текущего IP skip (`User location is not supported`). Live успешный Gemini gold — оставшийся DoD E2.1. Историческая пометка «Blocked VPN» ниже сохранена как контекст июля 2026.
+**Done (2026-09-16)** — этапы A–C. Короткий корпус: Ollama `3abc0b52-…` и Gemini `073408bd-…` 4/4. Жирный корпус (22 md): Ollama gold `a6c47b20-…` 4/4, catalog `ff6c4f43-…` 10/10, Gemini `e7af95dc-…` 4/4. OpenRouter optional, ключа нет. Историческая пометка «Blocked VPN» ниже сохранена как контекст июля 2026.
 
 **Blocked** 2026-07-14 — VPN / external Gemini API unreachable. Kickoff decisions below remain valid. Do **not** implement an empty ModelGateway stub while blocked. Resume E2.1 when Google AI Studio is reachable. Meanwhile proceed with **E3** (tools/agents).
 
