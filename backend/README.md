@@ -1577,7 +1577,7 @@ docker compose --profile observability up -d
 ```
 
 - scrape: `host.docker.internal:8000/8002` (локальный uvicorn/worker) и `backend-api` / `indexing-worker` (profile `deploy`);
-- dashboard: **TaskFlow Overview** (HTTP, RAG, Agent, indexing);
+- dashboard: **TaskFlow Overview** — накопленные счётчики по времени с момента старта процесса, не скорость за 5 минут. Перезапуск uvicorn обнуляет линии. Панели Agent пустые, пока в этом процессе не было agent-запроса;
 - в product UI кнопка **Observability** только для роли `admin` → открывает Grafana (`VITE_GRAFANA_URL`, default `http://localhost:3000`).
 
 Profile `observability` также входит в `deploy`. Product charts во внутреннем UI — later.

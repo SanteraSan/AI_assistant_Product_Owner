@@ -375,6 +375,12 @@ export function ChatPage() {
     sendRagMessageMutation.isPending || sendAgentMessageMutation.isPending
 
   useEffect(() => {
+    if (!isAuthenticated && activeView === 'buckets') {
+      openChat()
+    }
+  }, [activeView, isAuthenticated, openChat])
+
+  useEffect(() => {
     if (chatSessionsQuery.data?.length) {
       setThreads(chatSessionsQuery.data)
     }
@@ -675,7 +681,7 @@ export function ChatPage() {
       <section className="flex min-w-0 flex-1 flex-col">
         <TopBar
           activeBucketId={selectedBucketId}
-          activeView={activeView}
+          activeView={isAuthenticated ? activeView : 'chat'}
           buckets={buckets}
           grafanaUrl={GRAFANA_URL}
           models={approachModels}
@@ -684,7 +690,7 @@ export function ChatPage() {
           onChangeBucket={handleChangeBucket}
           onChangeModel={handleChangeModel}
           onChangeView={(view) => {
-            if (view === 'chat') {
+            if (view === 'chat' || !isAuthenticated) {
               openChat()
               return
             }
@@ -701,7 +707,7 @@ export function ChatPage() {
           user={currentUser}
         />
 
-        {activeView === 'chat' ? (
+        {activeView === 'chat' || !isAuthenticated ? (
           <ChatWorkspace
             activeBucket={activeBucket}
             approach={selectedApproach}

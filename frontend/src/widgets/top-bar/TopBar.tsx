@@ -62,7 +62,9 @@ export function TopBar({
           Чат
         </Button>
         <Button
+          disabled={!user}
           onClick={() => onChangeView('buckets')}
+          title={user ? 'База знаний' : 'Войдите, чтобы открыть базу знаний'}
           variant={activeView === 'buckets' ? 'primary' : 'secondary'}
         >
           База знаний

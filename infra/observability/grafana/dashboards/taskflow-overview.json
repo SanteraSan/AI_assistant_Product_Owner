@@ -1,6 +1,7 @@
 {
   "annotations": { "list": [] },
   "editable": true,
+  "description": "Накопленные счётчики с момента старта процесса API, по оси времени. Перезапуск uvicorn обнуляет линии. Это не скорость за последние 5 минут.",
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
@@ -8,23 +9,89 @@
   "panels": [
     {
       "type": "row",
-      "title": "HTTP",
+      "title": "Сейчас",
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
       "id": 1
     },
     {
+      "id": 13,
+      "title": "HTTP requests",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
+      "targets": [
+        {
+          "expr": "sum(taskflow_http_requests_total)",
+          "legendFormat": "total",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "RAG requests",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
+      "targets": [
+        {
+          "expr": "sum(taskflow_rag_requests_total)",
+          "legendFormat": "total",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Agent requests",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
+      "targets": [
+        {
+          "expr": "sum(taskflow_agent_requests_total)",
+          "legendFormat": "total",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Indexing jobs",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" },
+      "targets": [
+        {
+          "expr": "sum by (result) (taskflow_indexing_jobs_total)",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "HTTP",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 16
+    },
+    {
       "id": 2,
-      "title": "HTTP request rate",
+      "title": "HTTP requests, cumulative",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
-        "defaults": { "unit": "reqps" },
+        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "spanNulls": true } },
         "overrides": []
       },
       "targets": [
         {
-          "expr": "sum by (path, status) (rate(taskflow_http_requests_total[5m]))",
+          "expr": "sum by (path, status) (taskflow_http_requests_total)",
           "legendFormat": "{{path}} {{status}}",
           "refId": "A"
         }
@@ -32,17 +99,17 @@
     },
     {
       "id": 3,
-      "title": "HTTP p95 latency",
+      "title": "HTTP p95, since process start",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
-        "defaults": { "unit": "s" },
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "spanNulls": true } },
         "overrides": []
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, path) (rate(taskflow_http_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, path) (taskflow_http_request_duration_seconds_bucket))",
           "legendFormat": "{{path}}",
           "refId": "A"
         }
@@ -51,18 +118,22 @@
     {
       "type": "row",
       "title": "RAG / Agent",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
       "id": 4
     },
     {
       "id": 5,
-      "title": "RAG requests by outcome",
+      "title": "RAG requests, cumulative",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 15 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "spanNulls": true } },
+        "overrides": []
+      },
       "targets": [
         {
-          "expr": "sum by (outcome) (rate(taskflow_rag_requests_total[5m]))",
+          "expr": "sum by (outcome) (taskflow_rag_requests_total)",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
@@ -70,13 +141,17 @@
     },
     {
       "id": 6,
-      "title": "Agent requests by outcome + agent_runtime",
+      "title": "Agent requests, cumulative",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 15 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "spanNulls": true } },
+        "overrides": []
+      },
       "targets": [
         {
-          "expr": "sum by (outcome, agent_runtime) (rate(taskflow_agent_requests_total[5m]))",
+          "expr": "sum by (outcome, agent_runtime) (taskflow_agent_requests_total)",
           "legendFormat": "{{agent_runtime}} / {{outcome}}",
           "refId": "A"
         }
@@ -84,17 +159,17 @@
     },
     {
       "id": 7,
-      "title": "RAG p95 latency",
+      "title": "RAG p95, since process start",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 15 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
-        "defaults": { "unit": "s" },
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "spanNulls": true } },
         "overrides": []
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(taskflow_rag_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, outcome) (taskflow_rag_request_duration_seconds_bucket))",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
@@ -102,17 +177,17 @@
     },
     {
       "id": 11,
-      "title": "Agent requests by agent_runtime",
+      "title": "Agent requests by runtime, cumulative",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
-        "defaults": { "unit": "reqps" },
+        "defaults": { "custom": { "drawStyle": "line", "spanNulls": true } },
         "overrides": []
       },
       "targets": [
         {
-          "expr": "sum by (agent_runtime) (rate(taskflow_agent_requests_total[5m]))",
+          "expr": "sum by (agent_runtime) (taskflow_agent_requests_total)",
           "legendFormat": "{{agent_runtime}}",
           "refId": "A"
         }
@@ -120,17 +195,17 @@
     },
     {
       "id": 12,
-      "title": "Agent p95 latency by agent_runtime",
+      "title": "Agent p95 by runtime, since process start",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
-        "defaults": { "unit": "s" },
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "spanNulls": true } },
         "overrides": []
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, agent_runtime) (rate(taskflow_agent_request_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, agent_runtime) (taskflow_agent_request_duration_seconds_bucket))",
           "legendFormat": "{{agent_runtime}}",
           "refId": "A"
         }
@@ -139,30 +214,19 @@
     {
       "type": "row",
       "title": "Indexing",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 },
       "id": 8
     },
     {
       "id": 9,
-      "title": "Indexing jobs by result",
+      "title": "Indexing jobs, cumulative",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [
-        {
-          "expr": "sum by (result) (rate(taskflow_indexing_jobs_total[5m]))",
-          "legendFormat": "{{result}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 10,
-      "title": "Indexing jobs total (counter)",
-      "type": "stat",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 27 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "spanNulls": true } },
+        "overrides": []
+      },
       "targets": [
         {
           "expr": "sum by (result) (taskflow_indexing_jobs_total)",
