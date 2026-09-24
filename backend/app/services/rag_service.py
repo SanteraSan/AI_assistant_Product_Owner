@@ -9,6 +9,7 @@ from app.services.external_scope import (
     sources_include_non_synthetic,
 )
 from app.services.feature_extractor import FeatureExtractor
+from app.services.hh_resume_sections import prefer_named_resume_employer
 from app.services.llm.gateway import ModelGateway
 from app.services.ollama_client import OllamaClient
 from app.services.query_router import QueryRouter
@@ -131,6 +132,7 @@ class RagService:
                 routing_hints=routing_decision.hints,
             )
         )
+        sources = prefer_named_resume_employer(query, sources)
         sources = _apply_source_diversity(
             sources,
             max_sources_per_title=max_sources_per_title if max_sources_per_title is not None else 1,
@@ -655,6 +657,11 @@ def build_rag_prompt(
             "- Пиши кратко и по делу: обычно 3–6 предложений или короткий список.",
             "- Не пиши длинные эссе, вступления и повторения.",
             "- Не выдумывай факты, которых нет в контексте.",
+            (
+                "- Если вопрос про стек или технологии конкретного работодателя, "
+                "бери их только из фрагмента, где названа эта организация. "
+                "Блоки «Навыки», «Обо мне» и другие места работы не подмешивай."
+            ),
             (
                 "- Если в контексте есть релевантный фрагмент, ответь по нему, "
                 "даже если документ не относится к продукту TaskFlow AI."

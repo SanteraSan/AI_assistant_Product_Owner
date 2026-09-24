@@ -11,6 +11,7 @@ from app.services.image_digest_service import build_targeted_image_digest
 from app.services.object_storage import ObjectStorage, display_name_from_ref
 from app.services.ollama_client import OllamaClient
 from app.services.requested_file_scope import find_accessible_document_by_name
+from app.services.sticky_document_scope import confine_document_ids
 from app.services.tools.base import (
     ToolContext,
     ToolResult,
@@ -21,6 +22,20 @@ from app.services.tools.base import (
 )
 
 IMAGE_SOURCE_TYPES = {"png", "jpg", "jpeg", "webp", "gif"}
+
+
+def _chat_document_ids(extras: dict[str, object]) -> list[str]:
+    document_ids = extras.get("chat_document_ids")
+    if not isinstance(document_ids, list):
+        return []
+    return [item.strip() for item in document_ids if isinstance(item, str) and item.strip()]
+
+
+def _scope_document_ids(extras: dict[str, object]) -> list[str]:
+    document_ids = extras.get("document_ids")
+    if not isinstance(document_ids, list):
+        return []
+    return [item.strip() for item in document_ids if isinstance(item, str) and item.strip()]
 
 
 class AnalyzeImageArgs(BaseModel):
@@ -71,6 +86,21 @@ class AnalyzeImageTool:
             )
 
         document = await self._resolve_document(ctx=ctx, args=args)
+        scope_ids = _scope_document_ids(ctx.extras)
+        chat_ids = _chat_document_ids(ctx.extras)
+        allowed_ids = confine_document_ids(
+            [document.id] if document is not None else [],
+            scope_ids,
+            chat_ids,
+        )
+        if document is not None and (scope_ids or chat_ids) and document.id not in set(allowed_ids):
+            return tool_denied(
+                error_code="outside_active_file",
+                error_message=(
+                    "Этот файл не в текущей области чата. "
+                    "Ответ остаётся на активном файле, пока в вопросе не назван другой."
+                ),
+            )
         if document is None:
             return tool_denied(
                 error_code="image_document_not_found",
@@ -83,8 +113,10 @@ class AnalyzeImageTool:
             return tool_invalid(
                 error_code="not_an_image",
                 error_message=(
-                    f"Document '{document.file_name}' source_type="
-                    f"'{document.source_type}' is not an image."
+                    f"Файл '{document.file_name}' не изображение "
+                    f"(source_type={document.source_type}). "
+                    "Прочитай его текстом через rag_search с этим document_id "
+                    "и ответь по содержимому. Не останавливайся на отказе от vision."
                 ),
             )
         if not document.source_path or not self._object_storage.exists(document.source_path):
@@ -160,11 +192,7 @@ class AnalyzeImageTool:
                 documents=available,
             )
 
-        scoped_ids = [
-            item.strip()
-            for item in (ctx.extras.get("document_ids") or [])
-            if isinstance(item, str) and item.strip()
-        ]
+        scoped_ids = _scope_document_ids(ctx.extras)
         if len(scoped_ids) == 1:
             return await self._bucket_service.get_document(
                 user=ctx.user,

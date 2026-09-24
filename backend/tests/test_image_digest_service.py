@@ -6,7 +6,7 @@ from openpyxl.drawing.image import Image as ExcelImage
 from PIL import Image, ImageDraw
 
 from app.services import document_loader
-from app.services.image_digest_service import load_image_digest_documents
+from app.services.image_digest_service import IMAGE_DIGEST_PROMPT, load_image_digest_documents
 
 
 class _FakeOllamaClient:
@@ -16,6 +16,13 @@ class _FakeOllamaClient:
     async def generate(self, **kwargs):
         self.generate_kwargs = kwargs
         return {"response": "На изображении видна надпись UFA и человек рядом."}
+
+
+def test_image_digest_prompt_keeps_table_and_prose_branches() -> None:
+    assert "markdown-таблицей" in IMAGE_DIGEST_PROMPT
+    assert "одной компактной" in IMAGE_DIGEST_PROMPT
+    assert "3-8 предложениях" in IMAGE_DIGEST_PROMPT
+    assert "Если это фото без таблицы" in IMAGE_DIGEST_PROMPT
 
 
 def test_load_image_digest_documents_builds_digest_metadata(tmp_path: Path) -> None:

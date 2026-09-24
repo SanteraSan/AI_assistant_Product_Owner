@@ -20,6 +20,7 @@ from app.services.agent.orchestrator import (
     _build_agent_prompt,
     _collect_sources,
     _latency_ms,
+    _tool_specs_for_scope,
 )
 from app.services.agent.tool_loop import parse_tool_loop_response
 from app.services.ollama_client import OllamaClient
@@ -155,7 +156,10 @@ class LangGraphAgentAdapter:
             )
 
         prompt = _build_agent_prompt(
-            tool_specs=self._tool_registry.list_specs(),
+            tool_specs=_tool_specs_for_scope(
+                self._tool_registry,
+                state.get("retrieval_scope"),
+            ),
             memory_context=state.get("memory_context"),
             retrieval_scope=state.get("retrieval_scope"),
             transcript=transcript,
@@ -167,7 +171,10 @@ class LangGraphAgentAdapter:
             options={"temperature": 0.1, "top_p": 0.9},
         )
         response_text = str(raw.get("response") or "").strip()
-        parsed = parse_tool_loop_response(response_text)
+        parsed = parse_tool_loop_response(
+            response_text,
+            tool_names=set(self._tool_registry.names()),
+        )
 
         if parsed.error and not parsed.tool_calls and not parsed.final_answer:
             if step >= max_steps:

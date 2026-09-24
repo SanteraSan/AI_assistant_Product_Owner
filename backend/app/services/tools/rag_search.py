@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 from app.services.bucket_service import BucketService
 from app.services.rag_scope import resolve_rag_document_ids
+from app.services.sticky_document_scope import confine_document_ids
+from app.services.hh_resume_sections import resume_excerpt
 from app.services.rag_service import RagService
 from app.services.tools.base import ToolContext, ToolResult, tool_ok
 
@@ -40,7 +42,11 @@ class RagSearchTool:
 
     async def run(self, ctx: ToolContext, args: RagSearchArgs) -> ToolResult:
         bucket_ids = list(args.bucket_ids) or _scope_bucket_ids(ctx.extras)
-        document_ids = list(args.document_ids) or _scope_document_ids(ctx.extras)
+        document_ids = confine_document_ids(
+            list(args.document_ids),
+            _scope_document_ids(ctx.extras),
+            _chat_document_ids(ctx.extras),
+        )
 
         bucket_documents = []
         for bucket_id in bucket_ids:
@@ -96,7 +102,11 @@ class RagSearchTool:
                 "source_type": source.source_type,
                 "source_path": source.source_path,
                 "feature": source.feature,
-                "content": source.content[: self._content_excerpt_limit],
+                "content": resume_excerpt(
+                    source.content,
+                    section_kind=_resume_section_kind(source.metadata),
+                    limit=self._content_excerpt_limit,
+                ),
                 "document_id": source.metadata.get("document_id"),
             }
             for source in search.sources
@@ -113,6 +123,13 @@ class RagSearchTool:
         )
 
 
+def _resume_section_kind(metadata: dict[str, Any]) -> str:
+    nested = metadata.get("document_metadata")
+    if isinstance(nested, dict):
+        return str(nested.get("resume_section") or "")
+    return str(metadata.get("resume_section") or "")
+
+
 def _scope_bucket_ids(extras: dict[str, Any]) -> list[str]:
     bucket_ids = extras.get("bucket_ids")
     cleaned: list[str] = []
@@ -124,6 +141,13 @@ def _scope_bucket_ids(extras: dict[str, Any]) -> list[str]:
     if isinstance(active, str) and active.strip():
         return [active.strip()]
     return []
+
+
+def _chat_document_ids(extras: dict[str, Any]) -> list[str]:
+    document_ids = extras.get("chat_document_ids")
+    if not isinstance(document_ids, list):
+        return []
+    return [item.strip() for item in document_ids if isinstance(item, str) and item.strip()]
 
 
 def _scope_document_ids(extras: dict[str, Any]) -> list[str]:

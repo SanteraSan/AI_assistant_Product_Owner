@@ -129,6 +129,7 @@ class AgentChatRequest(BaseModel):
     tenant_id: str | None = Field(default=None, min_length=1)
     bucket_ids: list[str] = Field(default_factory=list)
     document_ids: list[str] = Field(default_factory=list)
+    chat_document_ids: list[str] = Field(default_factory=list)
 
 
 class AgentChatResponse(ChatResponse):

@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.services.document_loader import RawDocument
+from app.services.hh_resume_sections import resume_embedding_parts
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,15 @@ def chunk_documents(
 ) -> list[DocumentChunk]:
     chunks: list[DocumentChunk] = []
     for document in documents:
-        parts = _split_text(document.content, max_chars=max_chars, overlap_chars=overlap_chars)
+        section_kind = str(document.metadata.get("resume_section") or "")
+        if section_kind:
+            parts = resume_embedding_parts(
+                document.content,
+                section_kind=section_kind,
+                organization=str(document.metadata.get("organization") or ""),
+            )
+        else:
+            parts = _split_text(document.content, max_chars=max_chars, overlap_chars=overlap_chars)
         for index, part in enumerate(parts):
             chunks.append(
                 DocumentChunk(

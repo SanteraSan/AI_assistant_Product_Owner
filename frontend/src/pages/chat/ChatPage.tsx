@@ -489,7 +489,7 @@ export function ChatPage() {
     }
     const attachmentDocumentIds = indexedAttachmentDocumentIds()
     if (attachmentDocumentIds.length) {
-      return { bucketIds: [], documentIds: attachmentDocumentIds }
+      return { bucketIds: [], documentIds: [attachmentDocumentIds[attachmentDocumentIds.length - 1]] }
     }
     if (asksAllAvailableDocuments(message) || !selectedBucketId) {
       return { bucketIds: [], documentIds: indexedAvailableDocumentIds() }

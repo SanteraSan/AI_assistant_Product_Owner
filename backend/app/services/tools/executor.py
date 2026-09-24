@@ -17,6 +17,7 @@ from app.services.tools.base import (
     tool_failed,
     tool_invalid,
 )
+from app.services.sticky_document_scope import FILE_SCOPED_SQL_TOOLS, sql_blocked_by_active_file
 from app.services.tools.permissions import can_invoke_tool, required_roles_for
 from app.services.tools.registry import ToolRegistry
 
@@ -57,6 +58,25 @@ class ToolExecutor:
             result = tool_invalid(
                 error_code="unknown_tool",
                 error_message=f"Unknown tool: {name}",
+            )
+            return await self._finish(
+                call_id=call_id,
+                name=name,
+                arguments=args,
+                user=user,
+                request_id=request_id,
+                result=result,
+                started=started,
+            )
+
+        if name in FILE_SCOPED_SQL_TOOLS and sql_blocked_by_active_file(extras):
+            result = tool_denied(
+                error_code="sql_blocked_by_active_file",
+                error_message=(
+                    "В этом ходе активен файл. SQL к аналитической схеме не вызывается. "
+                    "Ищи ответ через rag_search или analyze_image. "
+                    "Если факта в файле нет, так и скажи, без других документов."
+                ),
             )
             return await self._finish(
                 call_id=call_id,

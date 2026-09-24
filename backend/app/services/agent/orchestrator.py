@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from app.services.access_policy import UserContext
 from app.services.agent.tool_loop import parse_tool_loop_response
+from app.services.sticky_document_scope import FILE_SCOPED_SQL_TOOLS, sql_blocked_by_active_file
 from app.services.ollama_client import OllamaClient
 from app.services.tools.executor import ToolExecutor
 from app.services.tools.registry import ToolRegistry
@@ -60,7 +61,7 @@ class AgentOrchestrator:
 
         for step in range(1, self._max_steps + 1):
             prompt = _build_agent_prompt(
-                tool_specs=self._tool_registry.list_specs(),
+                tool_specs=_tool_specs_for_scope(self._tool_registry, retrieval_scope),
                 memory_context=memory_context,
                 retrieval_scope=retrieval_scope,
                 transcript=transcript,
@@ -72,7 +73,10 @@ class AgentOrchestrator:
                 options={"temperature": 0.1, "top_p": 0.9},
             )
             response_text = str(raw.get("response") or "").strip()
-            parsed = parse_tool_loop_response(response_text)
+            parsed = parse_tool_loop_response(
+                response_text,
+                tool_names=set(self._tool_registry.names()),
+            )
 
             if parsed.error and not parsed.tool_calls and not parsed.final_answer:
                 # Repair pass: treat plain text as final answer on last step.
@@ -189,7 +193,8 @@ def _build_agent_prompt(
 - Чтобы закончить: {{"final_answer":"...","tool_calls":[]}}
 - Не совмещай tool_calls и final_answer в одном ответе: сначала tools, потом отдельный final_answer строкой.
 - final_answer — непустая строка для пользователя (не [] и не JSON-массив).
-- Evidence только из tool results (особенно rag_search / analyze_image / SQL). Memory — не evidence.
+- Evidence только из tool results (rag_search / analyze_image, а SQL только если его нет в списке tools). Memory — не evidence.
+- Если в списке tools нет text_to_sql и execute_readonly_sql, не вызывай их: ход ограничен активным файлом.
 - Не выдумывай документы, SQL-результаты или содержимое картинок.
 - Если tool вернул denied/invalid_input — объясни ограничение или попробуй другой tool.
 - Вопросы про список файлов в бакете: list_bucket_documents (не list_buckets).
@@ -197,7 +202,9 @@ def _build_agent_prompt(
 - Вопросы про статус/доступность файла по имени (moto.jpg, AGENTS.md): вызывай
   get_document_status с arguments.file_name. Не проси UUID, если имя файла уже известно.
 - document_id передавай только когда пользователь дал UUID.
-- Если UI scope задаёт bucket_ids/document_ids — используй их (или оставь пустыми, tools подставят scope).
+- Сначала ищи в активном файле: не передавай document_ids, tools возьмут document_ids из scope. Если факта там нет и в scope есть chat_document_ids, вызови rag_search ещё раз с document_id того файла этого чата, о котором речь уже шла в диалоге. Id вне chat_document_ids не подставляй.
+- «Что ты видишь / что в файле» для pdf, docx и txt — это rag_search, не analyze_image. analyze_image только для png/jpg/jpeg. Если analyze_image сказал, что файл не изображение, сразу читай его через rag_search.
+- Если вопрос про стек или технологии конкретного работодателя, бери их только из фрагмента с названием этой организации. Блоки «Навыки», «Обо мне» и другие места работы не подмешивай.
 
 Доступные tools:
 {tools_json}
@@ -206,6 +213,16 @@ def _build_agent_prompt(
 {transcript_text}
 
 JSON:"""
+
+
+def _tool_specs_for_scope(
+    registry: ToolRegistry,
+    retrieval_scope: dict[str, object] | None,
+) -> list[dict[str, Any]]:
+    specs = registry.list_specs()
+    if not sql_blocked_by_active_file(retrieval_scope):
+        return specs
+    return [spec for spec in specs if spec.get("name") not in FILE_SCOPED_SQL_TOOLS]
 
 
 def _collect_sources(data: dict[str, Any] | None, sink: list[dict[str, Any]]) -> None:

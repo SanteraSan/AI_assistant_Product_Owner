@@ -66,6 +66,7 @@ from app.services.ollama_client import OllamaClient
 from app.services.ollama_load_guard import OllamaLoadGuard, OllamaOverloadedError
 from app.services.query_router import QueryRouter
 from app.services.rag_scope import resolve_rag_document_ids
+from app.services.sticky_document_scope import resolve_sticky_document_scope
 from app.services.requested_file_scope import (
     looks_like_file_inventory_question,
     missing_requested_file_answer,
@@ -653,6 +654,13 @@ async def rag_chat(
         started_at = perf_counter()
         outcome = "error"
         effective_bucket_ids = _effective_bucket_ids(payload)
+        document_ids, _chat_document_ids = await _document_ids_for_turn(
+            user=user,
+            session_id=payload.session_id,
+            message=payload.message,
+            requested_document_ids=payload.document_ids,
+        )
+        payload = payload.model_copy(update={"document_ids": document_ids})
         bucket_documents = await _bucket_documents_for_context(
             user=user,
             bucket_ids=effective_bucket_ids,
@@ -711,6 +719,7 @@ async def rag_chat(
                     document_ids=scoped_document_ids,
                     bucket_ids=effective_bucket_ids,
                     bucket_documents=bucket_documents,
+                    source_paths=payload.source_paths,
                 )
                 session_seen = await _session_seen_non_synthetic_flag(
                     user=user,
@@ -1049,6 +1058,51 @@ def _conversation_context_error(*, message: str) -> dict[str, object]:
     }
 
 
+async def _document_ids_for_turn(
+    *,
+    user: UserContext,
+    session_id: str | None,
+    message: str,
+    requested_document_ids: list[str],
+) -> tuple[list[str], list[str]]:
+    metadata = await chat_history_service.get_session_metadata(
+        tenant_id=user.tenant_id,
+        user_id=user.user_id,
+        session_id=session_id,
+    )
+    attached = metadata.get("attached_document_ids")
+    attached_document_ids = [
+        item.strip()
+        for item in attached
+        if isinstance(item, str) and item.strip()
+    ] if isinstance(attached, list) else []
+    active = metadata.get("active_document_id")
+    active_document_id = active.strip() if isinstance(active, str) else None
+    documents = await bucket_service.list_available_documents(user=user)
+    scope = resolve_sticky_document_scope(
+        message=message,
+        requested_document_ids=requested_document_ids,
+        attached_document_ids=attached_document_ids,
+        active_document_id=active_document_id,
+        documents=documents,
+    )
+    if (
+        scope.narrowed
+        and session_id
+        and scope.active_document_id
+        and scope.active_document_id != active_document_id
+    ):
+        await chat_history_service.update_session(
+            tenant_id=user.tenant_id,
+            user_id=user.user_id,
+            session_id=session_id,
+            metadata={"active_document_id": scope.active_document_id},
+        )
+    if scope.narrowed:
+        return scope.document_ids, attached_document_ids
+    return requested_document_ids, attached_document_ids
+
+
 def _effective_bucket_ids(payload: RagChatRequest) -> list[str]:
     values = [*payload.bucket_ids]
     if payload.active_bucket_id:
@@ -1182,6 +1236,7 @@ async def _build_targeted_image_sources(
     document_ids: list[str],
     bucket_ids: list[str],
     bucket_documents: list[DocumentAsset],
+    source_paths: list[str] | None = None,
 ) -> list[SourceChunk]:
     if not settings.image_vision_enabled or not settings.image_vision_model.strip():
         return []
@@ -1194,6 +1249,7 @@ async def _build_targeted_image_sources(
         bucket_ids=bucket_ids,
         bucket_documents=bucket_documents,
     )
+    documents = _limit_targeted_image_documents(documents, source_paths or [])
     if not documents:
         return []
 
@@ -1242,6 +1298,21 @@ async def _targeted_image_documents(
             documents.append((document, bucket_id))
             seen.add(document.id)
     return documents
+
+
+def _limit_targeted_image_documents(
+    documents: list[tuple[DocumentAsset, str]],
+    source_paths: list[str],
+) -> list[tuple[DocumentAsset, str]]:
+    """An explicit source_path pin must not be replaced by other bucket images."""
+    pinned = {path.strip() for path in source_paths if path and path.strip()}
+    if not pinned:
+        return documents
+    return [
+        item
+        for item in documents
+        if (item[0].source_path or "").strip() in pinned
+    ]
 
 
 async def _build_targeted_image_source(
@@ -1391,13 +1462,40 @@ def _looks_like_targeted_image_reanalysis(message: str) -> bool:
         "image",
         "photo",
     )
+    has_visual_attribute = _contains_visual_attribute(normalized, visual_attribute_markers)
     return (
         any(marker in normalized for marker in reanalysis_markers)
         and (
-            any(marker in normalized for marker in visual_attribute_markers)
+            has_visual_attribute
             or any(marker in normalized for marker in image_markers)
         )
-    ) or any(marker in normalized for marker in visual_attribute_markers)
+    ) or has_visual_attribute
+
+
+def _contains_visual_attribute(normalized: str, markers: tuple[str, ...]) -> bool:
+    for marker in markers:
+        if marker == "материал":
+            if _contains_material_attribute(normalized):
+                return True
+            continue
+        if marker in normalized:
+            return True
+    return False
+
+
+def _contains_material_attribute(normalized: str) -> bool:
+    """Visual 'what material', not the supplies stem in «покупки материалов»."""
+    start = 0
+    needle = "материал"
+    while True:
+        index = normalized.find(needle, start)
+        if index < 0:
+            return False
+        end = index + len(needle)
+        if normalized.startswith("ов", end):
+            start = end
+            continue
+        return True
 
 
 def _is_indexed_image_document(document: DocumentAsset) -> bool:
@@ -1534,6 +1632,7 @@ app.include_router(
     create_agent_router(
         agent_orchestrator=agent_orchestrator,
         build_conversation_context=_build_conversation_context,
+        resolve_document_ids=_document_ids_for_turn,
         save_chat_exchange=_try_save_chat_exchange,
         enforce_rate_limit=_enforce_rate_limit,
         attach_chat_exchange=_attach_chat_exchange,

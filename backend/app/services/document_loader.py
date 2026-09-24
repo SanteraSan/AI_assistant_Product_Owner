@@ -17,6 +17,8 @@ import pytesseract
 from pypdf import PdfReader
 import yaml
 
+from app.services.hh_resume_sections import split_hh_resume
+
 DEFAULT_TENANT_ID = "local_demo"
 DEFAULT_BUCKET_ID = "taskflow_seed"
 INDEXED_STATUS = "indexed"
@@ -179,17 +181,43 @@ def _load_pdf_documents(
     for path in sorted(raw_data_dir.rglob("*.pdf")):
         reader = PdfReader(path)
         page_count = len(reader.pages)
-        for page_index, page in enumerate(reader.pages, start=1):
-            content = (page.extract_text() or "").strip()
+        pages = [(page.extract_text() or "").strip() for page in reader.pages]
+        resume_sections = split_hh_resume(pages)
+        if resume_sections:
+            for index, section in enumerate(resume_sections, start=1):
+                documents.append(
+                    RawDocument(
+                        id=f"{_stable_document_id(path)}:resume:{index}",
+                        title=f"{path.stem.replace('_', ' ').title()} - {section.title}",
+                        content=section.content,
+                        source_type="pdf",
+                        source_path=str(path),
+                        domain=_domain_for_path(path),
+                        feature=_features_from_text(section.content),
+                        metadata={
+                            "file_name": path.name,
+                            "page_number": section.page_number,
+                            "page_count": page_count,
+                            "resume_section": section.kind,
+                            "organization": section.organization,
+                        },
+                        tenant_id=tenant_id,
+                        bucket_id=bucket_id,
+                    )
+                )
+            continue
+        for page_index, page_text in enumerate(pages, start=1):
+            if not page_text:
+                continue
             documents.append(
                 RawDocument(
                     id=f"{_stable_document_id(path)}:page:{page_index}",
                     title=f"{path.stem.replace('_', ' ').title()} - page {page_index}",
-                    content=content,
+                    content=page_text,
                     source_type="pdf",
                     source_path=str(path),
                     domain=_domain_for_path(path),
-                    feature=_features_from_text(content),
+                    feature=_features_from_text(page_text),
                     metadata={
                         "file_name": path.name,
                         "page_number": page_index,

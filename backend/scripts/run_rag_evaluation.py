@@ -670,6 +670,42 @@ SCENARIOS = [
         score_threshold=0.0,
     ),
     EvaluationScenario(
+        id="smeta_table_total",
+        name="Smeta table total from image",
+        prompt="Какая итоговая сумма в смете покупки материалов на изображении?",
+        source_types=("image_ocr", "image_digest"),
+        source_paths=(
+            "/home/santera/Projects/data/raw/scanned_fixtures/smeta-materials-table.png",
+        ),
+        required_marker_groups=(("итого", "общая", "сумм"),),
+        required_numeric_values=("482.5",),
+        required_source_types=("image_ocr", "image_digest"),
+        forbidden_response_markers=("4825", "4 825"),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
+        id="smeta_table_wide_tape",
+        name="Smeta wide tape row keeps its own columns",
+        prompt=(
+            "В смете покупки материалов какая цена за единицу и общая стоимость "
+            "строки «Лента широкая»? Ответь только по этой строке."
+        ),
+        source_types=("image_ocr", "image_digest"),
+        source_paths=(
+            "/home/santera/Projects/data/raw/scanned_fixtures/smeta-materials-table.png",
+        ),
+        required_marker_groups=(("лента широкая", "широкая"),),
+        required_numeric_values=("5.5", "49.5"),
+        required_source_types=("image_ocr", "image_digest"),
+        forbidden_response_markers=(
+            "широкая 138",
+            "широкая — 138",
+            "широкой 138",
+            "широкая | 138",
+        ),
+        score_threshold=0.0,
+    ),
+    EvaluationScenario(
         id="bucket_alpha_positive",
         name="Bucket Alpha Positive",
         prompt="Что нужно сделать для Alpha enterprise clients по notifications?",

@@ -128,6 +128,7 @@ class ChatHistoryService:
             chat_session.metadata_json = {
                 **(chat_session.metadata_json or {}),
                 "attached_document_ids": attached_document_ids,
+                "active_document_id": document_id,
             }
             if not chat_session.title or chat_session.title in {"Новый чат", "Untitled chat"}:
                 chat_session.title = _build_title(file_name)

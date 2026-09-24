@@ -59,8 +59,16 @@ If PaddleOCR is integrated later, add a normalization layer first:
 - preserve source metadata such as OCR engine, model versions, bounding boxes, row/cell coordinates, and confidence where available;
 - keep PaddleOCR optional, configurable, and isolated from the default ingestion path.
 
+## 2026-09-24: Smeta screenshot is not a Paddle case yet
+
+`data/raw/scanned_fixtures/smeta-materials-table.png` is a table screenshot without a detected grid: the PIL detector returned 0 crops. That is a miss, not a false positive, so the grid rules were left unchanged.
+
+Tesseract OCR on the same file mashed columns and wrote the total as `4825`. The repaired `image_digest` prompt (`gemma4:12b`, one compact markdown table) kept «Лента широкая» at 5,5 / 49,5 and the total at 482,5. RAG on `qwen3.5:9b` (`89237d20-7f02-49d6-acab-3e52f8679e75`) used that digest when both layers were actually in context.
+
+PaddleOCR stays out of the default path. This failure was an evidence-layer and routing problem, not a missing layout engine.
+
 ## Next Step
 
 Run the large M5 regression with the current baseline first.
 
-Only integrate PaddleOCR after the regression shows a real failure class that the baseline cannot handle, for example tables without visible lines, mixed page layouts, or scanned PDFs where grid detection is insufficient.
+Only integrate PaddleOCR after the regression shows a real failure class that the baseline cannot handle, for example tables without visible lines, mixed page layouts, or scanned PDFs where grid detection is insufficient. The smeta screenshot is a candidate for that class only if a future crowded-bucket run shows the markdown digest is not enough.

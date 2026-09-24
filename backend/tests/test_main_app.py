@@ -16,6 +16,7 @@ from app.main import (
     _enforce_rag_request_limits,
     _limits_snapshot,
     _looks_like_bucket_file_inventory_question,
+    _limit_targeted_image_documents,
     _looks_like_targeted_image_reanalysis,
     _targeted_image_point_id,
     create_app,
@@ -351,7 +352,14 @@ def test_bucket_file_inventory_helpers_use_selected_bucket_context() -> None:
 def test_targeted_image_reanalysis_intent_and_point_id_are_stable() -> None:
     assert _looks_like_targeted_image_reanalysis("Повторно проанализируй картинку: какого цвета ствол?")
     assert _looks_like_targeted_image_reanalysis("Какого цвета ствол у дерева?")
+    assert _looks_like_targeted_image_reanalysis("Какой материал на фото?")
     assert not _looks_like_targeted_image_reanalysis("Суммируй историю чата")
+    assert not _looks_like_targeted_image_reanalysis(
+        "Какая итоговая сумма в смете покупки материалов на изображении?"
+    )
+    assert not _looks_like_targeted_image_reanalysis(
+        "В смете покупки материалов какая цена за единицу и общая стоимость строки «Лента широкая»?"
+    )
 
     first = _targeted_image_point_id(
         document_id="doc-1",
@@ -367,6 +375,22 @@ def test_targeted_image_reanalysis_intent_and_point_id_are_stable() -> None:
     )
 
     assert first == second
+
+
+def test_targeted_image_documents_stay_inside_pinned_source_paths() -> None:
+    pinned = SimpleNamespace(source_path="/data/raw/scanned_fixtures/smeta-materials-table.png")
+    other = SimpleNamespace(source_path="/data/raw/uploads/avto.jpg")
+
+    limited = _limit_targeted_image_documents(
+        [(pinned, "taskflow_seed"), (other, "taskflow_seed")],
+        [pinned.source_path],
+    )
+
+    assert limited == [(pinned, "taskflow_seed")]
+    assert _limit_targeted_image_documents(
+        [(other, "taskflow_seed")],
+        [],
+    ) == [(other, "taskflow_seed")]
 
 
 def test_rag_chat_passes_targeted_image_source_to_rag(monkeypatch) -> None:
@@ -454,6 +478,7 @@ def test_rag_chat_passes_targeted_image_source_to_rag(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["sources"][0]["source_type"] == "image_targeted_digest"
     assert captured["targeted_kwargs"]["document_ids"] == ["doc-1"]
+    assert captured["targeted_kwargs"]["source_paths"] == []
     assert captured["rag_kwargs"]["additional_sources"] == [targeted_source]
 
 

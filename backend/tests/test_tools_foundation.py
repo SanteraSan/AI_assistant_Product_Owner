@@ -269,6 +269,60 @@ def test_parse_tool_loop_response_final_answer_fenced() -> None:
     assert "viewer" in (parsed.final_answer or "")
 
 
+@pytest.mark.anyio
+async def test_executor_blocks_sql_while_a_file_is_active() -> None:
+    class _SqlArgs(BaseModel):
+        question: str = Field(default="x")
+
+    class _SqlTool:
+        name = "text_to_sql"
+        description = "sql"
+        args_model = _SqlArgs
+        called = False
+
+        async def run(self, ctx: ToolContext, args: _SqlArgs) -> ToolResult:
+            del ctx, args
+            self.called = True
+            return tool_ok({"sql": "SELECT 1"})
+
+    registry = ToolRegistry()
+    sql_tool = _SqlTool()
+    registry.register(sql_tool)
+    executor = ToolExecutor(registry=registry, session_factory=None)
+
+    execution = await executor.execute(
+        name="text_to_sql",
+        arguments={"question": "самый медленный advanced"},
+        user=_user(roles={"analyst"}),
+        request_id="req-file",
+        extras={"document_ids": ["timing-png"]},
+    )
+    assert execution.result.status == "denied"
+    assert execution.result.error_code == "sql_blocked_by_active_file"
+    assert sql_tool.called is False
+
+
+def test_parse_tool_loop_response_accepts_tool_name_shorthand() -> None:
+    parsed = parse_tool_loop_response(
+        '{"rag_search":{"query":"стек технологий АО БАРС Групп"}}',
+        tool_names={"rag_search", "analyze_image"},
+    )
+    assert parsed.error is None
+    assert parsed.final_answer is None
+    assert len(parsed.tool_calls) == 1
+    assert parsed.tool_calls[0].name == "rag_search"
+    assert parsed.tool_calls[0].arguments == {"query": "стек технологий АО БАРС Групп"}
+
+
+def test_parse_tool_loop_response_ignores_unknown_shorthand() -> None:
+    parsed = parse_tool_loop_response(
+        '{"rag_search":{"query":"смета"}}',
+        tool_names={"analyze_image"},
+    )
+    assert parsed.tool_calls == []
+    assert parsed.final_answer is None
+
+
 def test_parse_tool_loop_response_empty_list_final_answer_is_none() -> None:
     parsed = parse_tool_loop_response(
         '{"tool_calls":[],"final_answer":[]}'

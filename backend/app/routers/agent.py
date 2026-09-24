@@ -20,6 +20,7 @@ from app.services.ollama_load_guard import OllamaOverloadedError
 
 
 BuildConversationContext = Callable[..., Awaitable[dict[str, object]]]
+ResolveDocumentIds = Callable[..., Awaitable[tuple[list[str], list[str]]]]
 SaveChatExchange = Callable[..., Awaitable[ChatExchangeRecord | None]]
 EnforceRateLimit = Callable[..., Awaitable[None]]
 AgentRunner = AgentOrchestrator | LangGraphAgentAdapter
@@ -29,6 +30,7 @@ def create_agent_router(
     *,
     agent_orchestrator: AgentOrchestrator,
     build_conversation_context: BuildConversationContext,
+    resolve_document_ids: ResolveDocumentIds,
     save_chat_exchange: SaveChatExchange,
     enforce_rate_limit: EnforceRateLimit,
     attach_chat_exchange: Callable[[AgentChatResponse, ChatExchangeRecord | None], None],
@@ -66,6 +68,18 @@ def create_agent_router(
         )
 
         try:
+            document_ids, chat_document_ids = await resolve_document_ids(
+                user=user,
+                session_id=payload.session_id,
+                message=payload.message,
+                requested_document_ids=payload.document_ids,
+            )
+            payload = payload.model_copy(
+                update={
+                    "document_ids": document_ids,
+                    "chat_document_ids": chat_document_ids,
+                }
+            )
             conversation_context = await build_conversation_context(
                 session_id=payload.session_id,
                 message=payload.message,
@@ -156,4 +170,9 @@ def _agent_retrieval_scope(payload: AgentChatRequest) -> dict[str, object]:
         scope["bucket_ids"] = bucket_ids
     if document_ids:
         scope["document_ids"] = document_ids
+    chat_document_ids = [
+        item.strip() for item in payload.chat_document_ids if item and item.strip()
+    ]
+    if chat_document_ids:
+        scope["chat_document_ids"] = chat_document_ids
     return scope

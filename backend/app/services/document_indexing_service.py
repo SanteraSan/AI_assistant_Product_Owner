@@ -203,23 +203,14 @@ class DocumentIndexingService:
 
     async def _index_document(self, *, document: DocumentAsset, bucket_id: str) -> int:
         storage = self._object_storage or LocalFilesystemStorage(Path("."))
-        raw_documents = _load_raw_documents_for_asset(
+        raw_documents = await load_asset_raw_documents(
             document=document,
             bucket_id=bucket_id,
             object_storage=storage,
+            ollama_client=self._ollama_client,
+            image_vision_enabled=self._image_vision_enabled,
+            image_vision_model=self._image_vision_model,
         )
-        if not raw_documents and _can_build_image_digest(
-            document=document,
-            enabled=self._image_vision_enabled,
-            vision_model=self._image_vision_model,
-        ):
-            raw_documents = await _load_image_digest_documents_for_asset(
-                document=document,
-                bucket_id=bucket_id,
-                ollama_client=self._ollama_client,
-                vision_model=self._image_vision_model or "",
-                object_storage=storage,
-            )
         chunks = chunk_documents(raw_documents)
         if not chunks:
             raise ValueError("No chunks produced for uploaded document.")
@@ -245,6 +236,55 @@ class DocumentIndexingService:
             )
         self._qdrant_store.upsert_chunks(pending)
         return len(pending)
+
+
+def combine_raw_documents(
+    primary: list[RawDocument],
+    extra: list[RawDocument],
+) -> list[RawDocument]:
+    merged = list(primary)
+    seen = {document.id for document in merged}
+    for document in extra:
+        if document.id in seen:
+            continue
+        merged.append(document)
+        seen.add(document.id)
+    return merged
+
+
+async def load_asset_raw_documents(
+    *,
+    document: DocumentAsset,
+    bucket_id: str,
+    object_storage: ObjectStorage,
+    ollama_client: OllamaClient,
+    image_vision_enabled: bool,
+    image_vision_model: str | None,
+) -> list[RawDocument]:
+    """OCR/text first. Image files also keep a vision digest beside non-empty OCR.
+
+    Office files stay on their parsed text here. Embedded-image digest for
+    DOCX/XLSX upload is a separate gap and is not filled by this path.
+    """
+    raw_documents = _load_raw_documents_for_asset(
+        document=document,
+        bucket_id=bucket_id,
+        object_storage=object_storage,
+    )
+    if _can_build_image_digest(
+        document=document,
+        enabled=image_vision_enabled,
+        vision_model=image_vision_model,
+    ):
+        digest_documents = await _load_image_digest_documents_for_asset(
+            document=document,
+            bucket_id=bucket_id,
+            ollama_client=ollama_client,
+            vision_model=image_vision_model or "",
+            object_storage=object_storage,
+        )
+        raw_documents = combine_raw_documents(raw_documents, digest_documents)
+    return raw_documents
 
 
 def _load_raw_documents_for_asset(

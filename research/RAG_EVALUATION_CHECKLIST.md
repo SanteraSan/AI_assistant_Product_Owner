@@ -1004,6 +1004,59 @@ Retrieval config:
 - `required_numeric_values=["3500"]` проходит;
 - важно: это baseline для grid-like scans, а не полноценный layout parser для любых сканов.
 
+## Test 45: Smeta Table Total
+
+Запрос:
+
+```text
+Какая итоговая сумма в смете покупки материалов на изображении?
+```
+
+Retrieval config:
+
+- `source_types=["image_ocr", "image_digest"]`;
+- `source_paths=["/home/santera/Projects/data/raw/scanned_fixtures/smeta-materials-table.png"]`;
+- `score_threshold=0.0`.
+
+Ожидания:
+
+- sources содержат и `image_ocr`, и `image_digest` этой фикстуры;
+- `required_numeric_values=["482.5"]` (нормализатор принимает `482,5`);
+- ответ содержит маркер итога/суммы;
+- запрещены `4825` и `4 825`: это кривой OCR, не золото;
+- `scanned_table` metadata не требуется: на этой картинке детектор сетки дал 0 crops.
+
+Прогон `89237d20-7f02-49d6-acab-3e52f8679e75`, `qwen3.5:9b`: flags true, sources=2, digest score выше OCR. Ранний прогон `5d063b35-977b-42c7-b52e-d479fce6a822` был HTTP-ok при `required_source_types_present=false` — смотреть flags, не строку `ok`.
+
+## Test 46: Smeta Wide Tape Row
+
+Запрос:
+
+```text
+В смете покупки материалов какая цена за единицу и общая стоимость строки «Лента широкая»? Ответь только по этой строке.
+```
+
+Retrieval config: те же `source_types` и `source_paths`, что в Test 45.
+
+Ожидания:
+
+- оба слоя фикстуры в sources;
+- маркеры «лента широкая» / «широкая»;
+- числа `5.5` и `49.5`;
+- запрещены склейки вроде `широкая 138` и `широкая | 138`. Голое `138` не запрещаем: в полной таблице оно принадлежит строке шнура.
+
+Тот же прогон `89237d20-7f02-49d6-acab-3e52f8679e75`: flags true. Pin на один файл проверяет внимание модели при двух чанках, не ranking в переполненном бакете.
+
+## Test 47: Resume Employer Stack (manual, after re-upload)
+
+Не eval-runner. Личный PDF в репозиторий не кладём. После повторной загрузки резюме HeadHunter, Agent, `qwen3.5:9b`:
+
+- «АО БАРС Групп»: React, Redux, TypeScript, Flutter, react-hook-form, AntD UI. Без Vue, MobX, Jest, Docker, SonarQube.
+- «ООО ИН РЕВ»: React, React Native, Electron, Redux, electron-store, TypeScript, react-hook-form, Chart.js, Tailwind, Material UI. Без Vue, MobX, Jest, Docker, Webpack.
+- В источниках ответа один блок `resume_section=employment` этой организации, не страница «Навыки».
+
+Живой Agent, `qwen3.5:9b`, 2026-09-24 около 07:40, документ `5e8ccce8-340f-4734-b653-4f460318f852`: оба стека совпали со строками резюме, Vue, MobX, Jest, Docker и PHP в ответы не попали. Unit-тест нарезки: `tests/test_hh_resume_sections.py`.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.
