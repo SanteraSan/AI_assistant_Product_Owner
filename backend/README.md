@@ -872,7 +872,7 @@ M5.4 smoke `fef54dac-ac00-4f49-b073-72ad40584920`: `excel_ingestion` на `qwen3
 
 Локальный exploratory smoke на реальном `Price.xls`:
 
-- файл не добавлен в git, но использован для проверки `.xls` ingestion;
+- файл только на диске и в `.gitignore`, в дереве репозитория его нет;
 - reindex после файла: 341 documents, 374 chunks;
 - initial vector-only retrieval не находил точный barcode `4600682643425` и плохо отвечал на вопросы про шапку документа;
 - добавлен deterministic Excel supplement внутри разрешённого scope: exact numeric terms для штрихкодов/артикулов и header rows для вопросов про документ/организацию/дату;

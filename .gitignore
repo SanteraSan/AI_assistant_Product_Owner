@@ -25,3 +25,13 @@ env/
 
 # Local job-search drafts (PII). Do not publish.
 .local-portfolio/
+
+# Chat and bucket uploads. Do not publish.
+data/raw/uploads/
+
+# LibreOffice / Office lock files.
+.~lock.*
+**/~$*
+
+# Real local price list (phones). Not a fixture.
+data/raw/tech_knowledge/Price.xls
