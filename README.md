@@ -19,7 +19,7 @@
 ## Архитектура
 
 ```text
-UI (React, FSD)
+UI (React, тестовая оболочка)
   -> BFF (session + CSRF + service JWT)
     -> FastAPI
          -> RAG: retrieve (Qdrant) + ACL filters + prompt + Ollama
@@ -52,7 +52,7 @@ UI (React, FSD)
 | Text-to-SQL | schema card, sqlglot guardrails, LoRA fallback |
 | Auth | Keycloak, BFF, service JWT, tenant/bucket/document ACL |
 | Ops lab | indexing worker, Redpanda, MinIO, Prometheus, Grafana |
-| Frontend | React, TypeScript, Vite, Zustand, React Query, FSD |
+| Frontend | React, TypeScript, Vite — экран для ручной проверки |
 | Оценка | unit-тесты, RAG eval scenarios, three-model smoke, журнал в `research/` |
 
 ## Что важно для ревью
@@ -67,7 +67,7 @@ UI (React, FSD)
 - LangGraph оставлен как лабораторный adapter с теми же tools и RBAC;
 - короткий QLoRA Text-to-SQL smoke улучшил синтаксис, но не дал semantic exact-match — это зафиксировано, а не замаскировано.
 
-Frontend-часть (FSD, Zustand / React Query, чат, buckets, источники, agent tool trace) написана как обычный продуктовый UI.
+Фронтенд сделан, чтобы можно было руками проверить чат, загрузку и доступ. Это тестовая оболочка, не enterprise-пример: большого внимания ей не уделялось.
 
 ## Как смотреть код
 
@@ -101,6 +101,7 @@ make dev-frontend
 - нет полноценного нагрузочного контура и cost/SLO;
 - LoRA — spike, не прод-модель;
 - legacy `.doc` / сложный chart rendering / layout-aware parsing специально оставлены как future hardening;
-- часть enterprise-слоя (Kafka, MinIO, Grafana, LangGraph) сделана как лабораторный срез, а не как «мы уже банк».
+- часть enterprise-слоя (Kafka, MinIO, Grafana, LangGraph) сделана как лабораторный срез, а не как «мы уже банк»;
+- фронтенд — экран для проверки бэкенда, а не отдельный продуктовый UI.
 
 Это сознательный ритм проекта: маленький baseline → оценка → hardening → запись в журнал.

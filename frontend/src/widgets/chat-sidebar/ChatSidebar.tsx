@@ -1,7 +1,7 @@
 import { MessageSquarePlus, Pencil, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import type { ChatThread } from '../../entities/chat/model'
-import { Button, Modal } from '../../shared/ui'
+import { Button, ConfirmDialog, DialogActions, Input, Modal, Notice } from '../../shared/ui'
 
 type ChatSidebarProps = {
   threads: ChatThread[]
@@ -147,24 +147,17 @@ export function ChatSidebar({
         title="Переименовать чат"
       >
         <div className="space-y-4">
-          <input
-            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-400"
-            onChange={(event) => setRenameValue(event.target.value)}
-            value={renameValue}
+          <Input onChange={(event) => setRenameValue(event.target.value)} value={renameValue} />
+          {actionError && threadToRename ? <Notice compact>{actionError}</Notice> : null}
+          <DialogActions
+            confirmLabel="Сохранить"
+            onCancel={() => setThreadToRename(null)}
+            onConfirm={() => {
+              void handleRename()
+            }}
+            pending={isSaving}
+            pendingLabel="Сохраняем..."
           />
-          {actionError && threadToRename ? (
-            <p className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {actionError}
-            </p>
-          ) : null}
-          <div className="flex justify-end gap-2">
-            <Button disabled={isSaving} onClick={() => setThreadToRename(null)} variant="secondary">
-              Отмена
-            </Button>
-            <Button disabled={isSaving} onClick={handleRename} variant="primary">
-              {isSaving ? 'Сохраняем...' : 'Сохранить'}
-            </Button>
-          </div>
         </div>
       </Modal>
 
@@ -178,31 +171,24 @@ export function ChatSidebar({
         }}
         title="Удалить чат?"
       >
-        <div className="space-y-4">
+        <ConfirmDialog
+          confirmLabel="Удалить"
+          danger
+          error={actionError && threadToDelete ? actionError : null}
+          errorCompact
+          onCancel={() => setThreadToDelete(null)}
+          onConfirm={() => {
+            void handleDelete()
+          }}
+          pending={isSaving}
+          pendingLabel="Удаляем..."
+        >
           <p className="text-sm leading-6 text-slate-600">
             Чат{' '}
             <span className="font-semibold text-slate-950">{threadToDelete?.title}</span> будет
             удалён вместе с историей сообщений.
           </p>
-          {actionError && threadToDelete ? (
-            <p className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {actionError}
-            </p>
-          ) : null}
-          <div className="flex justify-end gap-2">
-            <Button disabled={isSaving} onClick={() => setThreadToDelete(null)} variant="secondary">
-              Отмена
-            </Button>
-            <Button
-              className="bg-red-600 text-white hover:bg-red-700"
-              disabled={isSaving}
-              onClick={handleDelete}
-              variant="primary"
-            >
-              {isSaving ? 'Удаляем...' : 'Удалить'}
-            </Button>
-          </div>
-        </div>
+        </ConfirmDialog>
       </Modal>
     </aside>
   )

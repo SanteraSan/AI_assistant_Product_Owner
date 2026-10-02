@@ -1,32 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
-import { createBucket, deleteBucket, fetchBuckets, updateBucket } from '../../entities/bucket/api'
-import { mockBuckets } from '../../entities/bucket/model'
-import {
-  createChatSession,
-  deleteChatSession,
-  fetchChatMessages,
-  fetchChatSessions,
-  saveChatAttachmentMessage,
-  sendAgentMessage,
-  sendRagMessage,
-  updateChatSession,
-} from '../../entities/chat/api'
-import type { ChatMode } from '../../entities/chat/model'
+import { useQuery } from '@tanstack/react-query'
+import { useEffect } from 'react'
 import { useChatStore } from '../../entities/chat/store'
-import {
-  cancelStagedDocument,
-  commitBucketDocuments,
-  commitPersonalDocuments,
-  deleteDocument,
-  DocumentDeleteConflictError,
-  fetchAvailableDocuments,
-  fetchBucketDocuments,
-  downloadBucketDocuments,
-  retryDocumentIndexing,
-  stageDocument,
-} from '../../entities/document/api'
-import { mockDocuments } from '../../entities/document/model'
+import type { ChatMode } from '../../entities/chat/model'
 import { fetchProviderCatalog } from '../../entities/model/api'
 import {
   isModelApproach,
@@ -34,36 +9,29 @@ import {
   normalizeApproach,
   type ModelApproach,
 } from '../../entities/model/model'
-import { formatApiError } from '../../shared/api/httpClient'
 import { useAuthStore } from '../../entities/user/store'
 import { useWorkspaceStore } from '../../entities/workspace/store'
+import { useAttachChatDocument } from '../../features/attach-document'
+import { useBucketLibrary } from '../../features/bucket-library'
+import { useChatSessions } from '../../features/chat-session'
+import { useSendChatMessage } from '../../features/send-message'
+import { GRAFANA_URL } from '../../shared/config/env'
 import { BucketWorkspace } from '../../widgets/bucket-workspace/BucketWorkspace'
 import { ChatSidebar } from '../../widgets/chat-sidebar/ChatSidebar'
 import { ChatWorkspace } from '../../widgets/chat-workspace/ChatWorkspace'
 import { TopBar } from '../../widgets/top-bar/TopBar'
-import { GRAFANA_URL } from '../../shared/config/env'
 
 export function ChatPage() {
-  const queryClient = useQueryClient()
-  const [inspectedBucketId, setInspectedBucketId] = useState('')
   const {
     activeThreadId,
-    addAttachmentMessage,
-    addAssistantMessage,
-    addUserMessage,
     composerValue,
-    createThread: createLocalThread,
     deleteThread,
     messagesByThreadId,
     renameThread,
     selectThread,
     setComposerValue,
-    setThreadMessages,
-    setThreads,
     setThreadContext,
-    setThreadSessionId,
     threads,
-    upsertThread,
     updateAttachmentStatuses,
   } = useChatStore()
   const { currentUser, login, logout, status } = useAuthStore()
@@ -82,19 +50,18 @@ export function ChatPage() {
     selectedChatMode,
     selectedModelId,
   } = useWorkspaceStore()
-  const bucketsQuery = useQuery({
-    enabled: isAuthenticated,
-    queryKey: ['buckets', currentUser?.tenantId],
-    queryFn: () => fetchBuckets(),
-    retry: false,
+  const library = useBucketLibrary({
+    isAuthenticated,
+    roles: currentUser?.roles,
+    selectedBucketId: activeBucketId,
+    selectBucket,
+    tenantId: currentUser?.tenantId,
+    userId: currentUser?.id,
   })
-  const hasBackendBuckets = Boolean(bucketsQuery.data?.length)
-  const buckets = hasBackendBuckets ? bucketsQuery.data! : mockBuckets
-
-  const selectedBucketId = buckets.some((bucket) => bucket.id === activeBucketId)
+  const selectedBucketId = library.buckets.some((bucket) => bucket.id === activeBucketId)
     ? activeBucketId
     : ''
-  const activeBucket = buckets.find((bucket) => bucket.id === selectedBucketId)
+  const activeBucket = library.buckets.find((bucket) => bucket.id === selectedBucketId)
   const healthQuery = useQuery({
     enabled: isAuthenticated,
     queryKey: ['provider-catalog'],
@@ -108,271 +75,45 @@ export function ChatPage() {
   const effectiveModelId = selectedModel?.id ?? selectedModelId
   const messages = messagesByThreadId[activeThreadId] ?? []
   const activeThread = threads.find((thread) => thread.id === activeThreadId)
-  const chatSessionsQuery = useQuery({
-    enabled: isAuthenticated,
-    queryKey: ['chat-sessions', currentUser?.tenantId, currentUser?.id],
-    queryFn: () => fetchChatSessions(),
-    retry: false,
+  const { attachFile } = useAttachChatDocument({
+    approach: selectedApproach,
+    modelId: effectiveModelId,
+    selectedBucketId,
+    sessionId: activeThread?.sessionId,
+    tenantId: currentUser?.tenantId,
+    userId: currentUser?.id,
   })
-  const activeSessionId = activeThread?.sessionId
-  const chatMessagesQuery = useQuery({
-    enabled: isAuthenticated && Boolean(activeSessionId),
-    queryKey: ['chat-messages', currentUser?.tenantId, currentUser?.id, activeSessionId],
-    queryFn: () => fetchChatMessages(activeSessionId!),
-    retry: false,
-  })
-  const documentsQuery = useQuery({
-    enabled: isAuthenticated && hasBackendBuckets && Boolean(inspectedBucketId),
-    queryKey: ['bucket-documents', currentUser?.tenantId, inspectedBucketId],
-    queryFn: () => fetchBucketDocuments(inspectedBucketId),
-    refetchInterval: (query) =>
-      query.state.data?.some((document) => document.status === 'indexing')
-        ? 3000
-        : false,
-    retry: false,
-  })
-  const documents = useMemo(
-    () => (hasBackendBuckets ? (documentsQuery.data ?? []) : mockDocuments),
-    [documentsQuery.data, hasBackendBuckets],
-  )
-  const availableDocumentsQuery = useQuery({
-    enabled: isAuthenticated && hasBackendBuckets,
-    queryKey: ['documents-available', currentUser?.tenantId, currentUser?.id, currentUser?.roles],
-    queryFn: () => fetchAvailableDocuments(),
-    refetchInterval: (query) =>
-      query.state.data?.some((document) => document.status === 'indexing') ? 3000 : false,
-    retry: false,
-  })
-  const availableDocuments = useMemo(
-    () => (hasBackendBuckets ? (availableDocumentsQuery.data ?? []) : mockDocuments),
-    [availableDocumentsQuery.data, hasBackendBuckets],
-  )
-  const stageDocumentMutation = useMutation({
-    mutationFn: (file: File) => stageDocument(file),
-  })
-  const cancelStagedDocumentMutation = useMutation({
-    mutationFn: (uploadId: string) => cancelStagedDocument(uploadId),
-  })
-  const commitBucketDocumentsMutation = useMutation({
-    mutationFn: ({
-      bucketId,
-      existingDocumentIds,
-      removedDocumentIds,
-      stagedUploadIds,
-    }: {
-      bucketId: string
-      existingDocumentIds: string[]
-      removedDocumentIds: string[]
-      stagedUploadIds: string[]
-    }) =>
-      commitBucketDocuments(bucketId, {
-        existingDocumentIds,
-        removedDocumentIds,
-        stagedUploadIds,
-        visibility: 'private',
-      }),
-    onSuccess: (committedDocuments, variables) => {
-      queryClient.setQueryData(
-        ['bucket-documents', currentUser?.tenantId, variables.bucketId],
-        (current: typeof committedDocuments | undefined) => {
-          const remainingDocuments = (current ?? []).filter(
-            (document) => !variables.removedDocumentIds.includes(document.id),
-          )
-          const committedById = new Map(committedDocuments.map((document) => [document.id, document]))
-          const mergedDocuments = remainingDocuments.map((document) =>
-            committedById.get(document.id) ?? document,
-          )
-          for (const document of committedDocuments) {
-            if (!mergedDocuments.some((existingDocument) => existingDocument.id === document.id)) {
-              mergedDocuments.push(document)
-            }
-          }
-          return mergedDocuments
-        },
-      )
-      void queryClient.invalidateQueries({ queryKey: ['bucket-documents'] })
-      void queryClient.invalidateQueries({ queryKey: ['documents-available'] })
-      void queryClient.invalidateQueries({ queryKey: ['buckets'] })
+  const { isSending, sendMessage } = useSendChatMessage({
+    activeBucketId: activeBucket?.id ?? '',
+    activeBucketName: activeBucket?.name ?? 'Без bucket',
+    activeThreadId,
+    approach: selectedApproach,
+    chatMode: selectedChatMode,
+    composerValue,
+    context: {
+      selectedBucketId,
+      hasBackendBuckets: library.hasBackendBuckets,
+      documents: library.documents,
+      availableDocuments: library.availableDocuments,
+      attachments: messages.flatMap((item) => item.attachments ?? []),
+      sessionDocumentIds: activeThread?.documentIds ?? [],
     },
+    modelId: effectiveModelId,
+    sessionId: activeThread?.sessionId,
+    tenantId: currentUser?.tenantId ?? '',
+    userId: currentUser?.id,
   })
-  const commitPersonalDocumentsMutation = useMutation({
-    mutationFn: ({ stagedUploadIds }: { stagedUploadIds: string[] }) =>
-      commitPersonalDocuments({
-        stagedUploadIds,
-        visibility: 'private',
-      }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['documents-available'] })
-    },
+  const sessions = useChatSessions({
+    activeThreadId,
+    approach: selectedApproach,
+    isAuthenticated,
+    isSendingMessage: isSending,
+    modelId: effectiveModelId,
+    selectedBucketId,
+    sessionId: activeThread?.sessionId,
+    tenantId: currentUser?.tenantId,
+    userId: currentUser?.id,
   })
-  const deleteDocumentMutation = useMutation({
-    mutationFn: (documentId: string) => deleteDocument(documentId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['documents-available'] })
-      void queryClient.invalidateQueries({ queryKey: ['bucket-documents'] })
-      void queryClient.invalidateQueries({ queryKey: ['buckets'] })
-    },
-  })
-  const retryDocumentIndexingMutation = useMutation({
-    mutationFn: ({
-      bucketId,
-      documentId,
-    }: {
-      documentId: string
-      bucketId?: string
-    }) => retryDocumentIndexing(documentId, bucketId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['documents-available'] })
-      void queryClient.invalidateQueries({ queryKey: ['bucket-documents'] })
-    },
-  })
-  const createBucketMutation = useMutation({
-    mutationFn: () =>
-      createBucket({
-        name: `Личная база знаний ${new Date().toLocaleTimeString('ru-RU')}`,
-        description: 'Персональный bucket для документов, загруженных через UI.',
-      }),
-    onSuccess: (bucket) => {
-      void queryClient.invalidateQueries({ queryKey: ['buckets'] })
-      selectBucket(bucket.id)
-    },
-  })
-  const updateBucketMutation = useMutation({
-    mutationFn: ({
-      bucketId,
-      description,
-      name,
-    }: {
-      bucketId: string
-      description: string
-      name: string
-    }) => updateBucket(bucketId, { name, description }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['buckets'] })
-    },
-  })
-  const deleteBucketMutation = useMutation({
-    mutationFn: (bucketId: string) => deleteBucket(bucketId),
-    onSuccess: (_result, bucketId) => {
-      if (selectedBucketId === bucketId) {
-        selectBucket('')
-      }
-      if (inspectedBucketId === bucketId) {
-        setInspectedBucketId('')
-      }
-      void queryClient.invalidateQueries({ queryKey: ['buckets'] })
-      void queryClient.invalidateQueries({ queryKey: ['bucket-documents'] })
-      void queryClient.invalidateQueries({ queryKey: ['documents-available'] })
-    },
-  })
-  const createChatSessionMutation = useMutation({
-    mutationFn: () =>
-      createChatSession({
-        title: 'Новый чат',
-        activeBucketId: selectedBucketId,
-        modelId: effectiveModelId,
-        approach: selectedApproach,
-      }),
-    onSuccess: (thread) => {
-      upsertThread(thread)
-      void queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-    },
-    onError: () => {
-      createLocalThread()
-    },
-  })
-  const updateChatSessionMutation = useMutation({
-    mutationFn: ({
-      activeBucketId,
-      approach,
-      modelId,
-      sessionId,
-      title,
-    }: {
-      activeBucketId?: string
-      approach?: ModelApproach
-      modelId?: string
-      sessionId: string
-      title?: string
-    }) =>
-      updateChatSession(sessionId, {
-        activeBucketId,
-        approach,
-        modelId,
-        title,
-      }),
-    onSuccess: (thread) => {
-      upsertThread(thread)
-      void queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-    },
-  })
-  const deleteChatSessionMutation = useMutation({
-    mutationFn: (sessionId: string) => deleteChatSession(sessionId),
-    onSuccess: (_result, sessionId) => {
-      deleteThread(sessionId)
-      void queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-    },
-  })
-  const sendRagMessageMutation = useMutation({
-    mutationFn: (message: string) =>
-      sendRagMessage({
-        message,
-        model: effectiveModelId,
-        approach: selectedApproach,
-        activeBucketId: selectedBucketId,
-        sessionId: activeThread?.sessionId,
-        tenantId: currentUser!.tenantId,
-        ...chatContext(message),
-      }),
-    onSuccess: ({ message, sessionId }) => {
-      addAssistantMessage(message)
-      if (sessionId) {
-        setThreadSessionId(activeThreadId, sessionId)
-      }
-      void queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      if (sessionId) {
-        void queryClient.invalidateQueries({ queryKey: ['chat-messages', currentUser?.tenantId, currentUser?.id, sessionId] })
-      }
-    },
-    onError: (error) => {
-      addAssistantMessage({
-        id: `assistant-error-${Date.now()}`,
-        role: 'assistant',
-        content: formatApiError(error, 'Не удалось получить ответ от RAG.'),
-      })
-    },
-  })
-  const sendAgentMessageMutation = useMutation({
-    mutationFn: (message: string) =>
-      sendAgentMessage({
-        message,
-        model: effectiveModelId,
-        approach: selectedApproach,
-        activeBucketId: selectedBucketId,
-        sessionId: activeThread?.sessionId,
-        tenantId: currentUser!.tenantId,
-        ...chatContext(message),
-      }),
-    onSuccess: ({ message, sessionId }) => {
-      addAssistantMessage(message)
-      if (sessionId) {
-        setThreadSessionId(activeThreadId, sessionId)
-      }
-      void queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      if (sessionId) {
-        void queryClient.invalidateQueries({ queryKey: ['chat-messages', currentUser?.tenantId, currentUser?.id, sessionId] })
-      }
-    },
-    onError: (error) => {
-      addAssistantMessage({
-        id: `assistant-error-${Date.now()}`,
-        role: 'assistant',
-        content: formatApiError(error, 'Не удалось получить ответ агента.'),
-      })
-    },
-  })
-  const isSendingMessage =
-    sendRagMessageMutation.isPending || sendAgentMessageMutation.isPending
 
   useEffect(() => {
     if (!isAuthenticated && activeView === 'buckets') {
@@ -381,39 +122,18 @@ export function ChatPage() {
   }, [activeView, isAuthenticated, openChat])
 
   useEffect(() => {
-    if (chatSessionsQuery.data?.length) {
-      setThreads(chatSessionsQuery.data)
-    }
-  }, [chatSessionsQuery.data, setThreads])
-
-  useEffect(() => {
-    if (isSendingMessage) {
-      return
-    }
-    if (activeSessionId && chatMessagesQuery.data) {
-      setThreadMessages(activeThreadId, chatMessagesQuery.data)
-    }
-  }, [
-    activeSessionId,
-    activeThreadId,
-    chatMessagesQuery.data,
-    isSendingMessage,
-    setThreadMessages,
-  ])
-
-  useEffect(() => {
-    if (!availableDocuments.length) {
+    if (!library.availableDocuments.length) {
       return
     }
     updateAttachmentStatuses(
-      availableDocuments.map((document) => ({
+      library.availableDocuments.map((document) => ({
         id: document.id,
         fileName: document.fileName,
         sourceType: document.sourceType,
         status: document.status,
       })),
     )
-  }, [availableDocuments, chatMessagesQuery.data, updateAttachmentStatuses])
+  }, [library.availableDocuments, sessions.messagesRevision, updateAttachmentStatuses])
 
   useEffect(() => {
     if (!activeThread) {
@@ -441,138 +161,6 @@ export function ChatPage() {
     selectModel,
   ])
 
-  function selectedBucketIdsForChat(): string[] {
-    if (!hasBackendBuckets || !selectedBucketId) {
-      return []
-    }
-    return [selectedBucketId]
-  }
-
-  function indexedAttachmentDocumentIds(): string[] {
-    const fromMessages = messages
-      .flatMap((message) => message.attachments ?? [])
-      .filter((attachment) => attachment.status === 'indexed')
-      .map((attachment) => attachment.id)
-    const indexedAvailableIds = new Set(indexedAvailableDocumentIds())
-    const fromSession = (activeThread?.documentIds ?? []).filter((documentId) =>
-      indexedAvailableIds.has(documentId),
-    )
-    return Array.from(new Set([...fromMessages, ...fromSession]))
-  }
-
-  function indexedAvailableDocumentIds(): string[] {
-    return Array.from(new Set(
-      availableDocuments
-        .filter((document) => document.status === 'indexed')
-        .map((document) => document.id),
-    ))
-  }
-
-  function namedDocumentIds(message: string): string[] {
-    const normalized = normalizeDocumentName(message)
-    const candidates = selectedBucketId
-      ? [...documents, ...availableDocuments]
-      : availableDocuments
-    return Array.from(new Set(
-      candidates
-        .filter((document) => document.status === 'indexed')
-        .filter((document) => {
-          return documentNameVariants(document.fileName, document.title).some((variant) =>
-            normalized.includes(variant),
-          )
-        })
-        .map((document) => document.id),
-    ))
-  }
-
-  function chatContext(message: string): { bucketIds: string[]; documentIds: string[] } {
-    const explicitDocumentIds = namedDocumentIds(message)
-    if (explicitDocumentIds.length) {
-      return { bucketIds: [], documentIds: explicitDocumentIds }
-    }
-    if (selectedBucketId && asksSelectedBucketDocuments(message)) {
-      return { bucketIds: selectedBucketIdsForChat(), documentIds: [] }
-    }
-    const attachmentDocumentIds = indexedAttachmentDocumentIds()
-    if (attachmentDocumentIds.length) {
-      return { bucketIds: [], documentIds: [attachmentDocumentIds[attachmentDocumentIds.length - 1]] }
-    }
-    if (asksAllAvailableDocuments(message) || !selectedBucketId) {
-      return { bucketIds: [], documentIds: indexedAvailableDocumentIds() }
-    }
-    return { bucketIds: selectedBucketIdsForChat(), documentIds: [] }
-  }
-
-  function handleSendMessage() {
-    const message = composerValue.trim()
-    if (!message || isSendingMessage) {
-      return
-    }
-    const { bucketIds, documentIds } = chatContext(message)
-    addUserMessage(message, {
-      bucketId: activeBucket?.id ?? '',
-      bucketName: activeBucket?.name ?? 'Без bucket',
-    })
-    setThreadContext(activeThreadId, {
-      bucketIds,
-      documentIds,
-      modelId: effectiveModelId,
-      approach: selectedApproach,
-    })
-    if (selectedChatMode === 'agent') {
-      sendAgentMessageMutation.mutate(message)
-      return
-    }
-    sendRagMessageMutation.mutate(message)
-  }
-
-  function handleChangeChatMode(mode: ChatMode) {
-    selectChatMode(mode)
-  }
-
-  async function handleAttachFileToChat(file: File) {
-    try {
-      let sessionId = activeThread?.sessionId
-      if (!sessionId) {
-        const thread = await createChatSession({
-          title: 'Новый чат',
-          activeBucketId: selectedBucketId,
-          modelId: effectiveModelId,
-          approach: selectedApproach,
-        })
-        upsertThread(thread)
-        sessionId = thread.sessionId ?? thread.id
-        void queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      }
-
-      const stagedDocument = await stageDocumentMutation.mutateAsync(file)
-      const documents = await commitPersonalDocumentsMutation.mutateAsync({
-        stagedUploadIds: [stagedDocument.id],
-      })
-      const document = documents[0]
-      const attachment = {
-        id: document?.id ?? stagedDocument.id,
-        fileName: document?.fileName ?? stagedDocument.fileName,
-        sourceType: document?.sourceType ?? stagedDocument.sourceType,
-        status: document?.status ?? 'indexing',
-      }
-      const savedMessage = await saveChatAttachmentMessage(sessionId, {
-        documentId: attachment.id,
-        fileName: attachment.fileName,
-        sourceType: attachment.sourceType,
-        status: attachment.status,
-      })
-      addAttachmentMessage(attachment, savedMessage.id)
-      void queryClient.invalidateQueries({
-        queryKey: ['chat-messages', currentUser?.tenantId, currentUser?.id, sessionId],
-      })
-      void queryClient.invalidateQueries({ queryKey: ['chat-sessions'] })
-      void queryClient.invalidateQueries({ queryKey: ['documents-available'] })
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Не удалось загрузить документ.')
-    }
-  }
-
   function syncActiveSessionContext(next: {
     activeBucketId?: string
     approach?: ModelApproach
@@ -581,7 +169,7 @@ export function ChatPage() {
     if (!activeThread?.sessionId) {
       return
     }
-    updateChatSessionMutation.mutate({
+    sessions.updateSession({
       activeBucketId: next.activeBucketId ?? selectedBucketId,
       approach: next.approach ?? selectedApproach,
       modelId: next.modelId ?? selectedModelId,
@@ -644,27 +232,31 @@ export function ChatPage() {
     syncActiveSessionContext({ activeBucketId: bucketId })
   }
 
+  function handleChangeChatMode(mode: ChatMode) {
+    selectChatMode(mode)
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50">
       <ChatSidebar
         activeThreadId={activeThreadId}
-        onCreateThread={() => createChatSessionMutation.mutate()}
+        onCreateThread={() => sessions.createSession()}
         onDeleteThread={async (threadId) => {
           const thread = threads.find((item) => item.id === threadId)
           if (thread?.sessionId) {
-            await deleteChatSessionMutation.mutateAsync(thread.sessionId)
+            await sessions.deleteSession(thread.sessionId)
           } else {
             deleteThread(threadId)
           }
           if (useChatStore.getState().threads.length === 0) {
-            createChatSessionMutation.mutate()
+            sessions.createSession()
           }
         }}
         onRenameThread={async (threadId, title) => {
           const thread = threads.find((item) => item.id === threadId)
           renameThread(threadId, title)
           if (thread?.sessionId) {
-            await updateChatSessionMutation.mutateAsync({
+            await sessions.updateSessionAsync({
               sessionId: thread.sessionId,
               title,
               activeBucketId: thread.bucketId,
@@ -682,7 +274,7 @@ export function ChatPage() {
         <TopBar
           activeBucketId={selectedBucketId}
           activeView={isAuthenticated ? activeView : 'chat'}
-          buckets={buckets}
+          buckets={library.buckets}
           grafanaUrl={GRAFANA_URL}
           models={approachModels}
           onChangeApproach={handleChangeApproach}
@@ -713,96 +305,42 @@ export function ChatPage() {
             approach={selectedApproach}
             chatMode={selectedChatMode}
             composerValue={composerValue}
-            isSending={isSendingMessage}
+            isSending={isSending}
             messages={messages}
             onAttachFile={(file) => {
-              void handleAttachFileToChat(file)
+              void attachFile(file)
             }}
             onChangeComposerValue={setComposerValue}
-            onSendMessage={handleSendMessage}
+            onSendMessage={sendMessage}
             selectedModel={selectedModel}
           />
         ) : (
           <BucketWorkspace
-            availableDocuments={availableDocuments}
-            buckets={buckets}
-            canMutateDocuments={hasBackendBuckets}
+            availableDocuments={library.availableDocuments}
+            buckets={library.buckets}
+            canMutateDocuments={library.hasBackendBuckets}
             currentUserId={currentUser!.id}
-            documents={documents}
-            onCancelStagedDocument={(uploadId) =>
-              cancelStagedDocumentMutation.mutateAsync(uploadId)
-            }
+            documents={library.documents}
+            onCancelStagedDocument={library.cancelStagedDocument}
             onCommitChanges={async (bucketId, changes) => {
-              await commitBucketDocumentsMutation.mutateAsync({ bucketId, ...changes })
+              await library.commitBucketChanges(bucketId, changes)
             }}
-            onCreateBucket={() => createBucketMutation.mutate()}
-            onDeleteBucket={(bucketId) => deleteBucketMutation.mutateAsync(bucketId)}
-            onDownloadDocuments={async (bucketId, documentIds, fallbackFileName) => {
-              await downloadBucketDocuments(bucketId, documentIds, fallbackFileName)
-            }}
-            onDeleteDocument={async (documentId) => {
-              try {
-                await deleteDocumentMutation.mutateAsync(documentId)
-              } catch (error) {
-                if (error instanceof DocumentDeleteConflictError) {
-                  const bucketNames = error.conflict.buckets.map((bucket) => bucket.name).join(', ')
-                  throw new Error(
-                    `Этот файл ещё используется в bucket: ${bucketNames}. Сначала уберите его из этих bucket.`,
-                    { cause: error },
-                  )
-                }
-                throw error
-              }
-            }}
-            onInspectBucket={setInspectedBucketId}
+            onCreateBucket={library.createBucket}
+            onDeleteBucket={library.deleteBucket}
+            onDeleteDocument={library.deleteLibraryDocument}
+            onDownloadDocuments={library.downloadDocuments}
+            onInspectBucket={library.setInspectedBucketId}
             onRetryIndexing={async (documentId, bucketId) => {
-              await retryDocumentIndexingMutation.mutateAsync({ documentId, bucketId })
+              await library.retryIndexing(documentId, bucketId)
             }}
             onSelectBucket={handleSelectBucketFromCard}
-            onStageDocument={(file) => stageDocumentMutation.mutateAsync(file)}
+            onStageDocument={library.stageDocument}
             onUpdateBucket={async (bucketId, payload) => {
-              await updateBucketMutation.mutateAsync({ bucketId, ...payload })
+              await library.updateBucket(bucketId, payload)
             }}
           />
         )}
       </section>
     </div>
   )
-}
-
-function asksSelectedBucketDocuments(message: string): boolean {
-  const normalized = message.toLowerCase()
-  return (
-    normalized.includes('bucket') ||
-    normalized.includes('бакет') ||
-    normalized.includes('в выбранн') ||
-    normalized.includes('в текущ')
-  )
-}
-
-function asksAllAvailableDocuments(message: string): boolean {
-  const normalized = message.toLowerCase()
-  return (
-    normalized.includes('всем доступ') ||
-    normalized.includes('все доступ') ||
-    normalized.includes('всех доступ') ||
-    normalized.includes('по всем документ') ||
-    normalized.includes('all available')
-  )
-}
-
-function normalizeDocumentName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '')
-    .trim()
-}
-
-function documentNameVariants(fileName: string, title: string): string[] {
-  const stem = fileName.replace(/\.[^.]+$/, '')
-  return Array.from(new Set([
-    normalizeDocumentName(fileName),
-    normalizeDocumentName(stem),
-    normalizeDocumentName(title),
-  ].filter(Boolean)))
 }

@@ -1,9 +1,13 @@
-import { Download, FileText, Folder, Pencil, Plus, RotateCcw, Trash2, Upload } from 'lucide-react'
-import type { ReactNode } from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { Plus } from 'lucide-react'
+import { useRef, useState } from 'react'
 import type { Bucket } from '../../entities/bucket/model'
 import type { DocumentItem, StagedDocumentItem } from '../../entities/document/model'
-import { Badge, Button, Card, Modal } from '../../shared/ui'
+import { Button, ConfirmDialog, Modal } from '../../shared/ui'
+import { BucketCard } from './BucketCard'
+import { BucketDocumentsPanel } from './BucketDocumentsPanel'
+import { DeleteDocumentDialog } from './DeleteDocumentDialog'
+import { DownloadPicker } from './DownloadPicker'
+import { EditBucketForm } from './EditBucketForm'
 
 type BucketWorkspaceProps = {
   buckets: Bucket[]
@@ -37,12 +41,6 @@ type BucketWorkspaceProps = {
     payload: { name: string; description: string },
   ) => Promise<void>
 }
-
-const statusTone = {
-  ready: 'success',
-  indexing: 'warning',
-  error: 'danger',
-} as const
 
 export function BucketWorkspace({
   availableDocuments,
@@ -333,56 +331,23 @@ export function BucketWorkspace({
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {buckets.map((bucket) => (
-          <Card className="p-5" key={bucket.id}>
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                  <Folder size={22} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-950">{bucket.name}</h3>
-                  <p className="mt-1 text-sm leading-6 text-slate-500">{bucket.description}</p>
-                </div>
-              </div>
-              <Badge tone={statusTone[bucket.status]}>{bucket.status}</Badge>
-            </div>
-
-            <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
-              <p className="text-sm text-slate-500">{bucket.documentCount} documents</p>
-              <div className="flex gap-2">
-                <Button onClick={() => onSelectBucket(bucket.id)} variant="ghost">
-                  Выбрать
-                </Button>
-                <Button onClick={() => openDocuments(bucket)} variant="secondary">
-                  <FileText size={16} />
-                  Документы
-                </Button>
-                <Button
-                  disabled={!canMutateDocuments}
-                  onClick={() => {
-                    setBucketActionError(null)
-                    setEditName(bucket.name)
-                    setEditDescription(bucket.description)
-                    setBucketToEdit(bucket)
-                  }}
-                  variant="ghost"
-                >
-                  <Pencil size={16} />
-                </Button>
-                <Button
-                  className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                  disabled={!canMutateDocuments}
-                  onClick={() => {
-                    setBucketActionError(null)
-                    setBucketToDelete(bucket)
-                  }}
-                  variant="ghost"
-                >
-                  <Trash2 size={16} />
-                </Button>
-              </div>
-            </div>
-          </Card>
+          <BucketCard
+            bucket={bucket}
+            canMutateDocuments={canMutateDocuments}
+            key={bucket.id}
+            onDelete={(item) => {
+              setBucketActionError(null)
+              setBucketToDelete(item)
+            }}
+            onEdit={(item) => {
+              setBucketActionError(null)
+              setEditName(item.name)
+              setEditDescription(item.description)
+              setBucketToEdit(item)
+            }}
+            onOpenDocuments={openDocuments}
+            onSelect={onSelectBucket}
+          />
         ))}
       </div>
 
@@ -393,205 +358,43 @@ export function BucketWorkspace({
         size="lg"
         title={openedBucket ? `Документы: ${openedBucket.name}` : 'Документы'}
       >
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
-          <p className="text-sm text-slate-500">
-            Bucket хранит ссылки на документы. Доступ всё равно проверяется по owner/role/tenant.
-          </p>
-          <input
-            className="hidden"
-            onChange={(event) => handleUpload(event.target.files?.[0])}
-            ref={uploadInputRef}
-            type="file"
-          />
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              disabled={visibleDocuments.length === 0 || isDownloading}
-              onClick={openDownloadPicker}
-            >
-              <Download size={18} />
-              Скачать документы
-            </Button>
-            <Button
-              disabled={!canMutateDocuments}
-              onClick={() => uploadInputRef.current?.click()}
-              variant="primary"
-            >
-              <Upload size={18} />
-              Загрузить документ
-            </Button>
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-hidden px-6 py-4">
-          {!canMutateDocuments ? (
-            <p className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-              Сейчас открыт demo bucket. Создай реальный bucket в БД, чтобы загружать и привязывать документы.
-            </p>
-          ) : null}
-          {draftError ? (
-            <p className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-              {draftError}
-            </p>
-          ) : null}
-          {downloadError && !downloadPickerOpen ? (
-            <p className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-              {downloadError}
-            </p>
-          ) : null}
-
-          <div className="grid h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-4">
-            <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-100 bg-slate-50/60 p-4">
-              <h3 className="mb-3 shrink-0 text-sm font-semibold uppercase tracking-wide text-slate-500">
-                В этом bucket
-                {bucketDocumentCount > 0 ? (
-                  <span className="ml-2 text-slate-400">{bucketDocumentCount}</span>
-                ) : null}
-              </h3>
-              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-                {visibleDocuments.length === 0 &&
-                draftedExistingDocuments.length === 0 &&
-                stagedUploads.length === 0 ? (
-                  <p className="rounded-2xl border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-500">
-                    Документов пока нет. Можно загрузить новый или добавить доступный из библиотеки.
-                  </p>
-                ) : (
-                  <>
-                    {visibleDocuments.map((document) => (
-                      <DocumentRow
-                        action={
-                          <>
-                            {document.status === 'index_failed' ? (
-                              <Button
-                                disabled={!canMutateDocuments || retryingDocumentId === document.id}
-                                onClick={() => handleRetryIndexing(document.id, openedBucket?.id)}
-                                variant="ghost"
-                              >
-                                <RotateCcw size={14} />
-                                {retryingDocumentId === document.id ? 'Повтор...' : 'Повторить'}
-                              </Button>
-                            ) : null}
-                            <Button
-                              disabled={isDownloading}
-                              onClick={() => void handleDownload([document.id])}
-                              variant="ghost"
-                            >
-                              <Download size={14} />
-                              Скачать
-                            </Button>
-                            <Button
-                              disabled={!canMutateDocuments}
-                              onClick={() => handleDraftRemoveDocument(document.id)}
-                              variant="ghost"
-                            >
-                              Убрать
-                            </Button>
-                          </>
-                        }
-                        document={document}
-                        key={document.id}
-                      />
-                    ))}
-                    {draftedExistingDocuments.map((document) => (
-                      <DocumentRow
-                        action={
-                          <>
-                            <Badge tone="warning">draft</Badge>
-                            <Button
-                              onClick={() => handleCancelDraftExistingDocument(document.id)}
-                              variant="ghost"
-                            >
-                              Убрать
-                            </Button>
-                          </>
-                        }
-                        document={document}
-                        key={`draft-existing-${document.id}`}
-                      />
-                    ))}
-                    {stagedUploads.map((upload) => (
-                      <StagedDocumentRow
-                        action={
-                          <Button onClick={() => handleCancelStagedUpload(upload.id)} variant="ghost">
-                            Убрать
-                          </Button>
-                        }
-                        document={upload}
-                        key={upload.id}
-                      />
-                    ))}
-                  </>
-                )}
-              </div>
-            </section>
-
-            <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-100 bg-white p-4">
-              <h3 className="mb-3 shrink-0 text-sm font-semibold uppercase tracking-wide text-slate-500">
-                Доступные документы
-                {availableDocumentCount > 0 ? (
-                  <span className="ml-2 text-slate-400">{availableDocumentCount}</span>
-                ) : null}
-              </h3>
-              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-                {addableDocuments.length === 0 ? (
-                  <p className="rounded-2xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-                    Нет дополнительных документов, доступных для добавления.
-                  </p>
-                ) : (
-                  addableDocuments.map((document) => (
-                    <DocumentRow
-                      action={
-                        openedBucket ? (
-                          <>
-                            <Button
-                              disabled={!canMutateDocuments}
-                              onClick={() => handleDraftExistingDocument(document.id)}
-                              variant="ghost"
-                            >
-                              Добавить
-                            </Button>
-                            {document.status === 'index_failed' ? (
-                              <Button
-                                disabled={!canMutateDocuments || retryingDocumentId === document.id}
-                                onClick={() => handleRetryIndexing(document.id)}
-                                variant="ghost"
-                              >
-                                <RotateCcw size={14} />
-                                {retryingDocumentId === document.id ? 'Повтор...' : 'Повторить'}
-                              </Button>
-                            ) : null}
-                            {canDeleteAvailableDocument(document, currentUserId) ? (
-                              <Button
-                                className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                                disabled={!canMutateDocuments}
-                                onClick={() => setDocumentToDelete(document)}
-                                variant="ghost"
-                              >
-                                Удалить
-                              </Button>
-                            ) : null}
-                          </>
-                        ) : null
-                      }
-                      document={document}
-                      key={document.id}
-                    />
-                  ))
-                )}
-              </div>
-            </section>
-          </div>
-        </div>
-
-        <div className="flex shrink-0 items-center justify-between border-t border-slate-100 px-6 py-4">
-          <p className="text-sm text-slate-500">
-            {hasDraftChanges
-              ? 'Есть несохранённые изменения. Индексация начнётся после сохранения.'
-              : 'Изменений пока нет.'}
-          </p>
-          <Button disabled={!hasDraftChanges || isSaving} onClick={handleSaveChanges} variant="primary">
-            {isSaving ? 'Сохраняем...' : 'Сохранить'}
-          </Button>
-        </div>
+        <BucketDocumentsPanel
+          addableDocuments={addableDocuments}
+          availableDocumentCount={availableDocumentCount}
+          bucketDocumentCount={bucketDocumentCount}
+          canMutateDocuments={canMutateDocuments}
+          currentUserId={currentUserId}
+          downloadError={downloadError}
+          downloadPickerOpen={downloadPickerOpen}
+          draftError={draftError}
+          draftedExistingDocuments={draftedExistingDocuments}
+          hasDraftChanges={hasDraftChanges}
+          isDownloading={isDownloading}
+          isSaving={isSaving}
+          onAddExisting={handleDraftExistingDocument}
+          onAskDelete={setDocumentToDelete}
+          onCancelDraftExisting={handleCancelDraftExistingDocument}
+          onCancelStaged={(uploadId) => {
+            void handleCancelStagedUpload(uploadId)
+          }}
+          onDownloadOne={(documentId) => {
+            void handleDownload([documentId])
+          }}
+          onOpenDownloadPicker={openDownloadPicker}
+          onRemove={handleDraftRemoveDocument}
+          onRetry={(documentId, bucketId) => {
+            void handleRetryIndexing(documentId, bucketId)
+          }}
+          onSave={() => {
+            void handleSaveChanges()
+          }}
+          onUpload={handleUpload}
+          openedBucketId={openedBucket?.id}
+          retryingDocumentId={retryingDocumentId}
+          stagedUploads={stagedUploads}
+          uploadInputRef={uploadInputRef}
+          visibleDocuments={visibleDocuments}
+        />
       </Modal>
 
       <Modal
@@ -628,40 +431,18 @@ export function BucketWorkspace({
         }}
         title="Удалить файл?"
       >
-        <div className="space-y-4">
-          <p className="text-sm leading-6 text-slate-600">
-            Вы точно хотите удалить файл{' '}
-            <span className="font-semibold text-slate-950">
-              {documentToDelete?.fileName}
-            </span>
-            ? Это удалит его из личной библиотеки документов.
-          </p>
-          {deleteError ? (
-            <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-              {deleteError}
-            </p>
-          ) : null}
-          <div className="flex justify-end gap-2">
-            <Button
-              disabled={isDeleting}
-              onClick={() => {
-                setDocumentToDelete(null)
-                setDeleteError(null)
-              }}
-              variant="secondary"
-            >
-              Отмена
-            </Button>
-            <Button
-              className="bg-red-600 text-white hover:bg-red-700"
-              disabled={isDeleting}
-              onClick={handleDeleteDocument}
-              variant="primary"
-            >
-              {isDeleting ? 'Удаляем...' : 'Удалить'}
-            </Button>
-          </div>
-        </div>
+        <DeleteDocumentDialog
+          error={deleteError}
+          fileName={documentToDelete?.fileName ?? ''}
+          isDeleting={isDeleting}
+          onCancel={() => {
+            setDocumentToDelete(null)
+            setDeleteError(null)
+          }}
+          onConfirm={() => {
+            void handleDeleteDocument()
+          }}
+        />
       </Modal>
 
       <Modal
@@ -674,41 +455,18 @@ export function BucketWorkspace({
         }}
         title="Редактировать bucket"
       >
-        <div className="space-y-4">
-          <label className="block space-y-2 text-sm text-slate-700">
-            <span>Название</span>
-            <input
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-400"
-              onChange={(event) => setEditName(event.target.value)}
-              value={editName}
-            />
-          </label>
-          <label className="block space-y-2 text-sm text-slate-700">
-            <span>Описание</span>
-            <textarea
-              className="min-h-24 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-950 outline-none focus:border-slate-400"
-              onChange={(event) => setEditDescription(event.target.value)}
-              value={editDescription}
-            />
-          </label>
-          {bucketActionError && bucketToEdit ? (
-            <p className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {bucketActionError}
-            </p>
-          ) : null}
-          <div className="flex justify-end gap-2">
-            <Button
-              disabled={isBucketActionSaving}
-              onClick={() => setBucketToEdit(null)}
-              variant="secondary"
-            >
-              Отмена
-            </Button>
-            <Button disabled={isBucketActionSaving} onClick={handleSaveBucketEdit} variant="primary">
-              {isBucketActionSaving ? 'Сохраняем...' : 'Сохранить'}
-            </Button>
-          </div>
-        </div>
+        <EditBucketForm
+          description={editDescription}
+          error={bucketActionError && bucketToEdit ? bucketActionError : null}
+          name={editName}
+          onCancel={() => setBucketToEdit(null)}
+          onChangeDescription={setEditDescription}
+          onChangeName={setEditName}
+          onSave={() => {
+            void handleSaveBucketEdit()
+          }}
+          pending={isBucketActionSaving}
+        />
       </Modal>
 
       <Modal
@@ -721,199 +479,25 @@ export function BucketWorkspace({
         }}
         title="Удалить bucket?"
       >
-        <div className="space-y-4">
+        <ConfirmDialog
+          confirmLabel="Удалить"
+          danger
+          error={bucketActionError && bucketToDelete ? bucketActionError : null}
+          errorCompact
+          onCancel={() => setBucketToDelete(null)}
+          onConfirm={() => {
+            void handleDeleteBucket()
+          }}
+          pending={isBucketActionSaving}
+          pendingLabel="Удаляем..."
+        >
           <p className="text-sm leading-6 text-slate-600">
             Bucket{' '}
             <span className="font-semibold text-slate-950">{bucketToDelete?.name}</span> будет
             удалён. Документы из него останутся в списке «Доступные документы».
           </p>
-          {bucketActionError && bucketToDelete ? (
-            <p className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {bucketActionError}
-            </p>
-          ) : null}
-          <div className="flex justify-end gap-2">
-            <Button
-              disabled={isBucketActionSaving}
-              onClick={() => setBucketToDelete(null)}
-              variant="secondary"
-            >
-              Отмена
-            </Button>
-            <Button
-              className="bg-red-600 text-white hover:bg-red-700"
-              disabled={isBucketActionSaving}
-              onClick={handleDeleteBucket}
-              variant="primary"
-            >
-              {isBucketActionSaving ? 'Удаляем...' : 'Удалить'}
-            </Button>
-          </div>
-        </div>
+        </ConfirmDialog>
       </Modal>
     </main>
   )
-}
-
-function canDeleteAvailableDocument(document: DocumentItem, currentUserId: string): boolean {
-  return document.ownerUserId === currentUserId && document.visibility === 'private'
-}
-
-function DownloadPicker({
-  documents,
-  error,
-  isDownloading,
-  onCancel,
-  onDownload,
-  onToggle,
-  onToggleAll,
-  selectedIds,
-}: {
-  documents: DocumentItem[]
-  error: string | null
-  isDownloading: boolean
-  onCancel: () => void
-  onDownload: () => void
-  onToggle: (documentId: string) => void
-  onToggleAll: () => void
-  selectedIds: string[]
-}) {
-  const selectAllRef = useRef<HTMLInputElement>(null)
-  const selectedIdSet = new Set(selectedIds)
-  const allSelected = documents.length > 0 && selectedIds.length === documents.length
-  const noneSelected = selectedIds.length === 0
-
-  useEffect(() => {
-    if (selectAllRef.current) {
-      selectAllRef.current.indeterminate = !allSelected && !noneSelected
-    }
-  }, [allSelected, noneSelected])
-
-  return (
-    <>
-      <div className="shrink-0 border-b border-slate-100 px-6 py-4">
-        <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-900">
-          <input
-            checked={allSelected}
-            className="h-4 w-4 shrink-0 rounded border-slate-300"
-            onChange={onToggleAll}
-            ref={selectAllRef}
-            type="checkbox"
-          />
-          Выбрать все
-        </label>
-      </div>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-4">
-        {documents.map((document) => (
-          <label
-            className="flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-800"
-            key={document.id}
-          >
-            <input
-              checked={selectedIdSet.has(document.id)}
-              className="h-4 w-4 shrink-0 rounded border-slate-300"
-              onChange={() => onToggle(document.id)}
-              type="checkbox"
-            />
-            <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-              <span className="truncate font-medium text-slate-950" title={document.fileName}>
-                {document.fileName}
-              </span>
-              <span className="shrink-0 text-xs text-slate-500">{document.sourceType}</span>
-            </span>
-          </label>
-        ))}
-        {error ? (
-          <p className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>
-        ) : null}
-      </div>
-      <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 px-6 py-4">
-        <Button disabled={isDownloading} onClick={onCancel}>
-          Отменить
-        </Button>
-        <Button
-          disabled={noneSelected || isDownloading}
-          onClick={onDownload}
-          variant="primary"
-        >
-          {isDownloading ? 'Скачиваем...' : 'Скачать'}
-        </Button>
-      </div>
-    </>
-  )
-}
-
-function StagedDocumentRow({
-  action,
-  document,
-}: {
-  action?: ReactNode
-  document: StagedDocumentItem
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
-      <div>
-        <p className="font-medium text-slate-950">{document.fileName}</p>
-        <p className="mt-1 text-sm text-slate-500">
-          {document.sourceType} · staged · {document.uploadedAt}
-        </p>
-      </div>
-      <div className="flex items-center gap-2">
-        <Badge tone="warning">{document.status}</Badge>
-        {action}
-      </div>
-    </div>
-  )
-}
-
-function DocumentRow({
-  action,
-  document,
-}: {
-  action?: ReactNode
-  document: DocumentItem
-}) {
-  const isIndexing = document.status === 'indexing'
-  const isUploadedOnly = document.status === 'uploaded'
-  return (
-    <div className="rounded-2xl border border-slate-200 p-4">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="font-medium text-slate-950">{document.fileName}</p>
-          <p className="mt-1 text-sm text-slate-500">
-            {document.sourceType} · {document.visibility} · {document.uploadedAt}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge tone={statusToneForDocument(document.status)}>{document.status}</Badge>
-          {action}
-        </div>
-      </div>
-      {isIndexing ? (
-        <div className="mt-3">
-          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full w-1/2 animate-pulse rounded-full bg-amber-400" />
-          </div>
-          <p className="mt-2 text-xs text-slate-500">
-            Документ сохраняется в Qdrant. Статус обновляется автоматически.
-          </p>
-        </div>
-      ) : null}
-      {isUploadedOnly ? (
-        <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          Документ сохранён в библиотеке, но для него ещё не создана задача индексации.
-        </p>
-      ) : null}
-    </div>
-  )
-}
-
-function statusToneForDocument(status: DocumentItem['status']) {
-  if (status === 'indexed') {
-    return 'success'
-  }
-  if (status === 'error' || status === 'index_failed') {
-    return 'danger'
-  }
-  return 'warning'
 }
