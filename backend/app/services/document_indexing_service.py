@@ -1,6 +1,6 @@
 import logging
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -8,9 +8,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.clients.qdrant_store import QdrantStore
-from app.db.models import BucketDocument, DocumentAsset, DocumentIndexingJob
+from app.db.models import (
+    BucketDocument,
+    DocumentAclEntry,
+    DocumentAsset,
+    DocumentIndexingJob,
+    FeedbackItem,
+)
+from app.services.access_policy import UserContext, can_read_document
 from app.services.chunking import DocumentChunk, chunk_documents
 from app.services.document_loader import RawDocument, load_raw_documents
+from app.services.feedback_index_policy import feedback_item_enters_product_qdrant
 from app.services.image_digest_service import load_image_digest_documents
 from app.services.indexing_event_publisher import IndexingEventPublisher
 from app.services.object_storage import (
@@ -23,6 +31,21 @@ from app.services.ollama_client import OllamaClient
 
 logger = logging.getLogger(__name__)
 IMAGE_SOURCE_TYPES = {"png", "jpg", "jpeg"}
+_EMPTY_CHUNKS_MESSAGE = "No chunks produced for uploaded document."
+
+
+class IndexingStageError(Exception):
+    def __init__(self, stage: str, message: str) -> None:
+        super().__init__(message)
+        self.stage = stage
+
+
+@dataclass(frozen=True)
+class FeedbackIndexRow:
+    id: str
+    feedback_class: str
+    body: str
+    index_in_rag: bool
 
 
 class DocumentIndexingService:
@@ -49,36 +72,58 @@ class DocumentIndexingService:
         self._object_storage = object_storage
         self._metrics = metrics
 
-    async def process_jobs(self, job_ids: list[str]) -> None:
+    async def process_jobs(self, job_ids: list[str], *, message_tenant_id: str | None) -> None:
         for job_id in job_ids:
-            await self.process_job(job_id)
+            await self.process_job(job_id, message_tenant_id=message_tenant_id)
 
-    async def process_job(self, job_id: str) -> None:
+    async def process_job(self, job_id: str, *, message_tenant_id: str | None) -> None:
         async with self._session_factory() as session:
             job = await session.scalar(
                 select(DocumentIndexingJob).where(DocumentIndexingJob.id == job_id)
             )
             if job is None:
                 return
+            if not _message_tenant_matches(message_tenant_id, job.tenant_id):
+                logger.warning(
+                    "Indexing skipped job_id=%s document_id=%s stage=%s",
+                    job.id,
+                    job.document_id,
+                    "tenant_check",
+                )
+                return
             if job.status == "completed":
                 return
-            update_document_status = _should_update_document_status(job)
             document = await session.scalar(
-                select(DocumentAsset).where(DocumentAsset.id == job.document_id)
+                select(DocumentAsset).where(
+                    DocumentAsset.id == job.document_id,
+                    DocumentAsset.tenant_id == job.tenant_id,
+                )
             )
             if document is None:
-                job.status = "failed"
-                job.error = "Document asset not found."
-                await session.commit()
-                await self._publish_failed(
-                    job_id=job_id,
-                    document_id=None,
-                    bucket_id=job.bucket_id,
-                    tenant_id=job.tenant_id,
+                await self._fail_before_running(
+                    session=session,
+                    job=job,
+                    document=None,
+                    stage="load_asset",
                     error="Document asset not found.",
+                    update_documents=False,
+                    publish=True,
                 )
-                self._observe_indexing("failed")
                 return
+            acl_error = await _acl_check_error(session=session, job=job, document=document)
+            if acl_error is not None:
+                await self._fail_before_running(
+                    session=session,
+                    job=job,
+                    document=document,
+                    stage="acl_check",
+                    error=acl_error,
+                    update_documents=True,
+                    publish=False,
+                )
+                return
+
+            update_document_status = _should_update_document_status(job)
             job.status = "running"
             job.attempts += 1
             if update_document_status:
@@ -87,14 +132,33 @@ class DocumentIndexingService:
             if bucket_link is not None:
                 bucket_link.indexing_status = "indexing"
                 bucket_link.indexing_error = None
-            await session.commit()
+            feedback_rows = await _load_feedback_index_rows(session=session, job=job)
             tenant_id = job.tenant_id
             bucket_id = job.bucket_id
             document_id = document.id
+            await session.commit()
 
         try:
-            chunks_indexed = await self._index_document(document=document, bucket_id=bucket_id)
+            if feedback_rows:
+                chunks_indexed = await self._index_feedback_rows(
+                    document=document,
+                    bucket_id=bucket_id,
+                    tenant_id=tenant_id,
+                    rows=feedback_rows,
+                )
+            else:
+                chunks_indexed = await self._index_document(
+                    document=document,
+                    bucket_id=bucket_id,
+                )
         except Exception as exc:
+            stage, message = _stage_and_message(exc)
+            logger.error(
+                "Indexing failed job_id=%s document_id=%s stage=%s",
+                job_id,
+                document_id,
+                stage,
+            )
             async with self._session_factory() as session:
                 failed_job = await session.scalar(
                     select(DocumentIndexingJob).where(DocumentIndexingJob.id == job_id)
@@ -104,22 +168,22 @@ class DocumentIndexingService:
                 )
                 if failed_job is not None:
                     failed_job.status = "failed"
-                    failed_job.error = str(exc)
-                if failed_job is not None and _should_update_document_status(failed_job) and failed_document is not None:
-                    failed_document.status = "index_failed"
-                    failed_document.error = str(exc)
-                if failed_job is not None:
-                    failed_link = await _get_bucket_link(session=session, job=failed_job)
-                    if failed_link is not None:
-                        failed_link.indexing_status = "index_failed"
-                        failed_link.indexing_error = str(exc)
+                    failed_job.error = message
+                    failed_job.failed_stage = stage
+                    await _apply_index_failed_statuses(
+                        session=session,
+                        job=failed_job,
+                        document=failed_document,
+                        error=message,
+                    )
                 await session.commit()
             await self._publish_failed(
                 job_id=job_id,
                 document_id=document_id,
                 bucket_id=bucket_id,
                 tenant_id=tenant_id,
-                error=str(exc),
+                error=message,
+                failed_stage=stage,
             )
             self._observe_indexing("failed")
             return
@@ -135,6 +199,7 @@ class DocumentIndexingService:
                 completed_job.status = "completed"
                 completed_job.chunks_indexed = chunks_indexed
                 completed_job.error = None
+                completed_job.failed_stage = None
             if completed_job is not None and completed_document is not None:
                 completed_document.status = "indexed"
                 completed_document.error = None
@@ -152,6 +217,50 @@ class DocumentIndexingService:
             chunks_indexed=chunks_indexed,
         )
         self._observe_indexing("completed")
+
+    async def _fail_before_running(
+        self,
+        *,
+        session: AsyncSession,
+        job: DocumentIndexingJob,
+        document: DocumentAsset | None,
+        stage: str,
+        error: str,
+        update_documents: bool,
+        publish: bool,
+    ) -> None:
+        job.attempts += 1
+        job.status = "failed"
+        job.failed_stage = stage
+        job.error = error
+        if update_documents:
+            await _apply_index_failed_statuses(
+                session=session,
+                job=job,
+                document=document,
+                error=error,
+            )
+        document_id = job.document_id
+        bucket_id = job.bucket_id
+        tenant_id = job.tenant_id
+        job_id = job.id
+        await session.commit()
+        logger.error(
+            "Indexing failed job_id=%s document_id=%s stage=%s",
+            job_id,
+            document_id,
+            stage,
+        )
+        if publish:
+            await self._publish_failed(
+                job_id=job_id,
+                document_id=document_id,
+                bucket_id=bucket_id,
+                tenant_id=tenant_id,
+                error=error,
+                failed_stage=stage,
+            )
+        self._observe_indexing("failed")
 
     def _observe_indexing(self, result: str) -> None:
         if self._metrics is not None:
@@ -187,6 +296,7 @@ class DocumentIndexingService:
         bucket_id: str | None,
         tenant_id: str | None,
         error: str,
+        failed_stage: str,
     ) -> None:
         if self._event_publisher is None:
             return
@@ -197,6 +307,7 @@ class DocumentIndexingService:
                 bucket_id=bucket_id,
                 tenant_id=tenant_id,
                 error=error,
+                failed_stage=failed_stage,
             )
         except Exception:
             logger.exception("Failed to publish document.index_failed for job=%s", job_id)
@@ -213,29 +324,93 @@ class DocumentIndexingService:
         )
         chunks = chunk_documents(raw_documents)
         if not chunks:
-            raise ValueError("No chunks produced for uploaded document.")
+            raise ValueError(_EMPTY_CHUNKS_MESSAGE)
+        return await self._embed_and_upsert(chunks=chunks, document=document, bucket_id=bucket_id)
 
-        first_vector = await self._ollama_client.embed(self._embedding_model, chunks[0].content)
+    async def _index_feedback_rows(
+        self,
+        *,
+        document: DocumentAsset,
+        bucket_id: str,
+        tenant_id: str,
+        rows: list[FeedbackIndexRow],
+    ) -> int:
+        chunks = _feedback_chunks(
+            document=document,
+            bucket_id=bucket_id,
+            tenant_id=tenant_id,
+            rows=rows,
+        )
+        if not chunks:
+            return 0
+        return await self._embed_and_upsert(
+            chunks=chunks,
+            document=document,
+            bucket_id=bucket_id,
+            tenant_id=tenant_id,
+            feedback=True,
+        )
+
+    async def _embed_and_upsert(
+        self,
+        *,
+        chunks: list[DocumentChunk],
+        document: DocumentAsset,
+        bucket_id: str,
+        tenant_id: str | None = None,
+        feedback: bool = False,
+    ) -> int:
+        first_vector = await self._embed_for_index(chunks[0].content)
         self._qdrant_store.ensure_collection(vector_size=len(first_vector), recreate=False)
-
         pending: list[tuple[str, list[float], dict[str, object]]] = [
             (
                 _point_id_for_chunk(document_id=document.id, bucket_id=bucket_id, chunk=chunks[0]),
                 first_vector,
-                _payload_for_chunk(chunk=chunks[0], document=document, bucket_id=bucket_id),
+                _chunk_payload(
+                    chunk=chunks[0],
+                    document=document,
+                    bucket_id=bucket_id,
+                    tenant_id=tenant_id,
+                    feedback=feedback,
+                ),
             )
         ]
         for chunk in chunks[1:]:
-            vector = await self._ollama_client.embed(self._embedding_model, chunk.content)
+            vector = await self._embed_for_index(chunk.content)
             pending.append(
                 (
                     _point_id_for_chunk(document_id=document.id, bucket_id=bucket_id, chunk=chunk),
                     vector,
-                    _payload_for_chunk(chunk=chunk, document=document, bucket_id=bucket_id),
+                    _chunk_payload(
+                        chunk=chunk,
+                        document=document,
+                        bucket_id=bucket_id,
+                        tenant_id=tenant_id,
+                        feedback=feedback,
+                    ),
                 )
             )
-        self._qdrant_store.upsert_chunks(pending)
+        self._upsert_for_index(pending)
         return len(pending)
+
+    async def _embed_for_index(self, content: str) -> list[float]:
+        try:
+            return await self._ollama_client.embed(self._embedding_model, content)
+        except IndexingStageError:
+            raise
+        except Exception as exc:
+            raise IndexingStageError("embed", str(exc)) from exc
+
+    def _upsert_for_index(
+        self,
+        pending: list[tuple[str, list[float], dict[str, object]]],
+    ) -> None:
+        try:
+            self._qdrant_store.upsert_chunks(pending)
+        except IndexingStageError:
+            raise
+        except Exception as exc:
+            raise IndexingStageError("upsert", str(exc)) from exc
 
 
 def combine_raw_documents(
@@ -298,7 +473,7 @@ def _load_raw_documents_for_asset(
     with TemporaryDirectory(prefix="document-index-") as temporary_dir_name:
         temporary_dir = Path(temporary_dir_name)
         temporary_path = temporary_dir / file_name
-        object_storage.materialize(source_ref, temporary_path)
+        _materialize_for_index(object_storage, source_ref, temporary_path)
 
         loaded_documents = load_raw_documents(
             temporary_dir,
@@ -341,7 +516,7 @@ async def _load_image_digest_documents_for_asset(
     with TemporaryDirectory(prefix="document-index-vision-") as temporary_dir_name:
         temporary_dir = Path(temporary_dir_name)
         temporary_path = temporary_dir / file_name
-        object_storage.materialize(source_ref, temporary_path)
+        _materialize_for_index(object_storage, source_ref, temporary_path)
 
         loaded_documents = await load_image_digest_documents(
             temporary_dir,
@@ -434,3 +609,176 @@ def _payload_for_chunk(
         "synthetic": chunk.metadata.get("synthetic") is True,
         "language": "ru",
     }
+
+
+def _chunk_payload(
+    *,
+    chunk: DocumentChunk,
+    document: DocumentAsset,
+    bucket_id: str,
+    tenant_id: str | None,
+    feedback: bool,
+) -> dict[str, object]:
+    payload = _payload_for_chunk(chunk=chunk, document=document, bucket_id=bucket_id)
+    if not feedback:
+        return payload
+    payload["document_id"] = document.id
+    payload["tenant_id"] = tenant_id if tenant_id is not None else document.tenant_id
+    payload["bucket_id"] = bucket_id
+    payload["feedback_item_id"] = chunk.metadata["feedback_item_id"]
+    payload["feedback_class"] = chunk.metadata["feedback_class"]
+    payload["index_in_rag"] = True
+    return payload
+
+
+def _feedback_chunks(
+    *,
+    document: DocumentAsset,
+    bucket_id: str,
+    tenant_id: str,
+    rows: list[FeedbackIndexRow],
+) -> list[DocumentChunk]:
+    chunks: list[DocumentChunk] = []
+    for row in rows:
+        if not feedback_item_enters_product_qdrant(
+            feedback_class=row.feedback_class,
+            index_in_rag=row.index_in_rag,
+        ):
+            continue
+        content = row.body.strip()
+        if not content:
+            continue
+        chunks.append(
+            DocumentChunk(
+                id=row.id,
+                document_id=document.id,
+                title=document.title,
+                content=content,
+                source_type="feedback",
+                source_path=f"feedback:{row.id}",
+                domain="feedback",
+                feature=[],
+                chunk_index=len(chunks),
+                tenant_id=tenant_id,
+                bucket_id=bucket_id,
+                processing_status="indexed",
+                metadata={
+                    "feedback_item_id": row.id,
+                    "feedback_class": row.feedback_class,
+                    "document_asset_id": document.id,
+                },
+            )
+        )
+    return chunks
+
+
+def _materialize_for_index(
+    object_storage: ObjectStorage,
+    source_ref: str,
+    destination: Path,
+) -> None:
+    try:
+        object_storage.materialize(source_ref, destination)
+    except IndexingStageError:
+        raise
+    except Exception as exc:
+        raise IndexingStageError("load_object", str(exc)) from exc
+
+
+def _message_tenant_matches(message_tenant_id: str | None, job_tenant_id: str) -> bool:
+    if message_tenant_id is None:
+        return False
+    tenant_id = message_tenant_id.strip()
+    if not tenant_id:
+        return False
+    return tenant_id == job_tenant_id
+
+
+def _roles_from_owner_json(raw: object) -> frozenset[str]:
+    if not isinstance(raw, list):
+        return frozenset()
+    roles: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        role = item.strip()
+        if role:
+            roles.append(role)
+    return frozenset(roles)
+
+
+def _stage_and_message(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, IndexingStageError):
+        return exc.stage, str(exc)
+    if isinstance(exc, ValueError):
+        return "parse", str(exc)
+    return "index", str(exc)
+
+
+async def _acl_check_error(
+    *,
+    session: AsyncSession,
+    job: DocumentIndexingJob,
+    document: DocumentAsset,
+) -> str | None:
+    owner_user_id = (job.owner_user_id or "").strip()
+    if not owner_user_id:
+        return "Indexing job has no owner."
+    actor = UserContext(
+        tenant_id=job.tenant_id,
+        user_id=owner_user_id,
+        roles=_roles_from_owner_json(job.owner_roles_json),
+    )
+    acl_entries = (
+        await session.scalars(
+            select(DocumentAclEntry).where(
+                DocumentAclEntry.document_id == document.id,
+                DocumentAclEntry.tenant_id == job.tenant_id,
+            )
+        )
+    ).all()
+    if not can_read_document(document=document, user=actor, acl_entries=list(acl_entries)):
+        return "Document access denied."
+    return None
+
+
+async def _apply_index_failed_statuses(
+    *,
+    session: AsyncSession,
+    job: DocumentIndexingJob,
+    document: DocumentAsset | None,
+    error: str,
+) -> None:
+    if document is not None and _should_update_document_status(job):
+        document.status = "index_failed"
+        document.error = error
+    link = await _get_bucket_link(session=session, job=job)
+    if link is not None:
+        link.indexing_status = "index_failed"
+        link.indexing_error = error
+
+
+async def _load_feedback_index_rows(
+    *,
+    session: AsyncSession,
+    job: DocumentIndexingJob,
+) -> list[FeedbackIndexRow]:
+    rows = (
+        await session.scalars(
+            select(FeedbackItem)
+            .where(
+                FeedbackItem.tenant_id == job.tenant_id,
+                FeedbackItem.document_id == job.document_id,
+            )
+            .order_by(FeedbackItem.created_at, FeedbackItem.id)
+        )
+    ).all()
+    return [
+        FeedbackIndexRow(
+            id=row.id,
+            feedback_class=row.feedback_class,
+            body=row.body,
+            index_in_rag=row.index_in_rag,
+        )
+        for row in rows
+    ]

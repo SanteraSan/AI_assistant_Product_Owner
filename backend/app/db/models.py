@@ -1,7 +1,21 @@
 from datetime import date, datetime
 from uuid import uuid4
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    false,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -204,7 +218,60 @@ class DocumentIndexingJob(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     chunks_indexed: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failed_stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    owner_user_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    owner_roles_json: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+    )
     metadata_json: Mapped[dict[str, object]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class FeedbackItem(Base):
+    """One raw feedback row. No ORM relationships, same as DemoDeal."""
+
+    __tablename__ = "feedback_items"
+    __table_args__ = (
+        CheckConstraint(
+            "feedback_class IN ('noise', 'churn_signal', 'bug', 'feature')",
+            name="ck_feedback_items_feedback_class",
+        ),
+        CheckConstraint(
+            "index_in_rag = false OR feedback_class IN ('bug', 'feature')",
+            name="ck_feedback_items_index_in_rag_class",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
+    tenant_id: Mapped[str] = mapped_column(String(255), index=True)
+    bucket_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_buckets.id", ondelete="CASCADE"),
+        index=True,
+    )
+    document_id: Mapped[str | None] = mapped_column(
+        ForeignKey("document_assets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    feedback_class: Mapped[str] = mapped_column(String(32))
+    body: Mapped[str] = mapped_column(Text)
+    index_in_rag: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=false(),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

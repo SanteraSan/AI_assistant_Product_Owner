@@ -30,6 +30,16 @@ logging.basicConfig(
 logger = logging.getLogger("indexing_worker")
 
 
+def message_tenant_id(payload: dict[str, object]) -> str | None:
+    raw = payload.get("tenant_id")
+    if not isinstance(raw, str):
+        return None
+    tenant_id = raw.strip()
+    if not tenant_id:
+        return None
+    return tenant_id
+
+
 async def run_worker() -> None:
     settings = get_settings()
     engine = create_engine(settings.postgres_dsn)
@@ -154,7 +164,10 @@ async def run_worker() -> None:
                 payload.get("event_id"),
                 clean_ids,
             )
-            await indexing_service.process_jobs(clean_ids)
+            await indexing_service.process_jobs(
+                clean_ids,
+                message_tenant_id=message_tenant_id(payload),
+            )
             await consumer.commit()
             logger.info("Completed indexing.requested jobs=%s", clean_ids)
     finally:

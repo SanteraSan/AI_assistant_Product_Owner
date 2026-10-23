@@ -31,6 +31,7 @@ def test_publisher_builds_indexed_payload_shape() -> None:
             bucket_id="bucket-1",
             tenant_id="local_demo",
             error="boom",
+            failed_stage="index",
         )
 
     asyncio.run(_run())
@@ -39,6 +40,9 @@ def test_publisher_builds_indexed_payload_shape() -> None:
     assert sent[0][1]["chunks_indexed"] == 3
     assert sent[1][1]["event_type"] == "document.index_failed"
     assert sent[1][1]["error"] == "boom"
+    assert sent[1][1]["failed_stage"] == "index"
+    assert sent[1][1]["document_id"] == "doc-2"
+    assert "user_id" not in sent[1][1]
 
 
 def test_process_job_publishes_indexed_event() -> None:

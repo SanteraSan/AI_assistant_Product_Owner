@@ -1,0 +1,26 @@
+---
+description: Order of feedback-plan subagents when the user asks to implement a stage
+alwaysApply: true
+---
+
+# Feedback pipeline
+
+Запускай этот конвейер только когда пользователь просит реализовать этап плана фидбека. На вопросы, обсуждение и правки плана роли не вызывай.
+
+Один этап за сообщение. Жди завершения каждой роли и передавай следующей её результат. Роли лежат в `.cursor/agents/`.
+
+1. architect — только RFC, код не меняет.
+2. developer — код строго по RFC.
+3. reviewer — сверка с RFC, мелочи может поправить сам.
+4. tester — тесты и pytest, продуктовую логику не чинит.
+
+Красный тест возвращай developer. Если сломан сам RFC, возвращай architect.
+
+Не использовать как источник правды старые черновики в `ML|LLM|RAG` с балансом классов, Ragas и моделью `qwen3.5:9b`. Замер и zero-shot идут на `qwen3.8:latest`.
+
+Корпус для этапа 2 уже собран, заново его не генерировать:
+- `/home/santera/ML|LLM|RAG/sintetic_data/bugs.jsonl` — 60 багов
+- `/home/santera/ML|LLM|RAG/sintetic_data/features.jsonl` — 15 фич
+- `/home/santera/ML|LLM|RAG/sintetic_data/noise.jsonl` — 350 шума
+- `/home/santera/ML|LLM|RAG/sintetic_data/churn.jsonl` — 75 коротких сигналов
+- `/home/santera/ML|LLM|RAG/sintetic_data/castom.jsonl` — ручной holdout, 20 строк. Не переписывать и не дополнять моделью. Копия в репозитории: `data/feedback/v1/holdout.jsonl`.

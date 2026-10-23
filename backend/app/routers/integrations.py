@@ -80,7 +80,11 @@ def create_integrations_router(
                 request_id=request.headers.get("x-request-id"),
             )
         elif document_indexing_service is not None and indexing_job_ids:
-            background_tasks.add_task(document_indexing_service.process_jobs, indexing_job_ids)
+            background_tasks.add_task(
+                document_indexing_service.process_jobs,
+                indexing_job_ids,
+                message_tenant_id=user.tenant_id,
+            )
 
         return IntegrationIngestResponse(
             document_id=document.id,

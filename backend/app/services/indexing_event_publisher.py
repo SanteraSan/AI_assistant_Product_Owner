@@ -114,6 +114,7 @@ class IndexingEventPublisher:
         bucket_id: str | None,
         tenant_id: str | None,
         error: str,
+        failed_stage: str,
     ) -> dict[str, Any]:
         payload = {
             "event_type": "document.index_failed",
@@ -123,6 +124,7 @@ class IndexingEventPublisher:
             "bucket_id": bucket_id,
             "tenant_id": tenant_id,
             "error": error[:2000],
+            "failed_stage": failed_stage,
             "emitted_at": datetime.now(UTC).isoformat(),
         }
         key = document_id or job_id

@@ -24,6 +24,13 @@ from app.services.object_storage import LocalFilesystemStorage, ObjectStorage, r
 PERSONAL_INDEX_BUCKET_ID = "__personal__"
 
 
+def indexing_job_actor_fields(user: UserContext) -> dict[str, object]:
+    return {
+        "owner_user_id": user.user_id,
+        "owner_roles_json": sorted(user.roles),
+    }
+
+
 @dataclass(frozen=True)
 class DocumentDeleteResult:
     deleted: bool
@@ -490,6 +497,7 @@ class BucketService:
                     document_id=document_id,
                     status="pending",
                     metadata_json={"source": "retry_indexing"},
+                    **indexing_job_actor_fields(user),
                 )
             )
             await session.commit()
@@ -627,6 +635,7 @@ class BucketService:
                         document_id=document.id,
                         status="pending",
                         metadata_json={"source": "bucket_existing_document_commit"},
+                        **indexing_job_actor_fields(user),
                     )
                 )
                 committed_documents.append(document)
@@ -670,6 +679,7 @@ class BucketService:
                                 document_id=existing_document.id,
                                 status="pending",
                                 metadata_json={"source": "bucket_existing_upload_dedup"},
+                                **indexing_job_actor_fields(user),
                             )
                         )
                         indexing_job_ids.append(job_id)
@@ -723,6 +733,7 @@ class BucketService:
                         document_id=document_id,
                         status="pending",
                         metadata_json={"source": "bucket_commit"},
+                        **indexing_job_actor_fields(user),
                     )
                 )
                 upload.status = "committed"
@@ -813,6 +824,7 @@ class BucketService:
                         document_id=document_id,
                         status="pending",
                         metadata_json={"source": "personal_commit"},
+                        **indexing_job_actor_fields(user),
                     )
                 )
                 upload.status = "committed"

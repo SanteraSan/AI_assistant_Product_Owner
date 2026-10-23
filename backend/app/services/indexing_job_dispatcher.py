@@ -47,7 +47,11 @@ class IndexingJobDispatcher:
             )
             return "kafka"
         if self._document_indexing_service is not None:
-            background_tasks.add_task(self._document_indexing_service.process_jobs, job_ids)
+            background_tasks.add_task(
+                self._document_indexing_service.process_jobs,
+                job_ids,
+                message_tenant_id=tenant_id,
+            )
             return "background"
         logger.warning("Indexing jobs created but no dispatcher path available: %s", job_ids)
         return "noop"

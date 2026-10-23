@@ -63,7 +63,11 @@ def create_bucket_router(
             )
             return
         if document_indexing_service is not None and job_ids:
-            background_tasks.add_task(document_indexing_service.process_jobs, job_ids)
+            background_tasks.add_task(
+                document_indexing_service.process_jobs,
+                job_ids,
+                message_tenant_id=user.tenant_id,
+            )
 
     def normalized_visibility(raw_visibility: str) -> str:
         visibility = raw_visibility.strip().lower()

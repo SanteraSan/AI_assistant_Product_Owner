@@ -19,7 +19,13 @@ class _FakeIndexingService:
     def __init__(self) -> None:
         self.scheduled: list[list[str]] = []
 
-    async def process_jobs(self, job_ids: list[str]) -> None:
+    async def process_jobs(
+        self,
+        job_ids: list[str],
+        *,
+        message_tenant_id: str | None,
+    ) -> None:
+        del message_tenant_id
         self.scheduled.append(job_ids)
 
 
@@ -70,3 +76,6 @@ def test_dispatcher_falls_back_to_background_tasks() -> None:
     mode = asyncio.run(_run())
     assert mode == "background"
     assert len(background.tasks) == 1
+    task = background.tasks[0]
+    assert task.args == (["job-9"],)
+    assert task.kwargs == {"message_tenant_id": "local_demo"}
