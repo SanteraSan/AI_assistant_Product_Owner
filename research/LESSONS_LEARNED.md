@@ -31,6 +31,45 @@
 - как это влияет на проект.
 ```
 
+## 2026-10-25: Замер саммари фидбека H0/H1
+
+Контекст:
+- Задача PO из `data/feedback/v1/summary_gold.json`: «Собери недельное саммари критичных багов.» и «Какие фичи просят?». Срезы в отчёте: `critical_bugs` и `requested_features`.
+- Корпус v1, знаменатель — counts манифеста: noise 350, churn_signal 75, bug 68, feature 17, total 510.
+- `exact_copies`: bug 8, feature 2. До копий было 500 строк: bug 60 и feature 15. В индекс по флагу попадают не копии: `index_true_count` 75, `index_true_by_class` — bug 60, feature 15.
+- shares, как в манифесте, без округления в проценты: noise 0.686275, churn_signal 0.147059, bug 0.133333, feature 0.033333. Рядом `target_shares` 0.7 / 0.15 / 0.12 / 0.03, `tolerance_pp` 2.0, `shares_within_tolerance` true.
+- `holdout_gate`: ok true, rows 20, sha256 `c4daa546033646b738e2709f0ae7a49c025e17f212ff4479b70382d81cb83728`, mismatches пуст.
+- Протокол: чат `qwen3.8:latest`, эмбеддинги `nomic-embed-text`, оба имени с флагов CLI, `product_defaults_not_used` true. `temperature` 0.1, `top_p` 0.9, `judge_temperature` 0.0. `top_k` 5, `repeats` 5, `num_ctx` 16384, `think` false, `keep_alive` 10m.
+- Коллекция замера `feedback_eval_v1`; продуктовая коллекция `documents`. `tenant_id` `feedback_eval`, `bucket_id` `feedback_eval_v1`. `h0_index_in_rag` null, `h1_index_in_rag` true.
+- Промпт `research/prompts/feedback_summary_user.txt`, судья `research/prompts/feedback_summary_judge.txt`.
+- Объём. `volume.source` — `manifest_checked_against_eval_collection`. `volume.postgres` — null. Причина: «Seed этапа 2 в рабочую Postgres не выполнялся. Знаменатель — counts манифеста, проверенные scroll коллекции feedback_eval_v1. Продуктовый бакет не засевается.»
+- `volume.match` true. `eval_collection_counts` совпадают с counts: 350, 75, 68, 17, 510. `eval_index_true_by_class` совпадает с манифестом: bug 60, feature 15. Scroll относится к коллекции `feedback_eval_v1`, не к продуктовой `documents` и не к рабочей Postgres.
+
+Наблюдение:
+
+График этапа — эта таблица. Средние только из `summary`.
+
+| срез | рука | retrieval_recall_mean | faithfulness_mean | answer_coverage_mean | must_not_hit_runs | judge_faithfulness_mean | judge_answer_coverage_mean |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| critical_bugs | H0 | 0.4 | 1.0 | 0.4 | 0 | 1.0 | 1.0 |
+| critical_bugs | H1 | 0.5 | 1.0 | 0.5 | 0 | 1.0 | 1.0 |
+| requested_features | H0 | 0.5 | 1.0 | 0.5 | 0 | 1.0 | 1.0 |
+| requested_features | H1 | 0.5 | 1.0 | 0.5 | 0 | 1.0 | 1.0 |
+
+- `decision_source` — markers. Судья и маркеры разошлись по `answer_coverage`: у маркеров 0.4 и 0.5 на багах и 0.5 на фичах, у судьи `judge_answer_coverage_mean` 1.0 во всех четырёх клетках. faithfulness у обоих слоёв 1.0. `must_not_hit_runs` равен 0 во всех четырёх клетках. Решение по маркерам.
+- `h1_acceptance.accepted` true означает: must_not в H1 пуст, recall и faithfulness не просели. Рядом поля: `bugs_must_not_cleared` true, `bugs_must_not_hit_runs_h0` 0, `bugs_must_not_hit_runs_h1` 0, `bugs_must_not_already_clear_in_h0` true, `faithfulness_not_regressed` true, `retrieval_recall_not_regressed` true, `fixed_thresholds_not_used` true.
+- Рычаг «из ответов пропали фразы шума» не наблюдался: в H0 попаданий must_not тоже не было.
+- Сдвиг средних есть только у багов: recall 0.4 → 0.5 и coverage 0.4 → 0.5. Faithfulness багов осталась 1.0. Фичи остались на 0.5 / 1.0 / 0.5. Принятие H1 считается по багам; фичи в `h1_acceptance` не входят.
+- Пороги 0.65 и 0.85 в этом замере не стоят.
+
+Решение:
+- Правило этапа 1 остаётся: шум и короткие сигналы остаются в Postgres, в продуктовый Qdrant идут только bug и feature. Этот этап правило не переоткрывает. Замер сравнивал руку без фильтра флага (`h0_index_in_rag` null) и руку `index_in_rag` true на коллекции `feedback_eval_v1`.
+- H1 принят по узкому критерию выше. Подтверждения, что из ответов ушли фразы шума, нет.
+
+Вывод:
+- H2 в этой записи — будущая работа, не сделанное. Из `h2`: `implemented` false, `needed` false, reason — `recall capped by k, not by repeated scenarios`, `mean_unique_scenarios` 5.0, `capacity` 5, `never_found` — csv_import, integrations, projects, search, sprints.
+- Классификатор, MLflow, недельный cron — несделанное. Их в отчёте замера нет.
+
 ## 2026-09-15: E2.1 этап A — ModelGateway + synthetic guard (без live Gemini)
 
 Контекст:

@@ -1900,3 +1900,21 @@ PDF, в котором есть хотя бы два диапазона «мес
 python backend/scripts/build_feedback_corpus.py --write-jsonl
 python backend/scripts/build_feedback_corpus.py --write-jsonl --seed --tenant-id TENANT --bucket-id BUCKET
 ```
+
+### Замер саммари
+
+Задача PO: «Собери недельное саммари критичных багов.» и «Какие фичи просят?».
+
+Сырые строки лежат в `data/feedback/v1/` (`raw.jsonl`, `cleaned.jsonl`, `holdout.jsonl`, `manifest.json`). В продуктовый Qdrant по-прежнему попадают только строки с `index_in_rag`.
+
+Замер рабочую Postgres не засевал. В отчёте `volume.postgres` равен null, причина — «Seed этапа 2 в рабочую Postgres не выполнялся. Знаменатель — counts манифеста, проверенные scroll коллекции feedback_eval_v1. Продуктовый бакет не засевается.» Команды `--seed` выше остаются описанием скрипта сборки.
+
+Повтор из корня репозитория. Отчёт — `research/feedback_summary_eval_latest.json`, вывод — запись журнала от 2026-10-25. H1 принят, потому что must_not в H1 пуст, а recall и faithfulness не просели; фразы шума в ответах H0 уже отсутствовали.
+
+```bash
+python backend/scripts/eval_feedback_summary.py \
+    --model qwen3.8:latest \
+    --embedding-model nomic-embed-text
+```
+
+Других флагов у скрипта нет. Иная модель завершает прогон с кодом 2. Скрипт перезаписывает `research/feedback_summary_eval_latest.json`.

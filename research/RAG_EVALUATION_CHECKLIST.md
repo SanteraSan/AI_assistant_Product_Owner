@@ -1057,6 +1057,16 @@ Retrieval config: те же `source_types` и `source_paths`, что в Test 45.
 
 Живой Agent, `qwen3.5:9b`, 2026-09-24 около 07:40, документ `5e8ccce8-340f-4734-b653-4f460318f852`: оба стека совпали со строками резюме, Vue, MobX, Jest, Docker и PHP в ответы не попали. Unit-тест нарезки: `tests/test_hh_resume_sections.py`.
 
+## Фидбек v1: саммари H0/H1
+
+```bash
+python backend/scripts/eval_feedback_summary.py \
+    --model qwen3.8:latest \
+    --embedding-model nomic-embed-text
+```
+
+Саммари остаётся скриптом замера. Отдельный чат-сценарий и сценарий агента для него не заводятся. Повтор — команда выше, из корня репозитория. Чат `qwen3.8:latest`, эмбеддинги `nomic-embed-text`. Прогон пишет коллекцию `feedback_eval_v1` и не заполняет рабочую Postgres и продуктовую коллекцию `documents`. Как читать числа — запись журнала от 2026-10-25. Пункт не входит в прогон `scripts.run_rag_evaluation` и не сравнивает `gemma3:12b` с `qwen2.5:14b`.
+
 ## Open TODOs
 
 - Улучшить отображение sanitized titles: сейчас prompt title может заменяться на `Источник без числовых метрик`; лучше скрывать title из prompt metadata или хранить отдельное `prompt_title`.
