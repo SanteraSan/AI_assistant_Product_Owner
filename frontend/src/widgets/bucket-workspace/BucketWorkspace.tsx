@@ -2,9 +2,11 @@ import { Plus } from 'lucide-react'
 import { useRef, useState } from 'react'
 import type { Bucket } from '../../entities/bucket/model'
 import type { DocumentItem, StagedDocumentItem } from '../../entities/document/model'
+import type { FeedbackCounts } from '../../entities/feedback/model'
 import { Button, ConfirmDialog, Modal } from '../../shared/ui'
 import { BucketCard } from './BucketCard'
 import { BucketDocumentsPanel } from './BucketDocumentsPanel'
+import { FeedbackCountsPanel } from './FeedbackCountsPanel'
 import { DeleteDocumentDialog } from './DeleteDocumentDialog'
 import { DownloadPicker } from './DownloadPicker'
 import { EditBucketForm } from './EditBucketForm'
@@ -15,6 +17,9 @@ type BucketWorkspaceProps = {
   canMutateDocuments: boolean
   currentUserId: string
   documents: DocumentItem[]
+  feedbackCounts: FeedbackCounts | null
+  feedbackCountsLoading: boolean
+  feedbackCountsError: string | null
   onCancelStagedDocument: (uploadId: string) => Promise<void>
   onCommitChanges: (
     bucketId: string,
@@ -48,6 +53,9 @@ export function BucketWorkspace({
   canMutateDocuments,
   currentUserId,
   documents,
+  feedbackCounts,
+  feedbackCountsLoading,
+  feedbackCountsError,
   onCancelStagedDocument,
   onCommitChanges,
   onCreateBucket,
@@ -358,6 +366,13 @@ export function BucketWorkspace({
         size="lg"
         title={openedBucket ? `Документы: ${openedBucket.name}` : 'Документы'}
       >
+        {openedBucket !== null ? (
+          <FeedbackCountsPanel
+            counts={feedbackCounts}
+            error={feedbackCountsError}
+            isLoading={feedbackCountsLoading}
+          />
+        ) : null}
         <BucketDocumentsPanel
           addableDocuments={addableDocuments}
           availableDocumentCount={availableDocumentCount}

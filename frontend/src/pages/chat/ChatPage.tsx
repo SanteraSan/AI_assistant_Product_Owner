@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { useChatStore } from '../../entities/chat/store'
 import type { ChatMode } from '../../entities/chat/model'
 import { fetchProviderCatalog } from '../../entities/model/api'
+import { useProviderKeyStore } from '../../entities/model/providerKeyStore'
 import {
   isModelApproach,
   modelsForApproach,
@@ -35,6 +36,8 @@ export function ChatPage() {
     updateAttachmentStatuses,
   } = useChatStore()
   const { currentUser, login, logout, status } = useAuthStore()
+  const providerApiKey = useProviderKeyStore((state) => state.providerApiKey)
+  const setProviderApiKey = useProviderKeyStore((state) => state.setProviderApiKey)
   const isAuthenticated = status === 'authenticated' && Boolean(currentUser)
   const {
     activeBucketId,
@@ -311,8 +314,11 @@ export function ChatPage() {
               void attachFile(file)
             }}
             onChangeComposerValue={setComposerValue}
+            onChangeProviderApiKey={setProviderApiKey}
             onSendMessage={sendMessage}
+            providerApiKey={providerApiKey}
             selectedModel={selectedModel}
+            showProviderKey={selectedApproach === 'external' && selectedChatMode === 'rag'}
           />
         ) : (
           <BucketWorkspace
@@ -321,6 +327,9 @@ export function ChatPage() {
             canMutateDocuments={library.hasBackendBuckets}
             currentUserId={currentUser!.id}
             documents={library.documents}
+            feedbackCounts={library.feedbackCounts}
+            feedbackCountsError={library.feedbackCountsError}
+            feedbackCountsLoading={library.feedbackCountsLoading}
             onCancelStagedDocument={library.cancelStagedDocument}
             onCommitChanges={async (bucketId, changes) => {
               await library.commitBucketChanges(bucketId, changes)

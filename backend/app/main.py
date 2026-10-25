@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from app.clients.qdrant_store import QdrantStore
 from app.core.config import get_settings
 from app.core.errors import ProviderError
+from app.core.log_redaction import install_secret_redaction_filter, redact_secrets
 from app.db.session import (
     create_engine,
     create_session_factory,
@@ -26,6 +27,7 @@ from app.models.chat import (
     ChatResponse,
     RagChatRequest,
     RagChatResponse,
+    reveal_provider_api_key,
 )
 from app.routers.agent import create_agent_router
 from app.routers.buckets import create_bucket_router
@@ -43,6 +45,7 @@ from app.services.document_indexing_service import DocumentIndexingService
 from app.services.external_db_sync_service import ExternalDbSyncService
 from app.services.external_scope import decide_external_scope
 from app.services.feature_extractor import FeatureExtractor
+from app.services.feedback_counts import FeedbackCountService
 from app.services.indexing_event_publisher import IndexingEventPublisher
 from app.services.indexing_job_dispatcher import IndexingJobDispatcher
 from app.services.integration_ingest_service import IntegrationIngestService
@@ -164,6 +167,7 @@ bucket_service = BucketService(
     raw_data_dir=settings.raw_data_dir,
     object_storage=object_storage,
 )
+feedback_count_service = FeedbackCountService(session_factory=db_session_factory)
 _sql_allowed_tables = parse_allowed_tables(settings.sql_tool_allowed_tables)
 sql_execution_service = SqlExecutionService(
     postgres_dsn=settings.postgres_dsn,
@@ -266,6 +270,7 @@ configure_targeted_image(
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    install_secret_redaction_filter()
     try:
         await init_db(
             db_engine,
@@ -291,6 +296,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    install_secret_redaction_filter()
     fastapi_app = FastAPI(title=settings.app_name, lifespan=lifespan)
     if settings.cors_allowed_origins:
         fastapi_app.add_middleware(
@@ -310,6 +316,7 @@ app.include_router(
         document_indexing_service=document_indexing_service,
         indexing_job_dispatcher=indexing_job_dispatcher,
         default_tenant_id=settings.default_tenant_id,
+        feedback_count_service=feedback_count_service,
     )
 )
 app.include_router(create_chat_router(history_service=chat_history_service))
@@ -340,10 +347,11 @@ async def http_metrics_middleware(request: Request, call_next):
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     request_id = _request_id_from_request(request)
+    detail = redact_secrets(exc.detail) if isinstance(exc.detail, str) else exc.detail
     return JSONResponse(
         status_code=exc.status_code,
         content={
-            "detail": exc.detail,
+            "detail": detail,
             "error_type": "http_error",
             "request_id": request_id,
         },
@@ -357,10 +365,11 @@ async def validation_exception_handler(
     exc: RequestValidationError,
 ) -> JSONResponse:
     request_id = _request_id_from_request(request)
+    # exc.body is the raw payload and can contain provider_api_key. Do not return it.
     return JSONResponse(
         status_code=422,
         content={
-            "detail": exc.errors(),
+            "detail": _redact_validation_errors(exc.errors()),
             "error_type": "validation_error",
             "request_id": request_id,
         },
@@ -376,10 +385,11 @@ async def provider_exception_handler(request: Request, exc: ProviderError) -> JS
         for key, value in exc.extra.items()
         if key != "persist_session_seen_non_synthetic"
     }
+    detail = redact_secrets(exc.detail) if isinstance(exc.detail, str) else exc.detail
     return JSONResponse(
         status_code=exc.status_code,
         content={
-            "detail": exc.detail,
+            "detail": detail,
             "error_type": exc.error_type.value,
             "request_id": request_id,
             **extra,
@@ -497,6 +507,7 @@ async def chat(
             endpoint="chat",
             allow_external_fallback=False,
             think=False,
+            provider_api_key=reveal_provider_api_key(payload.provider_api_key),
         )
     except httpx.ConnectError as exc:
         raise HTTPException(
@@ -622,6 +633,54 @@ async def rag_chat(
             outcome=outcome,
             duration_seconds=perf_counter() - started_at,
         )
+
+
+# A 422 for another field still carries the raw body in `input`.
+_SECRET_FIELD_NAMES = frozenset(
+    {
+        "provider_api_key",
+        "api_key",
+        "gemini_api_key",
+        "openrouter_api_key",
+        "x-api-key",
+        "x-goog-api-key",
+    }
+)
+
+
+def _redact_validation_errors(errors: list[object]) -> list[object]:
+    prepared: list[object] = []
+    for error in errors:
+        if not isinstance(error, dict):
+            prepared.append(error)
+            continue
+        item = dict(error)
+        loc = item.get("loc")
+        if isinstance(loc, (list, tuple)) and any(part == "provider_api_key" for part in loc):
+            item["input"] = "***"
+        prepared.append(item)
+    redacted = _redact_nested_strings(prepared)
+    if isinstance(redacted, list):
+        return redacted
+    return prepared
+
+
+def _redact_nested_strings(value: object) -> object:
+    if isinstance(value, str):
+        return redact_secrets(value)
+    if isinstance(value, dict):
+        redacted: dict[object, object] = {}
+        for key, item in value.items():
+            if isinstance(key, str) and key.lower() in _SECRET_FIELD_NAMES:
+                redacted[key] = "***"
+                continue
+            redacted[key] = _redact_nested_strings(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_nested_strings(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_nested_strings(item) for item in value)
+    return value
 
 
 def _qdrant_collection_exists() -> bool:

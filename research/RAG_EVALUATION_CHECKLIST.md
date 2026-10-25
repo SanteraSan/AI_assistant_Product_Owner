@@ -1065,7 +1065,19 @@ python backend/scripts/eval_feedback_summary.py \
     --embedding-model nomic-embed-text
 ```
 
-Саммари остаётся скриптом замера. Отдельный чат-сценарий и сценарий агента для него не заводятся. Повтор — команда выше, из корня репозитория. Чат `qwen3.8:latest`, эмбеддинги `nomic-embed-text`. Прогон пишет коллекцию `feedback_eval_v1` и не заполняет рабочую Postgres и продуктовую коллекцию `documents`. Как читать числа — запись журнала от 2026-10-25. Пункт не входит в прогон `scripts.run_rag_evaluation` и не сравнивает `gemma3:12b` с `qwen2.5:14b`.
+Саммари остаётся скриптом замера. Отдельный чат-сценарий и сценарий агента для него не заводятся. Повтор — команда выше, из корня репозитория. Чат `qwen3.8:latest`, эмбеддинги `nomic-embed-text`. Прогон пишет коллекцию `feedback_eval_v1` и не заполняет рабочую Postgres и продуктовую коллекцию `documents`. Как читать числа — запись журнала от 2026-10-25. Пункт не входит в прогон `scripts.run_rag_evaluation` и не сравнивает `gemma3:12b` с `qwen2.5:14b`. Скрипт H0/H1 не читает `provider_api_key` и не ходит в Gemini/OpenRouter.
+
+## Фидбек v1: zero-shot классов
+
+```bash
+python backend/scripts/eval_feedback_zero_shot.py --model qwen3.8:latest
+```
+
+Пункт не входит в `scripts.run_rag_evaluation`. Эмбеддингов, ключа провайдера и Qdrant нет. Как читать числа — запись журнала от 2026-10-25 «Этап 7 — zero-shot классы фидбека».
+
+## Фидбек v1: этап 8, продукт
+
+Бакет `TaskFlow seed corpus` (`taskflow_seed`, tenant `local_demo`). Счётчики: noise 350, churn_signal 75, bug 68, feature 17. В `documents` 75 точек `source_type=feedback`, классов `noise` и `churn_signal` нет, текстов holdout нет, подстрок «Класс!» и «Удаляю» нет. Новая eval-сюита не заводится. Пункт не входит в `scripts.run_rag_evaluation`.
 
 ## Open TODOs
 

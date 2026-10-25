@@ -191,6 +191,7 @@ class SalesComposer:
         additional_sources: list[SourceChunk] | None = None,
         approach: str | None = None,
         session_seen_non_synthetic: bool = False,
+        provider_api_key: str | None = None,
     ) -> RagChatResponse:
         del features, source_types, additional_sources
         selected_model = model or self._default_model
@@ -306,6 +307,7 @@ class SalesComposer:
             keep_alive=self._generation_keep_alive,
             options=generation_options,
             think=False,
+            provider_api_key=provider_api_key,
         )
         latency_ms = int((perf_counter() - started_at) * 1000)
         retrieval = {

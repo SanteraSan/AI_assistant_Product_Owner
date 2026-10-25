@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from app.core.errors import ErrorType, ProviderError
+from app.core.log_redaction import redact_secrets
 from app.core.model_pricing import estimate_cost_usd
 from app.services.llm.finish_reason import normalize_finish_reason
 from app.services.llm.types import GenerationResult
@@ -101,7 +102,7 @@ class OpenAICompatibleProvider:
             except httpx.HTTPError as exc:
                 raise ProviderError(
                     ErrorType.EXTERNAL_PROVIDER_UNAVAILABLE,
-                    str(exc),
+                    redact_secrets(str(exc)),
                     status_code=502,
                 ) from exc
 
@@ -136,10 +137,11 @@ class OpenAICompatibleProvider:
     def _error_from_response(self, response: httpx.Response) -> ProviderError:
         body = response.text
         lowered = body.lower()
+        safe_body = redact_secrets(body)
         if response.status_code == 429:
             return ProviderError(
                 ErrorType.EXTERNAL_PROVIDER_RATE_LIMITED,
-                body or f"{self._provider_name} rate limited.",
+                safe_body or f"{self._provider_name} rate limited.",
                 status_code=429,
             )
         if response.status_code in {400, 404} and any(
@@ -147,24 +149,24 @@ class OpenAICompatibleProvider:
         ):
             return ProviderError(
                 ErrorType.MODEL_UNAVAILABLE,
-                body or f"Model is unavailable on {self._provider_name}.",
+                safe_body or f"Model is unavailable on {self._provider_name}.",
                 status_code=404,
             )
         if any(marker in lowered for marker in LOCATION_UNAVAILABLE_MARKERS):
             return ProviderError(
                 ErrorType.EXTERNAL_PROVIDER_UNAVAILABLE,
-                body or f"{self._provider_name} is not available from this location.",
+                safe_body or f"{self._provider_name} is not available from this location.",
                 status_code=503,
             )
         if response.status_code >= 500:
             return ProviderError(
                 ErrorType.EXTERNAL_PROVIDER_UNAVAILABLE,
-                body or f"{self._provider_name} unavailable.",
+                safe_body or f"{self._provider_name} unavailable.",
                 status_code=503,
             )
         return ProviderError(
             ErrorType.EXTERNAL_PROVIDER_ERROR,
-            body or f"{self._provider_name} returned HTTP {response.status_code}.",
+            safe_body or f"{self._provider_name} returned HTTP {response.status_code}.",
             status_code=response.status_code if 400 <= response.status_code < 500 else 502,
             extra={"provider_status": response.status_code},
         )

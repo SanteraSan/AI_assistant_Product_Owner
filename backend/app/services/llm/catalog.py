@@ -28,6 +28,7 @@ DEFAULT_LOCAL_MODELS: tuple[str, ...] = (
     "qwen2.5:0.5b",
     "gemma3:12b",
     "nomic-embed-text",
+    "qwen3.8:latest",
 )
 
 
@@ -48,7 +49,13 @@ class ModelCatalog:
         self._gemini_configured = gemini_configured
         self._openrouter_configured = openrouter_configured
 
-    def resolve_provider(self, *, model: str, approach: str) -> str:
+    def resolve_provider(
+        self,
+        *,
+        model: str,
+        approach: str,
+        client_key_supplied: bool = False,
+    ) -> str:
         if approach == "local_only":
             if model in self._local:
                 return "ollama"
@@ -59,7 +66,7 @@ class ModelCatalog:
             )
         if approach == "external":
             if model in self._gemini:
-                if not self._gemini_configured:
+                if not self._gemini_configured and not client_key_supplied:
                     raise ProviderError(
                         ErrorType.MODEL_UNAVAILABLE,
                         "Gemini is not configured.",
@@ -67,7 +74,7 @@ class ModelCatalog:
                     )
                 return "gemini"
             if model in self._openrouter:
-                if not self._openrouter_configured:
+                if not self._openrouter_configured and not client_key_supplied:
                     raise ProviderError(
                         ErrorType.MODEL_UNAVAILABLE,
                         "OpenRouter is not configured.",

@@ -31,6 +31,89 @@
 - как это влияет на проект.
 ```
 
+## 2026-10-25: Этап 8 — фидбек в продуктовой коллекции
+
+Контекст:
+- Чат ищет в коллекции `documents`. Строки `feedback_items` без `document_id` туда не попадают: воркер берёт их только по документу джобы.
+- Бакет уже был в UI: `TaskFlow seed corpus`, `bucket_id` `taskflow_seed`, tenant `local_demo`. Второй бакет и вторая коллекция не заводились. Модель по умолчанию не менялась.
+- Holdout не сеялся. `cleaned.jsonl` не переписывался. `feedback_eval_v1` только считали.
+
+Наблюдение:
+- Команда из `backend`: `alembic upgrade head`, затем `python scripts/build_feedback_corpus.py --seed --index-attached --tenant-id local_demo --bucket-id taskflow_seed`. Новой ревизии Alembic не было.
+- Первый запуск успел проиндексировать и упал, когда скрипт читал поля джобы уже после закрытия сессии. Повтор той же команды: `job_id` `21f98686-73c6-4fe4-afc7-ce326fa6f194`, `job_status=completed`, `chunks_indexed=75`, документ `806b53c9-fea8-550e-b555-02f482cbf352`, статус документа и связи `indexed`.
+- Postgres, строки `fb-v1-`: noise 350, churn_signal 75, bug 68, feature 17, всего 510. `index_in_rag` у 60 bug и 15 feature. Чужой `document_id` — 0, тексты holdout в `body` — 0.
+- Scroll `documents` с фильтром tenant, бакета и `source_type=feedback`: 75 точек, bug 60, feature 15, noise 0, churn_signal 0. У всех `index_in_rag=true`, `synthetic=true`, тот же `document_id`. Подстрок «Класс!» и «Удаляю» нет, ни один `content` не совпал с текстом holdout.
+- `feedback_eval_v1`: 510 точек до и после. В бакете `documents` 1738 точек до и после повторного прогона: первый запуск уже положил 75 точек (до него печать показала 1663), повтор записал те же id.
+- Роли живой чат не гоняли и вопросы в код не вшивали. После перезапуска API родитель открыл бакет в UI, селектор `qwen3.8:latest`, подход hybrid.
+
+Решение:
+- Seed по-прежнему пишет `document_id=None`. Отдельный шаг привязывает только `fb-v1-%` и ставит одну джобу `bucket_commit`. Индексирует тот же `DocumentIndexingService.process_jobs`, без Kafka.
+- Заголовок чанка — `corpus_id`, иначе `max_sources_per_title` оставил бы одну точку из 75. В metadata чанка `synthetic=true`. Политика «в Qdrant только bug и feature с флагом» не менялась.
+- `qwen3.8:latest` добавлен последним элементом `DEFAULT_LOCAL_MODELS`. Первый пункт селектора по-прежнему `qwen3.5:9b`. Дефолты настроек не менялись: `default_model` остаётся `qwen2.5:0.5b`, `default_rag_model` — `gemma3:12b`, `agent_default_model` — пустая строка.
+
+Вывод:
+- Шум и короткие сигналы остались в Postgres. В продуктовый Qdrant попали 60 багов и 15 фич.
+- Ограничение: в `taskflow_seed` вместе с этими 75 точками лежат прежние документы бакета, всего 1738. При `top_k=5` ответ может смешать старый сид и фидбек. Отдельный бакет ради чистоты выборки не заводился.
+- Для `local_only` и `hybrid` каталог отдаёт `qwen3.8:latest` провайдеру `ollama`. `external` её не принимает: по-прежнему только Gemini и OpenRouter, иначе `MODEL_UNAVAILABLE` со статусом 404.
+- Живой чат 2026-10-25, бакет `TaskFlow seed corpus`. «Собери недельное саммари критичных багов.» вернул четыре источника `fb-v1-*` класса feedback и один старый vision digest. В источниках не было «Класс!» и «Удаляю». Ответ перечислил сбой подписок, обнуление дедлайна, спам-уведомления и утечку вложений и честно сказал, что меток «критичный» и дат недели в фрагментах нет.
+- «Какие фичи просят?» в `top_k=5` получила только старый сид: OCR `just_text` и vision digest `hard_for_analis_2`. Точек `fb-v1-*` в источниках не было, модель ответила, что просьб о фичах в контексте нет. Это то же смешение бакета, не повод поднимать `top_k`.
+- Панель «Объём фидбека» на этом бакете: шум 350, короткие сигналы 75, баги 68, фичи 17, всего 510, в индексе 75. Документ `fb-v1.txt` в списке бакета со статусом `indexed`.
+
+## 2026-10-25: Этап 7 — zero-shot классы фидбека
+
+Контекст:
+- Задача — отличить классы обращения `noise`, `churn_signal`, `bug`, `feature`. Модель с флага CLI: `qwen3.8:latest`. Эмбеддинги не вызывались (`embedding_model` null). Qdrant и Postgres не использовались, `index_in_rag` не менялся.
+- Команда из корня репозитория: `python backend/scripts/eval_feedback_zero_shot.py --model qwen3.8:latest`. Отчёт `research/feedback_zero_shot_eval_latest.json`.
+- Holdout `data/feedback/v1/holdout.jsonl`, 20 строк, sha256 `c4daa546033646b738e2709f0ae7a49c025e17f212ff4479b70382d81cb83728`, совпал с `manifest.json`. Поддержка: noise 4, churn_signal 3, bug 7, feature 6.
+- Страта из `cleaned.jsonl`: `allocation` equal, 8×4, seed `feedback-v1-stage7-20261025`, 32 строки. Доли корпуса 70/15/12/3 в этот кусок не копировались.
+- Протокол: temperature 0, top_p 1, num_ctx 4096, num_predict 128, seed 7, think false, format json, repeats 1, timeout_seconds 600, keep_alive 10m, 52 последовательных вызова. Промпт `research/prompts/feedback_zero_shot_class.txt`.
+- Доли CPU этого прогона из `ollama_ps_last`: gpu_share 0.67, cpu_share 0.33, context_length 4096.
+
+Наблюдение:
+
+Holdout, золото — ручная метка `generator_class`.
+
+| предиктор | macro-F1 | noise | churn_signal | bug | feature |
+| --- | --- | --- | --- | --- | --- |
+| правила | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
+| zero-shot | 0.9286 | 0.8571 | 0.8571 | 1.0000 | 1.0000 |
+
+Zero-shot на страте. Правила на шаблоне победой не считаются: macro-F1 правил на страте 1.0000 в конкурс не идёт.
+
+| предиктор | macro-F1 | noise | churn_signal | bug | feature |
+| --- | --- | --- | --- | --- | --- |
+| zero-shot | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
+
+Правила написаны под шаблоны этого jsonl и сохраняют generator_class, если фраза в своём лексиконе. Accuracy правил здесь победой не считается.
+
+keep_generator на holdout не открывает ворота: правило оставило ручную метку, потому что нормализованный текст не попал в лексикон шума и коротких сигналов. Счётчик `rule_reason` на holdout: keep_generator 20, lexicon_noise 0, lexicon_churn 0.
+
+Прогон медленный из-за CPU offload: gpu_share 0.67, cpu_share 0.33, context_length 4096. Суммарное wall время 64.8 с на 52 вызова.
+
+Согласие на holdout: both_correct 19, rules_only 1, zero_shot_only 0, both_wrong 0, zero_shot_unparsed 0.
+
+Решение:
+- qlora_gate.open false, mismatch_count 0. базовой модели и правил хватило. Фраза значит, что обучение не стартует. Она не значит, что zero-shot угадал все строки. macro-F1 правил на holdout 1.0000, macro-F1 zero-shot на holdout 0.9286, zero_shot_only 0. При нуле расхождений правил модель не может быть строго лучше правил на holdout. Адаптера нет, воркер индексации не менялся, training_started false.
+
+Вывод:
+- Следующий заход QLoRA не открыт. Этап 8 этим заходом не делался.
+
+## 2026-10-25: Этап 5 — ключ провайдера из браузера
+
+Контекст:
+- На один запрос `approach=external` нужен ключ пользователя для Gemini или OpenRouter. Пустое поле должно оставлять ключ сервера из env либо Ollama. Замер фидбека и агент этот ключ не читают.
+
+Решение:
+- `ChatRequest` и `RagChatRequest` принимают необязательный `provider_api_key`. Ключ клиента на этом вызове важнее ключа сервера; долгоживущие клиенты из env не подменяются. `hybrid` и `local_only` ключ игнорируют. Агент при external по-прежнему отвечает 400 `external_agent_not_supported`.
+- После ответа ключ не лежит в поле приложения, Postgres, ответе API, метриках и записанных логах. Затирание строки в памяти процесса не обещается.
+- В UI поле видно только при External и RAG. Браузер хранит его в `localStorage` как `taskflow.providerApiKey`.
+
+Наблюдение:
+- Живой Gemini и OpenRouter в этом этапе не вызывались. Проверка рассчитана на мок `httpx`. Отдельного run id нет.
+
+Вывод:
+- Замер H0/H1 остаётся на `qwen3.8:latest` и `nomic-embed-text` и поле `provider_api_key` не читает.
+
 ## 2026-10-25: Замер саммари фидбека H0/H1
 
 Контекст:

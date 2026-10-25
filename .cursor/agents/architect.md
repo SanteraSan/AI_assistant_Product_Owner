@@ -12,7 +12,9 @@ is_background: false
 
 Выдай RFC: какие файлы менять, сигнатуры с типами, что сознательно не делаем. Вопросы задавай только если без них нельзя выбрать структуру.
 
-На этапе 2 корпус уже собран в `/home/santera/ML|LLM|RAG/sintetic_data/` (`bugs.jsonl`, `features.jsonl`, `noise.jsonl`, `churn.jsonl`) и ручной holdout `castom.jsonl`. В RFC не предлагай генерировать эти тексты заново.
+На этапе 2 корпус уже собран в `/home/santera/ML|LLM|RAG/sintetic_data/` и в `data/feedback/v1/cleaned.jsonl`. Holdout не генерировать заново. Этапы 3 и 4 сделаны.
+
+Этап 8 — чат по отфильтрованным данным. Не пиши в `feedback_eval_v1`. Seed только в Postgres чат не кормит: `document_id` у строк пустой, поиск идёт в `documents`. В RFC: бакет демо-пользователя, `--seed` из `cleaned.jsonl`, привязка к документу, текущий indexing worker. В Qdrant только `feedback_item_enters_product_qdrant`. Шум и churn остаются в Postgres. Holdout не индексировать. Модель по умолчанию не менять.
 
 Инварианты, их не менять:
 - Шум и короткие сигналы остаются в Postgres. В продуктовый Qdrant идут только bug и feature.

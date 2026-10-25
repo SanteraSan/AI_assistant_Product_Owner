@@ -12,7 +12,9 @@ is_background: false
 
 Тесты не пиши: их напишет тестировщик. В конце перечисли, что покрыть.
 
-На этапе 2 корпус уже собран. Читай jsonl из `/home/santera/ML|LLM|RAG/sintetic_data/` (`bugs`, `features`, `noise`, `churn`) и ручной holdout `castom.jsonl` (копия `data/feedback/v1/holdout.jsonl`). Holdout не переписывай и не дополняй.
+На этапе 2 корпус уже собран. Читай jsonl из `/home/santera/ML|LLM|RAG/sintetic_data/` и `data/feedback/v1/cleaned.jsonl`. Holdout не переписывай и не дополняй. Этапы 3 и 4 не переделывай.
+
+На этапе 8 не создавай вторую коллекцию. Привяжи засеянные строки к документу бакета и пропусти их через текущий indexing worker в `documents`. В точки попадают только bug и feature с `index_in_rag`. Шум, churn и holdout в Qdrant не клади.
 
 Инварианты, их не менять:
 - Шум и короткие сигналы остаются в Postgres. В продуктовый Qdrant идут только bug и feature.

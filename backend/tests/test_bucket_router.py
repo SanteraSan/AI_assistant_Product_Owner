@@ -289,12 +289,19 @@ class _FakeBucketService:
         return self.document
 
 
+class _FakeFeedbackCountService:
+    async def counts_for_bucket(self, *, tenant_id: str, bucket_id: str) -> None:
+        del tenant_id, bucket_id
+        return None
+
+
 def _client() -> TestClient:
     app = FastAPI()
     app.include_router(
         create_bucket_router(
             bucket_service=_FakeBucketService(),  # type: ignore[arg-type]
             default_tenant_id="tenant-a",
+            feedback_count_service=_FakeFeedbackCountService(),  # type: ignore[arg-type]
         )
     )
     return TestClient(app)
@@ -471,6 +478,7 @@ def test_delete_personal_document() -> None:
         create_bucket_router(
             bucket_service=service,  # type: ignore[arg-type]
             default_tenant_id="tenant-a",
+            feedback_count_service=_FakeFeedbackCountService(),  # type: ignore[arg-type]
         )
     )
     client = TestClient(app)
@@ -523,6 +531,7 @@ def test_retry_document_indexing() -> None:
         create_bucket_router(
             bucket_service=service,  # type: ignore[arg-type]
             default_tenant_id="tenant-a",
+            feedback_count_service=_FakeFeedbackCountService(),  # type: ignore[arg-type]
         )
     )
     client = TestClient(app)
@@ -545,6 +554,7 @@ def test_download_single_bucket_document() -> None:
         create_bucket_router(
             bucket_service=service,  # type: ignore[arg-type]
             default_tenant_id="tenant-a",
+            feedback_count_service=_FakeFeedbackCountService(),  # type: ignore[arg-type]
         )
     )
     client = TestClient(app)
@@ -573,6 +583,7 @@ def test_download_multiple_bucket_documents_as_zip() -> None:
         create_bucket_router(
             bucket_service=service,  # type: ignore[arg-type]
             default_tenant_id="tenant-a",
+            feedback_count_service=_FakeFeedbackCountService(),  # type: ignore[arg-type]
         )
     )
     client = TestClient(app)
@@ -596,6 +607,7 @@ def test_download_unknown_document_is_not_found() -> None:
         create_bucket_router(
             bucket_service=_FakeBucketService(),  # type: ignore[arg-type]
             default_tenant_id="tenant-a",
+            feedback_count_service=_FakeFeedbackCountService(),  # type: ignore[arg-type]
         )
     )
     client = TestClient(app)
@@ -617,6 +629,7 @@ def test_download_forbidden_document_is_denied() -> None:
         create_bucket_router(
             bucket_service=service,  # type: ignore[arg-type]
             default_tenant_id="tenant-a",
+            feedback_count_service=_FakeFeedbackCountService(),  # type: ignore[arg-type]
         )
     )
     client = TestClient(app)

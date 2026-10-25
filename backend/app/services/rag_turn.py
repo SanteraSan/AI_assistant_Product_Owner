@@ -8,7 +8,7 @@ from app.clients.qdrant_store import QdrantStore
 from app.core.config import get_settings
 from app.core.errors import ProviderError
 from app.db.models import DocumentAsset
-from app.models.chat import RagChatRequest, RagChatResponse, SourceChunk
+from app.models.chat import RagChatRequest, RagChatResponse, SourceChunk, reveal_provider_api_key
 from app.services.access_policy import UserContext
 from app.services.bucket_service import BucketService
 from app.services.chat_history_service import ChatHistoryService
@@ -158,6 +158,7 @@ async def run_rag_turn(
                     if is_sales_rag_scope(effective_bucket_ids)
                     else rag_service
                 )
+                provider_api_key = reveal_provider_api_key(payload.provider_api_key)
                 response = await answerer.answer(
                     message=payload.message,
                     model=payload.model,
@@ -188,6 +189,7 @@ async def run_rag_turn(
                     additional_sources=targeted_image_sources,
                     approach=payload.approach,
                     session_seen_non_synthetic=session_seen,
+                    provider_api_key=provider_api_key,
                 )
             except ProviderError as exc:
                 if exc.extra.get("persist_session_seen_non_synthetic"):

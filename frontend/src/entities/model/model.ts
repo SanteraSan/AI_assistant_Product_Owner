@@ -38,6 +38,12 @@ export const localModels: LocalModel[] = [
     description: 'Coder-модель и база для Text-to-SQL LoRA.',
     provider: 'ollama',
   },
+  {
+    id: 'qwen3.8:latest',
+    label: 'qwen3.8:latest',
+    description: 'Модель замера фидбека. В селекторе для сравнения с H1.',
+    provider: 'ollama',
+  },
 ]
 
 export const externalModels: LocalModel[] = [

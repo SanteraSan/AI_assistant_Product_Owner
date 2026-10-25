@@ -58,6 +58,7 @@ def test_ollama_client_reuses_http_client_and_closes_it(monkeypatch: pytest.Monk
     assert len(_FakeAsyncClient.instances) == 1
     assert len(_FakeAsyncClient.instances[0].posts) == 2
     assert _FakeAsyncClient.instances[0].is_closed is True
+    assert "format" not in _FakeAsyncClient.instances[0].payloads[0]
 
 
 def test_ollama_client_sends_images_for_vision_generate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -72,3 +73,21 @@ def test_ollama_client_sends_images_for_vision_generate(monkeypatch: pytest.Monk
     asyncio.run(run_client_call())
 
     assert _FakeAsyncClient.instances[0].payloads[0]["images"] == ["base64-image"]
+
+
+def test_generate_payload_format_follows_response_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without response_format the payload has no format key. The string json sets it."""
+
+    _FakeAsyncClient.instances = []
+    monkeypatch.setattr(ollama_module.httpx, "AsyncClient", _FakeAsyncClient)
+    client = OllamaClient(base_url="http://ollama.test", timeout_seconds=1)
+
+    async def run_client_calls() -> None:
+        await client.generate("model", "prompt")
+        await client.generate("model", "prompt", response_format="json")
+
+    asyncio.run(run_client_calls())
+
+    payloads = _FakeAsyncClient.instances[0].payloads
+    assert "format" not in payloads[0]
+    assert payloads[1]["format"] == "json"

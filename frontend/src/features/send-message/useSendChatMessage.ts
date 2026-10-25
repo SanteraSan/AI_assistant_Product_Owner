@@ -3,6 +3,8 @@ import { sendAgentMessage, sendRagMessage } from '../../entities/chat/api'
 import type { ChatMode } from '../../entities/chat/model'
 import { useChatStore } from '../../entities/chat/store'
 import type { ModelApproach } from '../../entities/model/model'
+import { useProviderKeyStore } from '../../entities/model/providerKeyStore'
+import { providerApiKeyForRagRequest } from './providerApiKey'
 import { formatApiError } from '../../shared/api/httpClient'
 import { resolveChatContext, type ResolveChatContextInput } from '../chat-context'
 
@@ -56,6 +58,11 @@ export function useSendChatMessage({
         activeBucketId,
         sessionId,
         tenantId,
+        providerApiKey: providerApiKeyForRagRequest(
+          approach,
+          chatMode,
+          useProviderKeyStore.getState().providerApiKey,
+        ),
         ...resolveChatContext({ ...context, message }),
       }),
     onSuccess,

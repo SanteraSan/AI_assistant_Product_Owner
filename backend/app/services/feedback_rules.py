@@ -16,7 +16,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import FeedbackItem
@@ -38,6 +38,7 @@ SCENARIO_IDS: frozenset[str] = frozenset(
 )
 INDEX_TEXT_MAX_CHARS: int = 1200
 CORPUS_ID_PREFIX: str = "fb-v1-"
+EXPECTED_HOLDOUT_SHA256 = "c4daa546033646b738e2709f0ae7a49c025e17f212ff4479b70382d81cb83728"
 EXACT_BUG_COPIES: int = 8
 EXACT_FEATURE_COPIES: int = 2
 TARGET_SHARES: dict[str, float] = {
@@ -463,6 +464,94 @@ async def seed_feedback_items(
     ]
     session.add_all(items)
     return len(items)
+
+
+def feedback_product_document_id(*, tenant_id: str, bucket_id: str) -> str:
+    """Stable document id for the product feedback corpus of one bucket."""
+
+    return str(uuid5(NAMESPACE_URL, f"feedback-v1-product-document:{tenant_id}:{bucket_id}"))
+
+
+def assert_cleaned_rows_match_frozen(
+    rows: Sequence[FeedbackCleanedRow],
+    path: Path,
+) -> None:
+    """Raise when the assembly differs from the frozen JSONL. Does not write the file."""
+
+    _digest, records = _read_jsonl(path)
+    if len(records) != len(rows):
+        raise ValueError(f"{path.name} has {len(records)} rows, assembly has {len(rows)}")
+    for row, (line_no, payload) in zip(rows, records):
+        expected = _cleaned_payload(row)
+        for key, value in expected.items():
+            if key not in payload or payload[key] != value:
+                raise ValueError(f"{path.name}:{line_no} field {key} does not match the assembly")
+
+
+def assert_no_holdout_texts(
+    rows: Sequence[FeedbackCleanedRow],
+    holdout_path: Path,
+) -> None:
+    """Read holdout, compare sha256 with the manifest, and reject shared texts.
+
+    A hash other than the manifest value or the frozen holdout digest raises.
+    The same text in the assembly and in holdout raises. This function does not write.
+    """
+
+    raw = holdout_path.read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    manifest_path = holdout_path.with_name("manifest.json")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"holdout manifest cannot be read: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("holdout manifest is not an object")
+    manifest_sha = manifest.get("holdout_sha256")
+    if digest != EXPECTED_HOLDOUT_SHA256 or digest != manifest_sha:
+        raise ValueError(f"holdout sha256 {digest} does not match the manifest")
+    texts: set[str] = set()
+    for line_no, line in enumerate(raw.decode("utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{holdout_path.name}:{line_no} is not valid json") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"{holdout_path.name}:{line_no} is not an object")
+        text = payload.get("text")
+        if not isinstance(text, str):
+            raise ValueError(f"{holdout_path.name}:{line_no} text is not a string")
+        texts.add(text)
+    for row in rows:
+        if row.source.text in texts:
+            raise ValueError(f"{row.source.corpus_id} text matches a holdout row")
+
+
+async def bind_feedback_items_to_document(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    bucket_id: str,
+    document_id: str,
+) -> int:
+    """Set document_id on this bucket's fb-v1 rows. Other corpus ids stay put.
+
+    Does not open Qdrant. Returns the SQL rowcount.
+    """
+
+    result = await session.execute(
+        update(FeedbackItem)
+        .where(
+            FeedbackItem.tenant_id == tenant_id,
+            FeedbackItem.bucket_id == bucket_id,
+            FeedbackItem.corpus_id.like(f"{CORPUS_ID_PREFIX}%"),
+        )
+        .values(document_id=document_id)
+        .execution_options(synchronize_session=False)
+    )
+    return int(result.rowcount)
 
 
 def _closed_lexicons() -> tuple[frozenset[str], frozenset[str]]:

@@ -17,6 +17,7 @@ from app.models.bucket import (
     DownloadBucketDocumentsRequest,
     StagedDocumentResponse,
 )
+from app.models.feedback import FeedbackCountsResponse
 from app.services.access_policy import UserContext, parse_roles
 from app.services.bucket_service import BucketDownloadResult, BucketService
 from app.services.document_download import (
@@ -27,6 +28,7 @@ from app.services.document_download import (
     safe_download_name,
 )
 from app.services.document_indexing_service import DocumentIndexingService
+from app.services.feedback_counts import FeedbackCountService
 from app.services.indexing_job_dispatcher import IndexingJobDispatcher
 
 
@@ -39,6 +41,7 @@ def create_bucket_router(
     document_indexing_service: DocumentIndexingService | None = None,
     indexing_job_dispatcher: IndexingJobDispatcher | None = None,
     default_tenant_id: str,
+    feedback_count_service: FeedbackCountService,
 ) -> APIRouter:
     del default_tenant_id  # tenant comes from authenticated service JWT only
     router = APIRouter(tags=["buckets"])
@@ -152,6 +155,29 @@ def create_bucket_router(
             _document_response(document, bucket_id=bucket_id, bucket_link=bucket_link)
             for document, bucket_link in documents
         ]
+
+    @router.get(
+        "/buckets/{bucket_id}/feedback-counts",
+        response_model=FeedbackCountsResponse,
+    )
+    async def get_feedback_counts(
+        bucket_id: str,
+        user: UserContext = Depends(get_current_user),
+    ) -> FeedbackCountsResponse:
+        counts = await feedback_count_service.counts_for_bucket(
+            tenant_id=user.tenant_id,
+            bucket_id=bucket_id,
+        )
+        if counts is None:
+            raise HTTPException(status_code=404, detail="Bucket not found.")
+        return FeedbackCountsResponse(
+            noise=counts.noise,
+            churn_signal=counts.churn_signal,
+            bug=counts.bug,
+            feature=counts.feature,
+            total=counts.total,
+            indexed=counts.indexed,
+        )
 
     @router.get("/buckets/{bucket_id}/documents/{document_id}/download")
     async def download_bucket_document(

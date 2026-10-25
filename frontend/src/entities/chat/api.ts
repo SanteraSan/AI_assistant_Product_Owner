@@ -45,7 +45,7 @@ type ChatMessageDto = {
   created_at: string
 }
 
-export type SendRagMessagePayload = {
+type SendMessagePayload = {
   message: string
   model?: string
   approach?: string
@@ -55,6 +55,12 @@ export type SendRagMessagePayload = {
   bucketIds: string[]
   documentIds: string[]
 }
+
+export type SendRagMessagePayload = SendMessagePayload & {
+  providerApiKey?: string
+}
+
+export type SendAgentMessagePayload = SendMessagePayload
 
 export type CreateChatSessionPayload = {
   title?: string
@@ -143,17 +149,21 @@ export async function sendRagMessage(
   message: ChatMessage
   sessionId?: string
 }> {
+  const body: Record<string, unknown> = {
+    message: payload.message,
+    model: payload.model,
+    approach: payload.approach,
+    active_bucket_id: payload.activeBucketId ?? null,
+    session_id: payload.sessionId,
+    tenant_id: payload.tenantId,
+    bucket_ids: payload.bucketIds,
+    document_ids: payload.documentIds,
+  }
+  if (typeof payload.providerApiKey === 'string' && payload.providerApiKey !== '') {
+    body.provider_api_key = payload.providerApiKey
+  }
   const response = await apiRequest<RagChatDto>('/api/rag/chat', {
-    body: JSON.stringify({
-      message: payload.message,
-      model: payload.model,
-      approach: payload.approach,
-      active_bucket_id: payload.activeBucketId ?? null,
-      session_id: payload.sessionId,
-      tenant_id: payload.tenantId,
-      bucket_ids: payload.bucketIds,
-      document_ids: payload.documentIds
-  }),
+    body: JSON.stringify(body),
     method: 'POST'
   })
 
@@ -188,7 +198,7 @@ type AgentChatDto = {
 }
 
 export async function sendAgentMessage(
-  payload: SendRagMessagePayload,
+  payload: SendAgentMessagePayload,
 ): Promise<{
   message: ChatMessage
   sessionId?: string

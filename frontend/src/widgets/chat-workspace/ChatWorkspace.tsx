@@ -3,7 +3,7 @@ import type { ChatMessage, ChatMode } from '../../entities/chat/model'
 import type { Bucket } from '../../entities/bucket/model'
 import type { LocalModel, ModelApproach } from '../../entities/model/model'
 import { MessageComposer } from '../../features/send-message/MessageComposer'
-import { Badge, Card } from '../../shared/ui'
+import { Badge, Card, Input } from '../../shared/ui'
 
 type ChatWorkspaceProps = {
   activeBucket?: Bucket
@@ -14,6 +14,9 @@ type ChatWorkspaceProps = {
   isSending?: boolean
   messages: ChatMessage[]
   selectedModel?: LocalModel
+  showProviderKey: boolean
+  onChangeProviderApiKey: (value: string) => void
+  providerApiKey: string
   onChangeComposerValue: (value: string) => void
   onAttachFile?: (file: File) => void
   onSendMessage: () => void
@@ -29,8 +32,11 @@ export function ChatWorkspace({
   messages,
   onAttachFile,
   onChangeComposerValue,
+  onChangeProviderApiKey,
   onSendMessage,
+  providerApiKey,
   selectedModel,
+  showProviderKey,
 }: ChatWorkspaceProps) {
   const latestAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant')
   const latestSources = latestAssistantMessage?.sources ?? []
@@ -53,6 +59,24 @@ export function ChatWorkspace({
                 Запрос уйдёт во внешнюю модель (Gemini/OpenRouter). Текст сообщения отправится
                 провайдеру.
               </p>
+            ) : null}
+            {showProviderKey ? (
+              <div className="mt-3 space-y-2">
+                <label className="block space-y-2 text-sm text-slate-700">
+                  <span>Ключ провайдера</span>
+                  <Input
+                    autoComplete="off"
+                    onChange={(event) => onChangeProviderApiKey(event.target.value)}
+                    spellCheck={false}
+                    type="password"
+                    value={providerApiKey}
+                  />
+                </label>
+                <p className="text-xs text-slate-500">
+                  Ключ остаётся в этом браузере и уходит только с внешним RAG-запросом. Сервер его не
+                  сохраняет.
+                </p>
+              </div>
             ) : null}
             {chatMode === 'agent' && approach === 'external' ? (
               <p className="mt-2 text-sm text-amber-800">

@@ -14,6 +14,7 @@ from app.db.models import (
     DocumentAsset,
     DocumentIndexingJob,
     FeedbackItem,
+    KnowledgeBucket,
 )
 from app.services.access_policy import UserContext, can_read_document
 from app.services.chunking import DocumentChunk, chunk_documents
@@ -49,6 +50,7 @@ class FeedbackIndexRow:
     index_in_rag: bool
     index_text: str | None = None
     scenario_id: str | None = None
+    corpus_id: str | None = None
 
 
 class DocumentIndexingService:
@@ -655,14 +657,17 @@ def _feedback_chunks(
             "feedback_item_id": row.id,
             "feedback_class": row.feedback_class,
             "document_asset_id": document.id,
+            "synthetic": True,
         }
         if row.scenario_id is not None:
             metadata["scenario_id"] = row.scenario_id
+        # One title per row: chat max_sources_per_title defaults to 1.
+        title = (row.corpus_id or "").strip() or row.id
         chunks.append(
             DocumentChunk(
                 id=row.id,
                 document_id=document.id,
-                title=document.title,
+                title=title,
                 content=content,
                 source_type="feedback",
                 source_path=f"feedback:{row.id}",
@@ -787,6 +792,137 @@ async def _load_feedback_index_rows(
             index_in_rag=row.index_in_rag,
             index_text=row.index_text,
             scenario_id=row.scenario_id,
+            corpus_id=row.corpus_id,
         )
         for row in rows
     ]
+
+
+PRODUCT_QDRANT_COLLECTION = "documents"
+PRODUCT_EMBEDDING_MODEL = "nomic-embed-text"
+
+
+def assert_product_qdrant_target(*, collection_name: str, embedding_model: str) -> None:
+    """Refuse a product index target before any Qdrant client is constructed.
+
+    ``feedback_eval_v1`` and every name other than ``documents`` are refused.
+    The embedding model must be ``nomic-embed-text``.
+    """
+
+    name = collection_name.strip()
+    model = embedding_model.strip()
+    if name == "feedback_eval_v1" or name != PRODUCT_QDRANT_COLLECTION:
+        raise ValueError(f"refusing product index into collection {collection_name!r}")
+    if model != PRODUCT_EMBEDDING_MODEL:
+        raise ValueError(f"refusing product index with embedding model {embedding_model!r}")
+
+
+def open_product_qdrant_store(
+    *,
+    url: str,
+    collection_name: str,
+    embedding_model: str,
+    check_compatibility: bool,
+) -> QdrantStore:
+    """Open the product collection. A refused name does not construct a client."""
+
+    assert_product_qdrant_target(collection_name=collection_name, embedding_model=embedding_model)
+    return QdrantStore(
+        url=url,
+        collection_name=collection_name.strip(),
+        check_compatibility=check_compatibility,
+    )
+
+
+def _feedback_product_source_path(*, tenant_id: str, bucket_id: str) -> str:
+    return f"feedback://{tenant_id}/{bucket_id}/fb-v1"
+
+
+async def ensure_feedback_product_document(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    bucket_id: str,
+    document_id: str,
+    owner_user_id: str,
+) -> None:
+    """Create the product feedback asset and bucket link when they are missing.
+
+    Does not create a knowledge bucket. An existing asset keeps its source path
+    and is not moved off ``visibility=tenant``.
+    """
+
+    bucket = await session.scalar(
+        select(KnowledgeBucket.id).where(
+            KnowledgeBucket.id == bucket_id,
+            KnowledgeBucket.tenant_id == tenant_id,
+        )
+    )
+    if bucket is None:
+        raise ValueError("knowledge bucket does not exist for this tenant; refusing to create one")
+    existing = await session.scalar(select(DocumentAsset).where(DocumentAsset.id == document_id))
+    if existing is None:
+        session.add(
+            DocumentAsset(
+                id=document_id,
+                tenant_id=tenant_id,
+                owner_user_id=owner_user_id,
+                title="Фидбек v1",
+                file_name="fb-v1.txt",
+                source_type="feedback_corpus",
+                source_path=_feedback_product_source_path(tenant_id=tenant_id, bucket_id=bucket_id),
+                status="uploaded",
+                visibility="tenant",
+                allowed_roles=[],
+                size_bytes=0,
+                metadata_json={"origin": "feedback_v1_product"},
+            )
+        )
+        await session.flush()
+    elif existing.tenant_id != tenant_id:
+        raise ValueError("feedback product document id is already used in another tenant")
+    link = await session.scalar(
+        select(BucketDocument).where(
+            BucketDocument.tenant_id == tenant_id,
+            BucketDocument.bucket_id == bucket_id,
+            BucketDocument.document_id == document_id,
+        )
+    )
+    if link is None:
+        session.add(
+            BucketDocument(
+                tenant_id=tenant_id,
+                bucket_id=bucket_id,
+                document_id=document_id,
+                added_by_user_id=owner_user_id,
+                indexing_status="pending",
+            )
+        )
+        await session.flush()
+
+
+async def enqueue_feedback_product_job(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    bucket_id: str,
+    document_id: str,
+    owner_user_id: str,
+) -> str:
+    """Insert one pending bucket_commit job and return its id."""
+
+    job_id = str(uuid.uuid4())
+    session.add(
+        DocumentIndexingJob(
+            id=job_id,
+            tenant_id=tenant_id,
+            bucket_id=bucket_id,
+            document_id=document_id,
+            status="pending",
+            owner_user_id=owner_user_id,
+            owner_roles_json=[],
+            metadata_json={"source": "bucket_commit"},
+        )
+    )
+    await session.flush()
+    return job_id

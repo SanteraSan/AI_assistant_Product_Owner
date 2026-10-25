@@ -39,6 +39,7 @@ class OllamaClient:
         keep_alive: str | int | None = None,
         options: dict[str, Any] | None = None,
         think: bool | None = None,
+        response_format: str | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = {
             "model": model,
@@ -53,6 +54,8 @@ class OllamaClient:
             payload["options"] = options
         if think is not None:
             payload["think"] = think
+        if response_format is not None:
+            payload["format"] = response_format
 
         async with self._guarded_slot(model=model, operation="generate"):
             response = await self._http_client.post(

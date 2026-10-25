@@ -27,6 +27,11 @@ class ModelGateway:
         openrouter: OpenAICompatibleProvider | None = None,
         gemini_default_model: str = "gemini-3.6-flash",
         openrouter_default_model: str = "openai/gpt-4o-mini",
+        gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai",
+        openrouter_base_url: str = "https://openrouter.ai/api/v1",
+        external_timeout_seconds: float = 60.0,
+        openrouter_http_referer: str = "http://localhost:5173",
+        openrouter_app_title: str = "TaskFlow AI",
     ) -> None:
         self._ollama = ollama_client
         self._catalog = catalog
@@ -34,6 +39,11 @@ class ModelGateway:
         self._openrouter = openrouter
         self._gemini_default_model = gemini_default_model
         self._openrouter_default_model = openrouter_default_model
+        self._gemini_base_url = gemini_base_url
+        self._openrouter_base_url = openrouter_base_url
+        self._external_timeout_seconds = external_timeout_seconds
+        self._openrouter_http_referer = openrouter_http_referer
+        self._openrouter_app_title = openrouter_app_title
 
     async def aclose(self) -> None:
         if self._gemini is not None:
@@ -52,7 +62,9 @@ class ModelGateway:
         keep_alive: str | int | None = None,
         options: dict[str, Any] | None = None,
         think: bool | None = False,
+        provider_api_key: str | None = None,
     ) -> GenerationResult:
+        client_key = _normalize_client_api_key(provider_api_key)
         normalized = normalize_approach(approach)
         if endpoint == "agent" and normalized == "external":
             raise ProviderError(
@@ -62,12 +74,17 @@ class ModelGateway:
             )
 
         if normalized == "external":
-            provider_name = self._catalog.resolve_provider(model=model, approach="external")
+            provider_name = self._catalog.resolve_provider(
+                model=model,
+                approach="external",
+                client_key_supplied=client_key is not None,
+            )
             return await self._external_generate(
                 provider_name=provider_name,
                 model=model,
                 prompt=prompt,
                 options=options,
+                provider_api_key=client_key,
             )
 
         if endpoint == "chat" or not allow_external_fallback or normalized == "local_only":
@@ -174,7 +191,38 @@ class ModelGateway:
         model: str,
         prompt: str,
         options: dict[str, Any] | None,
+        provider_api_key: str | None = None,
     ) -> GenerationResult:
+        client_key = _normalize_client_api_key(provider_api_key)
+        if client_key is not None:
+            if provider_name == "gemini":
+                provider = OpenAICompatibleProvider(
+                    provider_name="gemini",
+                    base_url=self._gemini_base_url,
+                    api_key=client_key,
+                    timeout_seconds=self._external_timeout_seconds,
+                )
+            else:
+                provider = OpenAICompatibleProvider(
+                    provider_name=provider_name,
+                    base_url=self._openrouter_base_url,
+                    api_key=client_key,
+                    timeout_seconds=self._external_timeout_seconds,
+                    extra_headers={
+                        "HTTP-Referer": self._openrouter_http_referer,
+                        "X-Title": self._openrouter_app_title,
+                    },
+                )
+            try:
+                return await provider.generate(
+                    model=model,
+                    prompt=prompt,
+                    temperature=_option_float(options, "temperature"),
+                    top_p=_option_float(options, "top_p"),
+                )
+            finally:
+                await provider.aclose()
+
         provider = self._gemini if provider_name == "gemini" else self._openrouter
         if provider is None:
             raise ProviderError(
@@ -263,7 +311,21 @@ def build_model_gateway(*, settings: Settings, ollama_client: OllamaClient) -> M
         openrouter=openrouter,
         gemini_default_model=settings.gemini_default_model,
         openrouter_default_model=settings.openrouter_default_model,
+        gemini_base_url=settings.gemini_base_url,
+        openrouter_base_url=settings.openrouter_base_url,
+        external_timeout_seconds=settings.external_request_timeout_seconds,
+        openrouter_http_referer=settings.openrouter_http_referer,
+        openrouter_app_title=settings.openrouter_app_title,
     )
+
+
+def _normalize_client_api_key(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return stripped
 
 
 def _estimate_tokens(text: str) -> int:

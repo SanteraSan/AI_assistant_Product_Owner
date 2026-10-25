@@ -193,6 +193,7 @@ class RagService:
         additional_sources: list[SourceChunk] | None = None,
         approach: str | None = None,
         session_seen_non_synthetic: bool = False,
+        provider_api_key: str | None = None,
     ) -> RagChatResponse:
         selected_model = model or self._default_model
         selected_retrieval_query = retrieval_query or message
@@ -249,6 +250,7 @@ class RagService:
                 keep_alive=self._generation_keep_alive,
                 options=generation_options,
                 think=False,
+                provider_api_key=provider_api_key,
             )
             response_text = generation.response
             provider = generation.provider

@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
 class ChatSessionCreateRequest(BaseModel):
@@ -51,11 +51,33 @@ class ChatAttachmentCreateRequest(BaseModel):
     status: str = Field(default="indexing", min_length=1, max_length=32)
 
 
+def _blank_provider_api_key_to_none(value: object) -> object:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return value
+
+
+def reveal_provider_api_key(value: SecretStr | None) -> str | None:
+    if value is None:
+        return None
+    revealed = value.get_secret_value().strip()
+    return revealed or None
+
+
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     model: str | None = None
     session_id: str | None = Field(default=None, min_length=1, max_length=36)
     approach: str | None = Field(default=None, max_length=64)
+    provider_api_key: SecretStr | None = Field(default=None, max_length=512)
+
+    @field_validator("provider_api_key", mode="before")
+    @classmethod
+    def _normalize_provider_api_key(cls, value: object) -> object:
+        return _blank_provider_api_key_to_none(value)
 
 
 class ChatResponse(BaseModel):
@@ -104,6 +126,12 @@ class RagChatRequest(BaseModel):
     max_sources_per_title: int | None = Field(default=None, ge=1, le=10)
     max_sources_per_source_type: int | None = Field(default=None, ge=1, le=10)
     max_sources_per_source_path: int | None = Field(default=None, ge=1, le=10)
+    provider_api_key: SecretStr | None = Field(default=None, max_length=512)
+
+    @field_validator("provider_api_key", mode="before")
+    @classmethod
+    def _normalize_provider_api_key(cls, value: object) -> object:
+        return _blank_provider_api_key_to_none(value)
 
 
 class RagChatResponse(ChatResponse):

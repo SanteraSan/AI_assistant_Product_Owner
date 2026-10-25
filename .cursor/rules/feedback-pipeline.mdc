@@ -24,3 +24,18 @@ alwaysApply: true
 - `/home/santera/ML|LLM|RAG/sintetic_data/noise.jsonl` — 350 шума
 - `/home/santera/ML|LLM|RAG/sintetic_data/churn.jsonl` — 75 коротких сигналов
 - `/home/santera/ML|LLM|RAG/sintetic_data/castom.jsonl` — ручной holdout, 20 строк. Не переписывать и не дополнять моделью. Копия в репозитории: `data/feedback/v1/holdout.jsonl`.
+- Замороженный корпус: `data/feedback/v1/cleaned.jsonl`. Этапы 3 и 4 уже сделаны, заново их не выполнять.
+
+Остаток по порядку: этап 8 сделан, бакет `taskflow_seed`, 75 точек `source_type=feedback` в `documents`. QLoRA не запускалась.
+
+Этап 8 нужен, чтобы чат отвечал по отфильтрованным данным. Коллекция `feedback_eval_v1` для чата не используется. Seed в Postgres сам чат не кормит: у строк `document_id` пустой, а поиск идёт в продуктовую коллекцию `documents`.
+
+На этапе 8:
+- `alembic upgrade head` на рабочую Postgres.
+- Один бакет в tenant демо-пользователя, который уже открывается в UI. Не заводить второй контур и не менять модель по умолчанию.
+- Засеять `cleaned.jsonl` существующим `build_feedback_corpus.py --seed` с явными `tenant_id` и `bucket_id`. Holdout не сеять.
+- Привязать строки к документу этого бакета и прогнать текущий indexing worker. В `documents` попадают только строки, которые пропускает `feedback_item_enters_product_qdrant`: bug и feature с `index_in_rag`. Шум и короткие сигналы остаются в Postgres.
+- Счётчики этапа 6 на этом бакете показывают все четыре класса. Источники чата не содержат «Класс!» и «Удаляю».
+- В ответе пользователю: имя бакета, число точек `source_type=feedback` в `documents`, вопросы «Собери недельное саммари критичных багов.» и «Какие фичи просят?». Для сравнения с замером в селекторе выбрать `qwen3.8:latest`.
+
+Статус: сделан (2026-10-25). Бакет `TaskFlow seed corpus` (`taskflow_seed`, tenant `local_demo`), документ `806b53c9-fea8-550e-b555-02f482cbf352`. Postgres: noise 350, churn_signal 75, bug 68, feature 17, indexed 75. В `documents` 75 точек `source_type=feedback` (bug 60, feature 15).

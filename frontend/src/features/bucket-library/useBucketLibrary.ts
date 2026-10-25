@@ -13,6 +13,7 @@ import {
   stageDocument,
 } from '../../entities/document/api'
 import type { DocumentItem } from '../../entities/document/model'
+import { fetchFeedbackCounts } from '../../entities/feedback/api'
 
 type UseBucketLibraryOptions = {
   isAuthenticated: boolean
@@ -49,6 +50,12 @@ export function useBucketLibrary({
       query.state.data?.some((document) => document.status === 'indexing')
         ? 3000
         : false,
+    retry: false,
+  })
+  const feedbackCountsQuery = useQuery({
+    enabled: isAuthenticated && hasBackendBuckets && Boolean(inspectedBucketId),
+    queryKey: ['feedback-counts', tenantId, inspectedBucketId],
+    queryFn: () => fetchFeedbackCounts(inspectedBucketId),
     retry: false,
   })
   const documents = useMemo(
@@ -195,6 +202,14 @@ export function useBucketLibrary({
     availableDocuments,
     buckets,
     documents,
+    feedbackCounts: feedbackCountsQuery.data ?? null,
+    feedbackCountsLoading:
+      feedbackCountsQuery.isFetching &&
+      feedbackCountsQuery.data === undefined &&
+      !feedbackCountsQuery.isError,
+    feedbackCountsError: feedbackCountsQuery.isError
+      ? 'Не удалось загрузить объём фидбека.'
+      : null,
     hasBackendBuckets,
     setInspectedBucketId,
     stageDocument: (file: File) => stageDocumentMutation.mutateAsync(file),

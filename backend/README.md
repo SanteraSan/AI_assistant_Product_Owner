@@ -1819,6 +1819,8 @@ OPENROUTER_API_KEY=
 OPENROUTER_DEFAULT_MODEL=openai/gpt-4o-mini
 ```
 
+Поле ключа в браузере видно только при подходе External и режиме RAG. Значение лежит в `localStorage` под именем `taskflow.providerApiKey` и уходит в `POST /rag/chat` полем `provider_api_key`. На такой вызов собирается отдельный клиент провайдера и после ответа не сохраняется. Пустое поле оставляет путь сервера: ключ из env либо Ollama. Ключ браузера не попадает в Postgres, логи и метрики. Агент и замер фидбека его не используют.
+
 Цены: `app/core/model_pricing.py`. Нет строки в таблице → `estimated_cost_usd=null`.
 
 ### Sales-демопетля (этап B)
@@ -1907,7 +1909,7 @@ python backend/scripts/build_feedback_corpus.py --write-jsonl --seed --tenant-id
 
 Сырые строки лежат в `data/feedback/v1/` (`raw.jsonl`, `cleaned.jsonl`, `holdout.jsonl`, `manifest.json`). В продуктовый Qdrant по-прежнему попадают только строки с `index_in_rag`.
 
-Замер рабочую Postgres не засевал. В отчёте `volume.postgres` равен null, причина — «Seed этапа 2 в рабочую Postgres не выполнялся. Знаменатель — counts манифеста, проверенные scroll коллекции feedback_eval_v1. Продуктовый бакет не засевается.» Команды `--seed` выше остаются описанием скрипта сборки.
+Замер H0/H1 рабочую Postgres не засевал: в отчёте `volume.postgres` равен null, знаменатель — counts манифеста по scroll коллекции `feedback_eval_v1`. Продуктовый путь описан ниже.
 
 Повтор из корня репозитория. Отчёт — `research/feedback_summary_eval_latest.json`, вывод — запись журнала от 2026-10-25. H1 принят, потому что must_not в H1 пуст, а recall и faithfulness не просели; фразы шума в ответах H0 уже отсутствовали.
 
@@ -1918,3 +1920,25 @@ python backend/scripts/eval_feedback_summary.py \
 ```
 
 Других флагов у скрипта нет. Иная модель завершает прогон с кодом 2. Скрипт перезаписывает `research/feedback_summary_eval_latest.json`.
+
+### Продуктовый бакет
+
+Чат читает коллекцию `documents`. Бакет `TaskFlow seed corpus` (`bucket_id` `taskflow_seed`, tenant `local_demo`), документ `806b53c9-fea8-550e-b555-02f482cbf352`. В Postgres этого бакета 510 строк `fb-v1-`: noise 350, churn_signal 75, bug 68, feature 17. Флаг `index_in_rag` включён у 60 bug и 15 feature. В `documents` 75 точек `source_type=feedback`: bug 60, feature 15. Шум и короткие сигналы остаются в Postgres. Коллекцию `feedback_eval_v1` не переписывали: до и после прогона в ней 510 точек. Holdout не сеяли.
+
+Команда из каталога `backend`:
+
+```bash
+python scripts/build_feedback_corpus.py --seed --index-attached \
+    --tenant-id local_demo \
+    --bucket-id taskflow_seed
+```
+
+`--seed` без `--index-attached` по-прежнему только заливает Postgres и оставляет `document_id` пустым. Живой чат на `qwen3.8:latest` в этот заход не запускался.
+
+### Zero-shot классы
+
+Команда из корня репозитория. Иная модель даёт код 2. Отчёт — `research/feedback_zero_shot_eval_latest.json`. Обучение в прогон не входило. `index_in_rag` ставят правила.
+
+```bash
+python backend/scripts/eval_feedback_zero_shot.py --model qwen3.8:latest
+```
