@@ -6,7 +6,8 @@ from time import perf_counter
 from app.models.chat import RagChatResponse, SourceChunk
 from app.services.external_scope import decide_external_scope, sources_include_non_synthetic
 from app.services.llm.gateway import ModelGateway
-from app.services.rag_service import RagService, build_rag_prompt, _estimate_tokens
+from app.services.rag_prompt import _estimate_tokens, build_rag_prompt
+from app.services.rag_service import RagService
 from app.services.sales_deal_code import resolve_deal_from_message
 from app.services.sales_deal_repository import DealCardRepository, DemoDealRecord
 from app.services.sales_scope import SALES_RETRIEVAL_FEATURES, SALES_RETRIEVAL_SOURCE_TYPES

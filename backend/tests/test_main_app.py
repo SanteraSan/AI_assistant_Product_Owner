@@ -7,21 +7,27 @@ from fastapi.testclient import TestClient
 
 from app import main as main_module
 from app.main import (
-    _bucket_file_inventory_response,
-    _conversation_context_error,
-    _document_ids,
-    _effective_bucket_ids,
     _enforce_chat_request_limits,
     _enforce_filter_values_limit,
     _enforce_rag_request_limits,
     _limits_snapshot,
-    _looks_like_bucket_file_inventory_question,
-    _limit_targeted_image_documents,
-    _looks_like_targeted_image_reanalysis,
-    _targeted_image_point_id,
     create_app,
 )
 from app.models.chat import ChatRequest, RagChatRequest, RagChatResponse, SourceChunk
+from app.routers import chat as chat_router
+from app.services import rag_turn
+from app.services.rag_turn import (
+    _bucket_file_inventory_response,
+    _conversation_context_error,
+    _document_ids,
+    _effective_bucket_ids,
+)
+from app.services.requested_file_scope import looks_like_file_inventory_question
+from app.services.targeted_image import (
+    _limit_targeted_image_documents,
+    _looks_like_targeted_image_reanalysis,
+    _targeted_image_point_id,
+)
 from app.services.llm.types import GenerationResult
 from tests.auth_helpers import auth_headers
 
@@ -114,7 +120,7 @@ def test_chat_sessions_endpoint_returns_user_sessions(monkeypatch) -> None:
                 )
             ]
 
-    monkeypatch.setattr(main_module, "chat_history_service", _FakeChatHistoryService())
+    monkeypatch.setattr(chat_router, "chat_history_service", _FakeChatHistoryService())
     client = TestClient(main_module.app)
 
     response = client.get(
@@ -149,7 +155,7 @@ def test_chat_messages_endpoint_returns_session_messages(monkeypatch) -> None:
                 )
             ]
 
-    monkeypatch.setattr(main_module, "chat_history_service", _FakeChatHistoryService())
+    monkeypatch.setattr(chat_router, "chat_history_service", _FakeChatHistoryService())
     client = TestClient(main_module.app)
 
     response = client.get(
@@ -196,7 +202,7 @@ def test_update_chat_session_endpoint_persists_context(monkeypatch) -> None:
                 updated_at=timestamp,
             )
 
-    monkeypatch.setattr(main_module, "chat_history_service", _FakeChatHistoryService())
+    monkeypatch.setattr(chat_router, "chat_history_service", _FakeChatHistoryService())
     client = TestClient(main_module.app)
 
     response = client.patch(
@@ -260,7 +266,7 @@ def test_create_chat_attachment_message_endpoint(monkeypatch) -> None:
                 created_at=timestamp,
             )
 
-    monkeypatch.setattr(main_module, "chat_history_service", _FakeChatHistoryService())
+    monkeypatch.setattr(chat_router, "chat_history_service", _FakeChatHistoryService())
     client = TestClient(main_module.app)
 
     response = client.post(
@@ -285,7 +291,7 @@ def test_create_chat_attachment_message_endpoint_returns_404(monkeypatch) -> Non
         async def save_attachment_message(self, **_kwargs):
             return None
 
-    monkeypatch.setattr(main_module, "chat_history_service", _FakeChatHistoryService())
+    monkeypatch.setattr(chat_router, "chat_history_service", _FakeChatHistoryService())
     client = TestClient(main_module.app)
 
     response = client.post(
@@ -310,7 +316,7 @@ def test_delete_chat_session_endpoint(monkeypatch) -> None:
             assert session_id == "session-1"
             return True
 
-    monkeypatch.setattr(main_module, "chat_history_service", _FakeChatHistoryService())
+    monkeypatch.setattr(chat_router, "chat_history_service", _FakeChatHistoryService())
     client = TestClient(main_module.app)
 
     response = client.delete(
@@ -334,7 +340,7 @@ def test_bucket_file_inventory_helpers_use_selected_bucket_context() -> None:
     ]
 
     assert _effective_bucket_ids(request) == ["bucket-1"]
-    assert _looks_like_bucket_file_inventory_question(request.message)
+    assert looks_like_file_inventory_question(request.message)
     assert _document_ids(documents) == ["doc-1"]
 
     response = _bucket_file_inventory_response(
@@ -437,16 +443,16 @@ def test_rag_chat_passes_targeted_image_source_to_rag(monkeypatch) -> None:
             return None
 
     monkeypatch.setattr(main_module, "_qdrant_collection_exists", lambda: True)
-    monkeypatch.setattr(main_module, "_build_conversation_context", _fake_build_context)
-    monkeypatch.setattr(main_module, "_build_targeted_image_sources", _fake_build_targeted_image_sources)
-    monkeypatch.setattr(main_module, "rag_service", _FakeRagService())
+    monkeypatch.setattr(rag_turn, "_build_conversation_context", _fake_build_context)
+    monkeypatch.setattr(rag_turn, "_build_targeted_image_sources", _fake_build_targeted_image_sources)
+    monkeypatch.setattr(rag_turn, "rag_service", _FakeRagService())
     monkeypatch.setattr(main_module, "_try_save_chat_exchange", _fake_save_exchange)
     monkeypatch.setattr(main_module, "rag_log_service", _FakeRagLogService())
 
     async def _fake_resolve_rag_document_ids(**kwargs):
         return list(kwargs.get("requested_document_ids") or [])
 
-    monkeypatch.setattr(main_module, "resolve_rag_document_ids", _fake_resolve_rag_document_ids)
+    monkeypatch.setattr(rag_turn, "resolve_rag_document_ids", _fake_resolve_rag_document_ids)
 
     async def _fake_accessible_documents_for_rag(**_kwargs):
         return [
@@ -460,7 +466,7 @@ def test_rag_chat_passes_targeted_image_source_to_rag(monkeypatch) -> None:
         ]
 
     monkeypatch.setattr(
-        main_module,
+        rag_turn,
         "_accessible_documents_for_rag",
         _fake_accessible_documents_for_rag,
     )
@@ -525,16 +531,16 @@ def test_rag_chat_sales_bucket_uses_composer(monkeypatch) -> None:
         return []
 
     monkeypatch.setattr(main_module, "_qdrant_collection_exists", lambda: True)
-    monkeypatch.setattr(main_module, "_build_conversation_context", _fake_build_context)
-    monkeypatch.setattr(main_module, "_session_seen_non_synthetic_flag", _no_seen)
-    monkeypatch.setattr(main_module, "sales_composer", _FakeComposer())
-    monkeypatch.setattr(main_module, "rag_service", _FakeRagService())
+    monkeypatch.setattr(rag_turn, "_build_conversation_context", _fake_build_context)
+    monkeypatch.setattr(rag_turn, "_session_seen_non_synthetic_flag", _no_seen)
+    monkeypatch.setattr(rag_turn, "sales_composer", _FakeComposer())
+    monkeypatch.setattr(rag_turn, "rag_service", _FakeRagService())
     monkeypatch.setattr(main_module, "_try_save_chat_exchange", _fake_save_exchange)
     monkeypatch.setattr(main_module, "rag_log_service", _FakeRagLogService())
-    monkeypatch.setattr(main_module, "_bucket_documents_for_context", _fake_bucket_documents)
-    monkeypatch.setattr(main_module, "resolve_rag_document_ids", _fake_resolve_rag_document_ids)
+    monkeypatch.setattr(rag_turn, "_bucket_documents_for_context", _fake_bucket_documents)
+    monkeypatch.setattr(rag_turn, "resolve_rag_document_ids", _fake_resolve_rag_document_ids)
     monkeypatch.setattr(
-        main_module,
+        rag_turn,
         "_accessible_documents_for_rag",
         _fake_accessible_documents_for_rag,
     )

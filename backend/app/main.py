@@ -2,10 +2,8 @@ import logging
 import asyncio
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from time import perf_counter
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import uuid4
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -16,7 +14,6 @@ from fastapi.responses import JSONResponse
 from app.clients.qdrant_store import QdrantStore
 from app.core.config import get_settings
 from app.core.errors import ProviderError
-from app.db.models import ChatMessage, ChatSession, DocumentAsset
 from app.db.session import (
     create_engine,
     create_session_factory,
@@ -25,63 +22,53 @@ from app.db.session import (
 )
 from app.dependencies.auth import get_current_user
 from app.models.chat import (
-    ChatAttachmentCreateRequest,
-    ChatMessageResponse,
     ChatRequest,
     ChatResponse,
-    ChatSessionCreateRequest,
-    ChatSessionResponse,
-    ChatSessionUpdateRequest,
     RagChatRequest,
     RagChatResponse,
-    SourceChunk,
 )
 from app.routers.agent import create_agent_router
 from app.routers.buckets import create_bucket_router
+from app.routers.chat import create_chat_router
 from app.routers.integrations import create_integrations_router
 from app.services.access_policy import UserContext
 from app.services.agent.orchestrator import AgentOrchestrator
 from app.services.agent.langgraph_adapter import LangGraphAgentAdapter
-from app.services.bucket_service import PERSONAL_INDEX_BUCKET_ID, BucketService
+from app.services.bucket_service import BucketService
 from app.services.chat_history_service import ChatExchangeRecord, ChatHistoryService
 from app.services.conversation_context_service import ConversationContextService
 from app.services.conversation_memory_service import ConversationMemoryService
 from app.services.conversation_summary_service import ConversationSummaryService
-from app.services.document_indexing_service import IMAGE_SOURCE_TYPES, DocumentIndexingService
+from app.services.document_indexing_service import DocumentIndexingService
 from app.services.external_db_sync_service import ExternalDbSyncService
-from app.services.external_scope import (
-    SESSION_SEEN_NON_SYNTHETIC,
-    decide_external_scope,
-    session_seen_non_synthetic,
-)
+from app.services.external_scope import decide_external_scope
 from app.services.feature_extractor import FeatureExtractor
-from app.services.image_digest_service import build_targeted_image_digest
 from app.services.indexing_event_publisher import IndexingEventPublisher
 from app.services.indexing_job_dispatcher import IndexingJobDispatcher
 from app.services.integration_ingest_service import IntegrationIngestService
 from app.services.llm import build_model_gateway
 from app.services.metrics import AppMetrics, metrics_http_middleware, prometheus_response
-from app.services.object_storage import build_object_storage, display_name_from_ref, resolve_upload_root
+from app.services.object_storage import build_object_storage, resolve_upload_root
 from app.services.ollama_client import OllamaClient
 from app.services.ollama_load_guard import OllamaLoadGuard, OllamaOverloadedError
 from app.services.query_router import QueryRouter
-from app.services.rag_scope import resolve_rag_document_ids
-from app.services.sticky_document_scope import resolve_sticky_document_scope
-from app.services.requested_file_scope import (
-    looks_like_file_inventory_question,
-    missing_requested_file_answer,
-    resolve_requested_files,
-)
 from app.services.rate_limiter import RedisRateLimiter
 from app.services.rag_log_service import RagLogService
 from app.services.rag_service import RagService
+from app.services.rag_turn import (
+    _build_conversation_context,
+    _document_ids_for_turn,
+    _session_seen_non_synthetic_flag,
+    configure_rag_turn,
+    run_rag_turn,
+)
 from app.services.redis_service import RedisService
 from app.services.sales_composer import SalesComposer
 from app.services.sales_deal_repository import PostgresDealCardRepository
-from app.services.sales_scope import is_sales_rag_scope
 from app.services.sql_execution_service import SqlExecutionService
 from app.services.sql_schema_card import parse_allowed_tables
 from app.services.text_to_sql_service import TextToSqlService
+from app.services.targeted_image import configure_targeted_image
 from app.services.tools import ToolExecutor, build_default_tool_registry
 
 
@@ -257,6 +244,24 @@ indexing_job_dispatcher = IndexingJobDispatcher(
     document_indexing_service=document_indexing_service,
     indexing_event_publisher=indexing_event_publisher,
 )
+configure_rag_turn(
+    bucket_service=bucket_service,
+    chat_history_service=chat_history_service,
+    conversation_context_service=conversation_context_service,
+    conversation_memory_service=conversation_memory_service,
+    conversation_summary_service=conversation_summary_service,
+    feature_extractor=feature_extractor,
+    qdrant_store=qdrant_store,
+    rag_service=rag_service,
+    sales_composer=sales_composer,
+)
+configure_targeted_image(
+    bucket_service=bucket_service,
+    object_storage=object_storage,
+    ollama_client=ollama_client,
+    qdrant_store=qdrant_store,
+    feature_extractor=feature_extractor,
+)
 
 
 @asynccontextmanager
@@ -307,6 +312,7 @@ app.include_router(
         default_tenant_id=settings.default_tenant_id,
     )
 )
+app.include_router(create_chat_router(history_service=chat_history_service))
 app.include_router(
     create_integrations_router(
         integration_ingest_service=integration_ingest_service,
@@ -462,106 +468,6 @@ async def metrics_summary() -> dict[str, object]:
     return app_metrics.summary()
 
 
-@app.get("/chat/sessions", response_model=list[ChatSessionResponse])
-async def list_chat_sessions(
-    user: UserContext = Depends(get_current_user),
-) -> list[ChatSessionResponse]:
-    sessions = await chat_history_service.list_sessions(
-        tenant_id=user.tenant_id,
-        user_id=user.user_id,
-    )
-    return [_chat_session_response(session) for session in sessions]
-
-
-@app.post("/chat/sessions", response_model=ChatSessionResponse, status_code=201)
-async def create_chat_session(
-    payload: ChatSessionCreateRequest,
-    user: UserContext = Depends(get_current_user),
-) -> ChatSessionResponse:
-    session = await chat_history_service.create_session(
-        tenant_id=user.tenant_id,
-        user_id=user.user_id,
-        title=payload.title,
-        active_bucket_id=payload.active_bucket_id,
-        model_id=payload.model_id,
-        approach=payload.approach,
-        metadata=payload.metadata,
-    )
-    return _chat_session_response(session)
-
-
-@app.patch("/chat/sessions/{session_id}", response_model=ChatSessionResponse)
-async def update_chat_session(
-    session_id: str,
-    payload: ChatSessionUpdateRequest,
-    user: UserContext = Depends(get_current_user),
-) -> ChatSessionResponse:
-    session = await chat_history_service.update_session(
-        tenant_id=user.tenant_id,
-        user_id=user.user_id,
-        session_id=session_id,
-        title=payload.title,
-        active_bucket_id=payload.active_bucket_id,
-        model_id=payload.model_id,
-        approach=payload.approach,
-        metadata=payload.metadata,
-    )
-    if session is None:
-        raise HTTPException(status_code=404, detail="Chat session not found.")
-    return _chat_session_response(session)
-
-
-@app.delete("/chat/sessions/{session_id}", status_code=204)
-async def delete_chat_session(
-    session_id: str,
-    user: UserContext = Depends(get_current_user),
-) -> None:
-    deleted = await chat_history_service.delete_session(
-        tenant_id=user.tenant_id,
-        user_id=user.user_id,
-        session_id=session_id,
-    )
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Chat session not found.")
-
-
-@app.get("/chat/sessions/{session_id}/messages", response_model=list[ChatMessageResponse])
-async def list_chat_session_messages(
-    session_id: str,
-    user: UserContext = Depends(get_current_user),
-) -> list[ChatMessageResponse]:
-    messages = await chat_history_service.list_messages(
-        tenant_id=user.tenant_id,
-        user_id=user.user_id,
-        session_id=session_id,
-    )
-    return [_chat_message_response(message) for message in messages]
-
-
-@app.post(
-    "/chat/sessions/{session_id}/attachments",
-    response_model=ChatMessageResponse,
-    status_code=201,
-)
-async def create_chat_attachment_message(
-    session_id: str,
-    payload: ChatAttachmentCreateRequest,
-    user: UserContext = Depends(get_current_user),
-) -> ChatMessageResponse:
-    message = await chat_history_service.save_attachment_message(
-        tenant_id=user.tenant_id,
-        user_id=user.user_id,
-        session_id=session_id,
-        document_id=payload.document_id,
-        file_name=payload.file_name,
-        source_type=payload.source_type,
-        status=payload.status,
-    )
-    if message is None:
-        raise HTTPException(status_code=404, detail="Chat session not found.")
-    return _chat_message_response(message)
-
-
 @app.post("/chat", response_model=ChatResponse)
 async def chat(
     request: Request,
@@ -653,130 +559,12 @@ async def rag_chat(
     try:
         started_at = perf_counter()
         outcome = "error"
-        effective_bucket_ids = _effective_bucket_ids(payload)
-        document_ids, _chat_document_ids = await _document_ids_for_turn(
+        turn = await run_rag_turn(
+            payload=payload,
             user=user,
-            session_id=payload.session_id,
-            message=payload.message,
-            requested_document_ids=payload.document_ids,
+            started_at=started_at,
         )
-        payload = payload.model_copy(update={"document_ids": document_ids})
-        bucket_documents = await _bucket_documents_for_context(
-            user=user,
-            bucket_ids=effective_bucket_ids,
-        )
-        effective_document_ids = await resolve_rag_document_ids(
-            user=user,
-            bucket_service=bucket_service,
-            requested_document_ids=payload.document_ids,
-            bucket_documents=bucket_documents,
-        )
-        accessible_documents = await _accessible_documents_for_rag(
-            user=user,
-            bucket_documents=bucket_documents,
-            effective_document_ids=effective_document_ids,
-        )
-        conversation_context = await _build_conversation_context(
-            session_id=payload.session_id,
-            message=payload.message,
-        )
-        if looks_like_file_inventory_question(payload.message):
-            response = _file_inventory_response(
-                model=payload.model or settings.default_rag_model,
-                bucket_ids=effective_bucket_ids,
-                documents=accessible_documents,
-                latency_ms=int((perf_counter() - started_at) * 1000),
-            )
-        else:
-            requested_files = resolve_requested_files(
-                message=payload.message,
-                documents=accessible_documents,
-            )
-            if requested_files.missing_names and not requested_files.matched_documents:
-                response = RagChatResponse(
-                    model=payload.model or settings.default_rag_model,
-                    response=missing_requested_file_answer(requested_files.missing_names),
-                    latency_ms=int((perf_counter() - started_at) * 1000),
-                    collection=qdrant_store.collection_name,
-                    sources=[],
-                    score_threshold=None,
-                    retrieval={
-                        "mode": "requested_file_scope_refusal",
-                        "missing_requested_files": requested_files.missing_names,
-                        "document_ids": effective_document_ids,
-                        "final_top_k": 0,
-                    },
-                )
-            else:
-                scoped_document_ids = effective_document_ids
-                if requested_files.matched_documents:
-                    scoped_document_ids = [
-                        document.id for document in requested_files.matched_documents
-                    ]
-                targeted_image_sources = await _build_targeted_image_sources(
-                    message=payload.message,
-                    user=user,
-                    document_ids=scoped_document_ids,
-                    bucket_ids=effective_bucket_ids,
-                    bucket_documents=bucket_documents,
-                    source_paths=payload.source_paths,
-                )
-                session_seen = await _session_seen_non_synthetic_flag(
-                    user=user,
-                    session_id=payload.session_id,
-                )
-                try:
-                    answerer = (
-                        sales_composer
-                        if is_sales_rag_scope(effective_bucket_ids)
-                        else rag_service
-                    )
-                    response = await answerer.answer(
-                        message=payload.message,
-                        model=payload.model,
-                        retrieval_query=str(
-                            conversation_context.get("retrieval_query") or payload.message
-                        ),
-                        top_k=payload.top_k,
-                        score_threshold=payload.score_threshold,
-                        tenant_id=user.tenant_id,
-                        bucket_ids=effective_bucket_ids,
-                        features=payload.features,
-                        source_types=payload.source_types,
-                        document_ids=scoped_document_ids,
-                        source_paths=payload.source_paths,
-                        allowed_source_paths=[
-                            document.source_path
-                            for document in accessible_documents
-                            if document.source_path
-                            and (
-                                not scoped_document_ids
-                                or document.id in set(scoped_document_ids)
-                            )
-                        ],
-                        max_sources_per_title=payload.max_sources_per_title,
-                        max_sources_per_source_type=payload.max_sources_per_source_type,
-                        max_sources_per_source_path=payload.max_sources_per_source_path,
-                        memory_context=_as_dict(conversation_context.get("prompt_memory")),
-                        additional_sources=targeted_image_sources,
-                        approach=payload.approach,
-                        session_seen_non_synthetic=session_seen,
-                    )
-                except ProviderError as exc:
-                    if exc.extra.get("persist_session_seen_non_synthetic"):
-                        await _persist_session_seen_non_synthetic(
-                            user=user,
-                            session_id=payload.session_id,
-                        )
-                    raise
-                effective_document_ids = scoped_document_ids
-        response.conversation_context = conversation_context
-        scope = response.retrieval.get("external_scope")
-        if isinstance(scope, dict) and scope.get("persist_session_seen_non_synthetic") is True:
-            await _persist_session_seen_non_synthetic(
-                user=user,
-                session_id=payload.session_id,
-            )
+        response = turn.response
         chat_exchange = await _try_save_chat_exchange(
             session_id=payload.session_id,
             tenant_id=user.tenant_id,
@@ -789,8 +577,8 @@ async def rag_chat(
                 "model_id": response.model,
                 "approach": payload.approach,
                 "active_bucket_id": payload.active_bucket_id,
-                "bucket_ids": effective_bucket_ids,
-                "document_ids": effective_document_ids,
+                "bucket_ids": turn.effective_bucket_ids,
+                "document_ids": turn.effective_document_ids,
                 "sources": [
                     {
                         "id": source.id,
@@ -1000,526 +788,6 @@ def _rate_limit_scope(*, request: Request, endpoint: str) -> str:
     return f"{endpoint}:{client_host}"
 
 
-async def _build_conversation_context(
-    *,
-    session_id: str | None,
-    message: str,
-) -> dict[str, object]:
-    try:
-        recent_messages = await chat_history_service.get_recent_messages(
-            session_id=session_id,
-            limit=max(4, conversation_memory_service.recent_messages_limit),
-        )
-        summary_context = await conversation_summary_service.prepare_summary(
-            session_id=session_id,
-        )
-        context_decision = conversation_context_service.build_context(
-            message=message,
-            recent_messages=recent_messages,
-            summary_context=summary_context,
-        ).to_dict()
-        context_decision["prompt_memory"] = conversation_memory_service.build_prompt_memory(
-            recent_messages=recent_messages,
-            summary_context=context_decision,
-        )
-        return context_decision
-    except Exception:
-        logger.exception("Conversation context build failed")
-        return _conversation_context_error(message=message)
-
-
-def _conversation_context_error(*, message: str) -> dict[str, object]:
-    return {
-        "used": False,
-        "mode": "error",
-        "follow_up_detected": False,
-        "topic_switch_detected": False,
-        "history_messages_used": 0,
-        "retrieval_query": message,
-        "carried_features": [],
-        "current_features": feature_extractor.extract(message),
-        "decision_reason": "error",
-        "summary_available": False,
-        "summary_used": False,
-        "summary_updated": False,
-        "summary_message_count": 0,
-        "summary_features": [],
-        "summary_mode": "error",
-        "summary_reason": "conversation_context_build_failed",
-        "summary_strategy": settings.conversation_summary_strategy,
-        "summary_model": settings.conversation_summary_model,
-        "summary_structured": {},
-        "summary_fallback_used": False,
-        "summary_validation_error": "conversation_context_build_failed",
-        "summary_validation_warnings": [],
-        "prompt_memory": conversation_memory_service.empty_prompt_memory(
-            reason="conversation_context_build_failed"
-        ),
-    }
-
-
-async def _document_ids_for_turn(
-    *,
-    user: UserContext,
-    session_id: str | None,
-    message: str,
-    requested_document_ids: list[str],
-) -> tuple[list[str], list[str]]:
-    metadata = await chat_history_service.get_session_metadata(
-        tenant_id=user.tenant_id,
-        user_id=user.user_id,
-        session_id=session_id,
-    )
-    attached = metadata.get("attached_document_ids")
-    attached_document_ids = [
-        item.strip()
-        for item in attached
-        if isinstance(item, str) and item.strip()
-    ] if isinstance(attached, list) else []
-    active = metadata.get("active_document_id")
-    active_document_id = active.strip() if isinstance(active, str) else None
-    documents = await bucket_service.list_available_documents(user=user)
-    scope = resolve_sticky_document_scope(
-        message=message,
-        requested_document_ids=requested_document_ids,
-        attached_document_ids=attached_document_ids,
-        active_document_id=active_document_id,
-        documents=documents,
-    )
-    if (
-        scope.narrowed
-        and session_id
-        and scope.active_document_id
-        and scope.active_document_id != active_document_id
-    ):
-        await chat_history_service.update_session(
-            tenant_id=user.tenant_id,
-            user_id=user.user_id,
-            session_id=session_id,
-            metadata={"active_document_id": scope.active_document_id},
-        )
-    if scope.narrowed:
-        return scope.document_ids, attached_document_ids
-    return requested_document_ids, attached_document_ids
-
-
-def _effective_bucket_ids(payload: RagChatRequest) -> list[str]:
-    values = [*payload.bucket_ids]
-    if payload.active_bucket_id:
-        values.append(payload.active_bucket_id)
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        cleaned = value.strip()
-        if not cleaned or cleaned in seen:
-            continue
-        seen.add(cleaned)
-        normalized.append(cleaned)
-    return normalized
-
-
-async def _bucket_documents_for_context(
-    *,
-    user: UserContext,
-    bucket_ids: list[str],
-) -> list[DocumentAsset]:
-    documents: list[DocumentAsset] = []
-    seen: set[str] = set()
-    for bucket_id in bucket_ids:
-        rows = await bucket_service.list_documents(user=user, bucket_id=bucket_id)
-        if rows is None:
-            continue
-        for document, _bucket_link in rows:
-            if document.id in seen:
-                continue
-            seen.add(document.id)
-            documents.append(document)
-    return documents
-
-
-def _document_ids(documents: list[DocumentAsset]) -> list[str]:
-    return [document.id for document in documents if document.status == "indexed"]
-
-
-def _looks_like_bucket_file_inventory_question(message: str) -> bool:
-    return looks_like_file_inventory_question(message)
-
-
-async def _accessible_documents_for_rag(
-    *,
-    user: UserContext,
-    bucket_documents: list[DocumentAsset],
-    effective_document_ids: list[str],
-) -> list[DocumentAsset]:
-    if bucket_documents:
-        allowed_ids = set(effective_document_ids)
-        return [
-            document
-            for document in bucket_documents
-            if document.id in allowed_ids or not allowed_ids
-        ]
-    if not effective_document_ids:
-        return []
-    available = await bucket_service.list_available_documents(user=user)
-    allowed_ids = set(effective_document_ids)
-    return [document for document in available if document.id in allowed_ids]
-
-
-def _file_inventory_response(
-    *,
-    model: str,
-    bucket_ids: list[str],
-    documents: list[DocumentAsset],
-    latency_ms: int,
-) -> RagChatResponse:
-    indexed_documents = [document for document in documents if document.status == "indexed"]
-    scope_label = "выбранном bucket" if bucket_ids else "доступных документах"
-    if not indexed_documents:
-        answer = f"В {scope_label} нет доступных файлов."
-    else:
-        lines = [
-            f"- `{document.file_name}` — status `{document.status}`"
-            for document in indexed_documents
-        ]
-        answer = f"В {scope_label} доступны файлы:\n" + "\n".join(lines)
-    source_content = "\n".join(
-        f"{document.file_name} | status={document.status} | document_id={document.id}"
-        for document in indexed_documents
-    ) or "Документы не найдены."
-    return RagChatResponse(
-        model=model,
-        response=answer,
-        latency_ms=latency_ms,
-        collection=qdrant_store.collection_name,
-        sources=[
-            SourceChunk(
-                id="file-inventory",
-                score=None,
-                title="Accessible file inventory",
-                source_type="bucket_metadata",
-                source_path=None,
-                content=source_content,
-                metadata={"bucket_ids": bucket_ids},
-            )
-        ],
-        score_threshold=None,
-        retrieval={
-            "mode": "file_inventory",
-            "bucket_ids": bucket_ids,
-            "document_ids": [document.id for document in indexed_documents],
-            "final_top_k": len(indexed_documents),
-        },
-    )
-
-
-def _bucket_file_inventory_response(
-    *,
-    message: str,
-    model: str,
-    bucket_ids: list[str],
-    documents: list[DocumentAsset],
-    latency_ms: int,
-) -> RagChatResponse:
-    del message
-    return _file_inventory_response(
-        model=model,
-        bucket_ids=bucket_ids,
-        documents=documents,
-        latency_ms=latency_ms,
-    )
-
-
-async def _build_targeted_image_sources(
-    *,
-    message: str,
-    user: UserContext,
-    document_ids: list[str],
-    bucket_ids: list[str],
-    bucket_documents: list[DocumentAsset],
-    source_paths: list[str] | None = None,
-) -> list[SourceChunk]:
-    if not settings.image_vision_enabled or not settings.image_vision_model.strip():
-        return []
-    if not _looks_like_targeted_image_reanalysis(message):
-        return []
-
-    documents = await _targeted_image_documents(
-        user=user,
-        document_ids=document_ids,
-        bucket_ids=bucket_ids,
-        bucket_documents=bucket_documents,
-    )
-    documents = _limit_targeted_image_documents(documents, source_paths or [])
-    if not documents:
-        return []
-
-    sources: list[SourceChunk] = []
-    for document, bucket_id in documents[:3]:
-        try:
-            source = await _build_targeted_image_source(
-                document=document,
-                bucket_id=bucket_id,
-                message=message,
-            )
-        except Exception:
-            logger.exception("Targeted image re-analysis failed")
-            continue
-        if source is not None:
-            sources.append(source)
-    return sources
-
-
-async def _targeted_image_documents(
-    *,
-    user: UserContext,
-    document_ids: list[str],
-    bucket_ids: list[str],
-    bucket_documents: list[DocumentAsset],
-) -> list[tuple[DocumentAsset, str]]:
-    documents: list[tuple[DocumentAsset, str]] = []
-    seen: set[str] = set()
-
-    if document_ids:
-        bucket_id = bucket_ids[0] if bucket_ids else PERSONAL_INDEX_BUCKET_ID
-        for document_id in document_ids:
-            document = await bucket_service.get_document(user=user, document_id=document_id)
-            if document is None or document.id in seen:
-                continue
-            if _is_indexed_image_document(document):
-                documents.append((document, bucket_id))
-                seen.add(document.id)
-        return documents
-
-    bucket_id = bucket_ids[0] if bucket_ids else PERSONAL_INDEX_BUCKET_ID
-    for document in bucket_documents:
-        if document.id in seen:
-            continue
-        if _is_indexed_image_document(document):
-            documents.append((document, bucket_id))
-            seen.add(document.id)
-    return documents
-
-
-def _limit_targeted_image_documents(
-    documents: list[tuple[DocumentAsset, str]],
-    source_paths: list[str],
-) -> list[tuple[DocumentAsset, str]]:
-    """An explicit source_path pin must not be replaced by other bucket images."""
-    pinned = {path.strip() for path in source_paths if path and path.strip()}
-    if not pinned:
-        return documents
-    return [
-        item
-        for item in documents
-        if (item[0].source_path or "").strip() in pinned
-    ]
-
-
-async def _build_targeted_image_source(
-    *,
-    document: DocumentAsset,
-    bucket_id: str,
-    message: str,
-) -> SourceChunk | None:
-    if not object_storage.exists(document.source_path):
-        return None
-
-    previous_digest = _previous_image_digest(document=document, bucket_id=bucket_id)
-    with TemporaryDirectory(prefix="targeted-vision-") as temporary_dir_name:
-        temporary_path = Path(temporary_dir_name) / display_name_from_ref(document.source_path)
-        object_storage.materialize(document.source_path, temporary_path)
-        digest = await build_targeted_image_digest(
-            temporary_path,
-            question=message,
-            ollama_client=ollama_client,
-            vision_model=settings.image_vision_model,
-            previous_digest=previous_digest,
-        )
-    content = str(digest.get("content") or "").strip()
-    if not content:
-        return None
-
-    evidence_content = "\n".join(
-        [
-            f"File: {document.file_name}",
-            "Block type: image_targeted_digest",
-            f"Focused question: {message.strip()}",
-            "Targeted vision digest:",
-            content,
-        ]
-    )
-    features = feature_extractor.extract(f"{message}\n{content}")
-    point_id = _targeted_image_point_id(
-        document_id=document.id,
-        bucket_id=bucket_id,
-        question=message,
-        vision_model=settings.image_vision_model,
-    )
-    document_metadata = {
-        "document_asset_id": document.id,
-        "document_file_name": document.file_name,
-        "document_visibility": document.visibility,
-        "prompt_question": message.strip(),
-        "block_type": "image_targeted_digest",
-        "digest_type": "targeted_visual_answer",
-        "vision_model": settings.image_vision_model,
-        "image_width": digest.get("image_width"),
-        "image_height": digest.get("image_height"),
-        "image_format": digest.get("image_format"),
-    }
-    payload = {
-        "document_id": document.id,
-        "tenant_id": document.tenant_id,
-        "bucket_id": bucket_id,
-        "chunk_id": point_id,
-        "chunk_index": 0,
-        "domain": "uploaded_image",
-        "source_type": "image_targeted_digest",
-        "source_path": document.source_path,
-        "processing_status": "indexed",
-        "title": f"{document.file_name} - targeted image analysis",
-        "content": evidence_content,
-        "feature": features,
-        "document_metadata": document_metadata,
-        "language": "ru",
-    }
-    vector = await ollama_client.embed(settings.embedding_model, evidence_content)
-    qdrant_store.ensure_collection(vector_size=len(vector), recreate=False)
-    qdrant_store.upsert_chunks([(point_id, vector, payload)])
-    return SourceChunk(
-        id=point_id,
-        score=None,
-        title=str(payload["title"]),
-        source_type="image_targeted_digest",
-        source_path=document.source_path,
-        feature=features,
-        content=evidence_content,
-        metadata={
-            "document_id": document.id,
-            "tenant_id": document.tenant_id,
-            "bucket_id": bucket_id,
-            "chunk_id": point_id,
-            "chunk_index": 0,
-            "domain": "uploaded_image",
-            "processing_status": "indexed",
-            "document_metadata": document_metadata,
-            "language": "ru",
-        },
-    )
-
-
-def _previous_image_digest(*, document: DocumentAsset, bucket_id: str) -> str | None:
-    sources = qdrant_store.scroll(
-        limit=1,
-        tenant_id=document.tenant_id,
-        bucket_ids=[bucket_id],
-        source_types=["image_digest"],
-        document_ids=[document.id],
-    )
-    if not sources:
-        return None
-    return sources[0].content
-
-
-def _looks_like_targeted_image_reanalysis(message: str) -> bool:
-    normalized = message.lower()
-    reanalysis_markers = (
-        "повторно проанализ",
-        "проанализируй повторно",
-        "проанализируй еще",
-        "проанализируй ещё",
-        "посмотри еще",
-        "посмотри ещё",
-        "ещё раз",
-        "еще раз",
-        "уточни",
-        "детальнее",
-        "подробнее",
-    )
-    visual_attribute_markers = (
-        "цвет",
-        "оттен",
-        "форма",
-        "размер",
-        "располож",
-        "слева",
-        "справа",
-        "сверху",
-        "снизу",
-        "фон",
-        "материал",
-        "ствол",
-        "дерев",
-        "листв",
-        "видно",
-        "выгляд",
-    )
-    image_markers = (
-        "картин",
-        "изображ",
-        "фото",
-        "picture",
-        "image",
-        "photo",
-    )
-    has_visual_attribute = _contains_visual_attribute(normalized, visual_attribute_markers)
-    return (
-        any(marker in normalized for marker in reanalysis_markers)
-        and (
-            has_visual_attribute
-            or any(marker in normalized for marker in image_markers)
-        )
-    ) or has_visual_attribute
-
-
-def _contains_visual_attribute(normalized: str, markers: tuple[str, ...]) -> bool:
-    for marker in markers:
-        if marker == "материал":
-            if _contains_material_attribute(normalized):
-                return True
-            continue
-        if marker in normalized:
-            return True
-    return False
-
-
-def _contains_material_attribute(normalized: str) -> bool:
-    """Visual 'what material', not the supplies stem in «покупки материалов»."""
-    start = 0
-    needle = "материал"
-    while True:
-        index = normalized.find(needle, start)
-        if index < 0:
-            return False
-        end = index + len(needle)
-        if normalized.startswith("ов", end):
-            start = end
-            continue
-        return True
-
-
-def _is_indexed_image_document(document: DocumentAsset) -> bool:
-    return (
-        document.status == "indexed"
-        and document.source_type.lower() in IMAGE_SOURCE_TYPES
-    )
-
-
-def _targeted_image_point_id(
-    *,
-    document_id: str,
-    bucket_id: str,
-    question: str,
-    vision_model: str,
-) -> str:
-    normalized_question = " ".join(question.lower().split())
-    return str(
-        uuid5(
-            NAMESPACE_URL,
-            f"image-targeted-digest:{document_id}:{bucket_id}:{vision_model}:{normalized_question}",
-        )
-    )
-
 
 async def _try_save_chat_exchange(
     *,
@@ -1547,35 +815,6 @@ async def _try_save_chat_exchange(
         return None
 
 
-def _chat_session_response(session: ChatSession) -> ChatSessionResponse:
-    return ChatSessionResponse(
-        id=session.id,
-        title=session.title or "Untitled chat",
-        tenant_id=session.tenant_id,
-        owner_user_id=session.owner_user_id,
-        active_bucket_id=session.active_bucket_id,
-        model_id=session.model_id,
-        approach=session.approach,
-        metadata=session.metadata_json or {},
-        created_at=session.created_at.isoformat(),
-        updated_at=session.updated_at.isoformat(),
-    )
-
-
-def _chat_message_response(message: ChatMessage) -> ChatMessageResponse:
-    return ChatMessageResponse(
-        id=message.id,
-        session_id=message.session_id,
-        role=message.role,
-        content=message.content,
-        model=message.model,
-        provider=message.provider,
-        latency_ms=message.latency_ms,
-        metadata=message.metadata_json or {},
-        created_at=message.created_at.isoformat(),
-    )
-
-
 def _attach_chat_exchange(
     response: ChatResponse,
     chat_exchange: ChatExchangeRecord | None,
@@ -1585,47 +824,6 @@ def _attach_chat_exchange(
     response.session_id = chat_exchange.session_id
     response.user_message_id = chat_exchange.user_message_id
     response.assistant_message_id = chat_exchange.assistant_message_id
-
-
-def _as_dict(value: object) -> dict[str, object]:
-    if isinstance(value, dict):
-        return value
-    return {}
-
-
-async def _session_seen_non_synthetic_flag(
-    *,
-    user: UserContext,
-    session_id: str | None,
-) -> bool:
-    try:
-        metadata = await chat_history_service.get_session_metadata(
-            tenant_id=user.tenant_id,
-            user_id=user.user_id,
-            session_id=session_id,
-        )
-    except Exception:
-        logger.exception("Failed to read chat session metadata for external scope")
-        return False
-    return session_seen_non_synthetic(metadata)
-
-
-async def _persist_session_seen_non_synthetic(
-    *,
-    user: UserContext,
-    session_id: str | None,
-) -> None:
-    if not session_id:
-        return
-    try:
-        await chat_history_service.update_session(
-            tenant_id=user.tenant_id,
-            user_id=user.user_id,
-            session_id=session_id,
-            metadata={SESSION_SEEN_NON_SYNTHETIC: True},
-        )
-    except Exception:
-        logger.exception("Failed to persist session_seen_non_synthetic")
 
 
 app.include_router(

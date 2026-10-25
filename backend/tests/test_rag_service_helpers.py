@@ -1,21 +1,24 @@
 from app.models.chat import SourceChunk
 from app.db.models import ChatSession
 from app.services.chat_history_service import _apply_session_context
-from app.services.rag_service import (
-    _apply_source_diversity,
+from app.services.rag_docx import (
     _docx_neighbor_sources,
     _docx_rerank_score,
-    _excel_exact_match_count,
-    _extract_excel_exact_terms,
-    _extract_exact_numeric_terms,
     _extract_docx_exact_terms,
+)
+from app.services.rag_excel import (
+    _excel_exact_match_count,
+    _extract_exact_numeric_terms,
+    _extract_excel_exact_terms,
+    _looks_like_document_header_question,
+)
+from app.services.rag_prompt import _remove_numeric_metric_lines, build_rag_prompt
+from app.services.rag_service import (
+    _apply_source_diversity,
     _filter_sources_by_score,
     _is_narrow_document_scope,
-    _looks_like_document_header_question,
     _lower_score_threshold,
-    _remove_numeric_metric_lines,
     _required_source_types_for_supplement,
-    build_rag_prompt,
 )
 
 

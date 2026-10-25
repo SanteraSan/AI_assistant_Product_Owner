@@ -5,7 +5,7 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image as ExcelImage
 from PIL import Image, ImageDraw
 
-from app.services import document_loader
+from app.services.loaders import images as image_loader
 from app.services.image_digest_service import IMAGE_DIGEST_PROMPT, load_image_digest_documents
 
 
@@ -194,7 +194,7 @@ def test_load_image_digest_documents_includes_scanned_table_anchor_context(
     draw.rectangle((430, 80, 470, 125), fill=(160, 40, 40), outline=(220, 180, 60), width=3)
     image.save(image_path)
     monkeypatch.setattr(
-        document_loader,
+        image_loader,
         "_ocr_image_region",
         lambda image: "ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ Цена за кегу 3500 р. 4,1 % алкоголь, 11% плотность",
     )

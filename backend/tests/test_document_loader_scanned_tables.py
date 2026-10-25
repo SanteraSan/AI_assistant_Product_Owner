@@ -2,8 +2,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from app.services import document_loader
 from app.services.document_loader import iter_scanned_table_images
+from app.services.loaders import images as image_loader
 
 
 def _build_scanned_table_fixture(path: Path) -> None:
@@ -33,7 +33,7 @@ def test_scanned_table_extractor_links_image_cell_to_row_text(
     image_path = raw_data_dir / "scanned_table.png"
     _build_scanned_table_fixture(image_path)
     monkeypatch.setattr(
-        document_loader,
+        image_loader,
         "_ocr_image_region",
         lambda image: "ПЯТНИЦКОЕ НЕФИЛЬТРОВАННОЕ Цена за кегу 3500 р. 4,1 % алкоголь, 11% плотность",
     )

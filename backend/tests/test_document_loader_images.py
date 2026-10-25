@@ -5,8 +5,8 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image as ExcelImage
 from PIL import Image
 
-from app.services import document_loader
 from app.services.document_loader import iter_office_embedded_images, load_raw_documents
+from app.services.loaders import common as loader_common
 
 
 def test_image_ocr_loader_extracts_text_and_metadata(
@@ -18,9 +18,9 @@ def test_image_ocr_loader_extracts_text_and_metadata(
     image_path = raw_data_dir / "screenshot.png"
     Image.new("RGB", (320, 120), color="white").save(image_path)
 
-    monkeypatch.setattr(document_loader, "_tesseract_available", lambda: True)
+    monkeypatch.setattr(loader_common, "_tesseract_available", lambda: True)
     monkeypatch.setattr(
-        document_loader.pytesseract,
+        loader_common.pytesseract,
         "image_to_string",
         lambda image, lang: "Найти термин и начать обучение",
     )
@@ -54,9 +54,9 @@ def test_docx_embedded_image_ocr_builds_parent_metadata(
     document.add_picture(str(image_path))
     document.save(docx_path)
 
-    monkeypatch.setattr(document_loader, "_tesseract_available", lambda: True)
+    monkeypatch.setattr(loader_common, "_tesseract_available", lambda: True)
     monkeypatch.setattr(
-        document_loader.pytesseract,
+        loader_common.pytesseract,
         "image_to_string",
         lambda image, lang: "Embedded chart text",
     )
