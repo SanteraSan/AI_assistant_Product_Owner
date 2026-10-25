@@ -19,6 +19,7 @@ from app.services.access_policy import UserContext, can_read_document
 from app.services.chunking import DocumentChunk, chunk_documents
 from app.services.document_loader import RawDocument, load_raw_documents
 from app.services.feedback_index_policy import feedback_item_enters_product_qdrant
+from app.services.feedback_rules import feedback_chunk_content
 from app.services.image_digest_service import load_image_digest_documents
 from app.services.indexing_event_publisher import IndexingEventPublisher
 from app.services.object_storage import (
@@ -46,6 +47,8 @@ class FeedbackIndexRow:
     feedback_class: str
     body: str
     index_in_rag: bool
+    index_text: str | None = None
+    scenario_id: str | None = None
 
 
 class DocumentIndexingService:
@@ -645,9 +648,16 @@ def _feedback_chunks(
             index_in_rag=row.index_in_rag,
         ):
             continue
-        content = row.body.strip()
-        if not content:
+        content = feedback_chunk_content(body=row.body, index_text=row.index_text)
+        if not content.strip():
             continue
+        metadata: dict[str, object] = {
+            "feedback_item_id": row.id,
+            "feedback_class": row.feedback_class,
+            "document_asset_id": document.id,
+        }
+        if row.scenario_id is not None:
+            metadata["scenario_id"] = row.scenario_id
         chunks.append(
             DocumentChunk(
                 id=row.id,
@@ -662,11 +672,7 @@ def _feedback_chunks(
                 tenant_id=tenant_id,
                 bucket_id=bucket_id,
                 processing_status="indexed",
-                metadata={
-                    "feedback_item_id": row.id,
-                    "feedback_class": row.feedback_class,
-                    "document_asset_id": document.id,
-                },
+                metadata=metadata,
             )
         )
     return chunks
@@ -779,6 +785,8 @@ async def _load_feedback_index_rows(
             feedback_class=row.feedback_class,
             body=row.body,
             index_in_rag=row.index_in_rag,
+            index_text=row.index_text,
+            scenario_id=row.scenario_id,
         )
         for row in rows
     ]

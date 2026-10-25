@@ -61,6 +61,8 @@ class QdrantStore:
         document_ids: list[str] | None = None,
         source_paths: list[str] | None = None,
         allowed_source_paths: list[str] | None = None,
+        *,
+        index_in_rag: bool | None = None,
     ) -> list[SourceChunk]:
         result = self._client.query_points(
             collection_name=self._collection_name,
@@ -73,6 +75,7 @@ class QdrantStore:
                 document_ids=document_ids or [],
                 source_paths=source_paths or [],
                 allowed_source_paths=allowed_source_paths or [],
+                index_in_rag=index_in_rag,
             ),
             limit=limit,
             with_payload=True,
@@ -95,6 +98,7 @@ class QdrantStore:
         document_ids: list[str] | None = None,
         source_paths: list[str] | None = None,
         allowed_source_paths: list[str] | None = None,
+        index_in_rag: bool | None = None,
     ) -> list[SourceChunk]:
         records, _ = self._client.scroll(
             collection_name=self._collection_name,
@@ -106,6 +110,7 @@ class QdrantStore:
                 document_ids=document_ids or [],
                 source_paths=source_paths or [],
                 allowed_source_paths=allowed_source_paths or [],
+                index_in_rag=index_in_rag,
             ),
             limit=limit,
             with_payload=True,
@@ -163,6 +168,8 @@ def _payload_filter(
     document_ids: list[str],
     source_paths: list[str],
     allowed_source_paths: list[str] | None = None,
+    *,
+    index_in_rag: bool | None = None,
 ) -> models.Filter | None:
     must: list[models.Condition] = []
 
@@ -238,6 +245,15 @@ def _payload_filter(
             models.FieldCondition(
                 key="source_path",
                 match=models.MatchAny(any=normalized_source_paths),
+            )
+        )
+
+    # None keeps product search unchanged. Arms pass True only for H1.
+    if index_in_rag is not None:
+        must.append(
+            models.FieldCondition(
+                key="index_in_rag",
+                match=models.MatchValue(value=index_in_rag),
             )
         )
 

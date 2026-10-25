@@ -1,0 +1,147 @@
+{
+  "version": "v1",
+  "sources": [
+    {
+      "path": "/home/santera/ML|LLM|RAG/sintetic_data/noise.jsonl",
+      "rows": 350,
+      "sha256": "5aecb98ea4c1ef6e413bd95bd37136a73d17f1ce958263cbe0814f572f61c2f9"
+    },
+    {
+      "path": "/home/santera/ML|LLM|RAG/sintetic_data/churn.jsonl",
+      "rows": 75,
+      "sha256": "0d7b932d8c849b6a25e2330808681fd4169d033340f1469a61bb84c11f8e40a8"
+    },
+    {
+      "path": "/home/santera/ML|LLM|RAG/sintetic_data/bugs.jsonl",
+      "rows": 60,
+      "sha256": "d9f0fcebd53279e241ed4196f3aa1482763a97b198739aa5eecc2fe7f3b6798c"
+    },
+    {
+      "path": "/home/santera/ML|LLM|RAG/sintetic_data/features.jsonl",
+      "rows": 15,
+      "sha256": "8c82b5ac534508f4eb6327baa6aeb4cd1d1ab222e7a813ad02e2ac09e309bf95"
+    }
+  ],
+  "assembly_order": [
+    "noise.jsonl",
+    "churn.jsonl",
+    "bugs.jsonl",
+    "features.jsonl"
+  ],
+  "exact_copies": {
+    "bug": 8,
+    "feature": 2
+  },
+  "counts_before_duplicates": {
+    "noise": 350,
+    "churn_signal": 75,
+    "bug": 60,
+    "feature": 15,
+    "total": 500
+  },
+  "counts": {
+    "noise": 350,
+    "churn_signal": 75,
+    "bug": 68,
+    "feature": 17,
+    "total": 510
+  },
+  "shares": {
+    "noise": 0.686275,
+    "churn_signal": 0.147059,
+    "bug": 0.133333,
+    "feature": 0.033333
+  },
+  "target_shares": {
+    "noise": 0.7,
+    "churn_signal": 0.15,
+    "bug": 0.12,
+    "feature": 0.03
+  },
+  "tolerance_pp": 2.0,
+  "shares_within_tolerance": true,
+  "scenarios_unique": {
+    "bug": [
+      "csv_import",
+      "integrations",
+      "notifications",
+      "permissions",
+      "projects",
+      "reports",
+      "search",
+      "sprints",
+      "tasks",
+      "webhooks"
+    ],
+    "feature": [
+      "csv_import",
+      "integrations",
+      "notifications",
+      "permissions",
+      "projects",
+      "reports",
+      "search",
+      "sprints",
+      "tasks",
+      "webhooks"
+    ]
+  },
+  "scenarios_indexed": {
+    "bug": [
+      "csv_import",
+      "integrations",
+      "notifications",
+      "permissions",
+      "projects",
+      "reports",
+      "search",
+      "sprints",
+      "tasks",
+      "webhooks"
+    ],
+    "feature": [
+      "csv_import",
+      "integrations",
+      "notifications",
+      "permissions",
+      "projects",
+      "reports",
+      "search",
+      "sprints",
+      "tasks",
+      "webhooks"
+    ]
+  },
+  "missing_scenario_id_bug_feature": 0,
+  "length": {
+    "noise": {
+      "min": 0,
+      "max": 11
+    },
+    "churn_signal": {
+      "min": 5,
+      "max": 23
+    },
+    "bug": {
+      "min": 332,
+      "max": 523
+    },
+    "feature": {
+      "min": 455,
+      "max": 629
+    }
+  },
+  "index_text_max_chars": 1200,
+  "pii_raw_counts": {
+    "phone": 8,
+    "card": 5
+  },
+  "index_true_count": 75,
+  "index_true_by_class": {
+    "bug": 60,
+    "feature": 15
+  },
+  "holdout_path": "data/feedback/v1/holdout.jsonl",
+  "holdout_rows": 20,
+  "holdout_sha256": "c4daa546033646b738e2709f0ae7a49c025e17f212ff4479b70382d81cb83728"
+}

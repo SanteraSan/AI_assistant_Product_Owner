@@ -251,6 +251,28 @@ class FeedbackItem(Base):
             "index_in_rag = false OR feedback_class IN ('bug', 'feature')",
             name="ck_feedback_items_index_in_rag_class",
         ),
+        CheckConstraint(
+            "generator_class IS NULL OR generator_class IN ('noise', 'churn_signal', 'bug', 'feature')",
+            name="ck_feedback_items_generator_class",
+        ),
+        CheckConstraint(
+            "rule_class IS NULL OR rule_class IN ('noise', 'churn_signal', 'bug', 'feature')",
+            name="ck_feedback_items_rule_class",
+        ),
+        CheckConstraint(
+            "rule_class IS NULL OR feedback_class = rule_class",
+            name="ck_feedback_items_rule_matches_feedback",
+        ),
+        CheckConstraint(
+            "rule_reason IS NULL OR rule_reason IN ('lexicon_noise', 'lexicon_churn', 'keep_generator', 'exact_duplicate')",
+            name="ck_feedback_items_rule_reason",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "bucket_id",
+            "corpus_id",
+            name="uq_feedback_items_tenant_bucket_corpus",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
@@ -272,6 +294,13 @@ class FeedbackItem(Base):
         default=False,
         server_default=false(),
     )
+    generator_class: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    rule_class: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    scenario_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    index_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    corpus_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    rule_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    duplicate_of: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

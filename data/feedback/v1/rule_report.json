@@ -1,0 +1,78 @@
+{
+  "rows": 510,
+  "class_mismatch_count": 0,
+  "mismatches": [],
+  "index_suppressed": [
+    {
+      "corpus_id": "fb-v1-0501",
+      "duplicate_of": "fb-v1-0426",
+      "rule_reason": "exact_duplicate",
+      "generator_class": "bug",
+      "rule_class": "bug"
+    },
+    {
+      "corpus_id": "fb-v1-0502",
+      "duplicate_of": "fb-v1-0427",
+      "rule_reason": "exact_duplicate",
+      "generator_class": "bug",
+      "rule_class": "bug"
+    },
+    {
+      "corpus_id": "fb-v1-0503",
+      "duplicate_of": "fb-v1-0428",
+      "rule_reason": "exact_duplicate",
+      "generator_class": "bug",
+      "rule_class": "bug"
+    },
+    {
+      "corpus_id": "fb-v1-0504",
+      "duplicate_of": "fb-v1-0429",
+      "rule_reason": "exact_duplicate",
+      "generator_class": "bug",
+      "rule_class": "bug"
+    },
+    {
+      "corpus_id": "fb-v1-0505",
+      "duplicate_of": "fb-v1-0430",
+      "rule_reason": "exact_duplicate",
+      "generator_class": "bug",
+      "rule_class": "bug"
+    },
+    {
+      "corpus_id": "fb-v1-0506",
+      "duplicate_of": "fb-v1-0431",
+      "rule_reason": "exact_duplicate",
+      "generator_class": "bug",
+      "rule_class": "bug"
+    },
+    {
+      "corpus_id": "fb-v1-0507",
+      "duplicate_of": "fb-v1-0432",
+      "rule_reason": "exact_duplicate",
+      "generator_class": "bug",
+      "rule_class": "bug"
+    },
+    {
+      "corpus_id": "fb-v1-0508",
+      "duplicate_of": "fb-v1-0433",
+      "rule_reason": "exact_duplicate",
+      "generator_class": "bug",
+      "rule_class": "bug"
+    },
+    {
+      "corpus_id": "fb-v1-0509",
+      "duplicate_of": "fb-v1-0486",
+      "rule_reason": "exact_duplicate",
+      "generator_class": "feature",
+      "rule_class": "feature"
+    },
+    {
+      "corpus_id": "fb-v1-0510",
+      "duplicate_of": "fb-v1-0487",
+      "rule_reason": "exact_duplicate",
+      "generator_class": "feature",
+      "rule_class": "feature"
+    }
+  ],
+  "index_true_count": 75
+}

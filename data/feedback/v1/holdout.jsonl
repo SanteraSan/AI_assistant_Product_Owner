@@ -1,0 +1,20 @@
+{"text": "Слушайте ну это просто пушка!!! Всё летает, спасибо разрабам!!!", "generator_class": "noise", "scenario_id": null}
+{"text": "нормас", "generator_class": "noise", "scenario_id": null}
+{"text": "УЖАСНОЕ ОБНОВЛЕНИЕ ВЕРНИТЕ КАК БЫЛО", "generator_class": "churn_signal", "scenario_id": null}
+{"text": "Аааааааа почему все так сложно??", "generator_class": "noise", "scenario_id": null}
+{"text": "тест", "generator_class": "noise", "scenario_id": null}
+{"text": "Ничего не работает, я ухожу от вас к конкурентам. Сил моих больше нет.", "generator_class": "churn_signal", "scenario_id": null}
+{"text": "Удаляю к чертям собачьим. Верните деньги!!!", "generator_class": "churn_signal", "scenario_id": null}
+{"text": "Приложение постоянно вылетает при входе, не могу даже баланс посмотреть. Мой телефон +7 900 000-00-00, разберитесь уже!!", "generator_class": "bug", "scenario_id": null}
+{"text": "Вылетает наглухо при попытке прикрепить сранный скриншот в чат техподдержки!!", "generator_class": "bug", "scenario_id": null}
+{"text": "Я вчера пытался выгрузить отчет по продажам за месяц в цсв, а мне выдает ошибку 500 internal server error. Почините плиз, очень горит по работе!!", "generator_class": "bug", "scenario_id": "reports"}
+{"text": "почему у меня пропал доступ к бакету 'marketing_docs'?? Пишет что у меня нет прав, хотя админ вчера все выдал! Срочно проверте!!!", "generator_class": "bug", "scenario_id": "permissions"}
+{"text": "Ваша система заблочила отправку важных уведомлений клиентам. Нам на карту 4242 4242 4242 4242 штраф выкатят за срыв сроков, если не исправите прямо сейчас!", "generator_class": "bug", "scenario_id": "notifications"}
+{"text": "При формировании отчета по пользователям за прошлую неделю дублируются строки. В итоге цифры в графиках едут, PO недоволен.", "generator_class": "bug", "scenario_id": "reports"}
+{"text": "При попытке расшарить папку новому сотруднику вылезает пустой белый экран. Приходится перезапускать всю страницу.", "generator_class": "bug", "scenario_id": "permissions"}
+{"text": "Добавьте пожалуйста темную тему, а то ночью глаза просто вытекают, когда сидишь в таскфлоу.", "generator_class": "feature", "scenario_id": null}
+{"text": "Было бы круто иметь возможность кастомизировать колонки в канбан-доске под себя, а не только дефолтные юзать.", "generator_class": "feature", "scenario_id": "tasks"}
+{"text": "Сделайте интеграцию с телеграмом, чтобы алерты о критических багах падали сразу в рабочий чат команды, а не только на почту.", "generator_class": "feature", "scenario_id": "integrations"}
+{"text": "Было бы супер если бы вы добавили кнопку 'Скачать все в один клик' для прикрепленных документов в бакете.", "generator_class": "feature", "scenario_id": null}
+{"text": "Очень не хватает фильтрации по автору фидбека в аналитической панели. Сделайте поиск по тенантам.", "generator_class": "feature", "scenario_id": "reports"}
+{"text": "Добавьте экспорт не только в CSV, но и в полноценный Excel со стилями, а то менеджеры плачут.", "generator_class": "feature", "scenario_id": "reports"}

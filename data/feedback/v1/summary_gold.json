@@ -1,0 +1,27 @@
+{
+  "version": "v1",
+  "source_manifest": "data/feedback/v1/manifest.json",
+  "expected_holdout_sha256": "c4daa546033646b738e2709f0ae7a49c025e17f212ff4479b70382d81cb83728",
+  "expected_holdout_rows": 20,
+  "must_not": ["Класс!", "Супер!!!", "двухфакторная аутентификация"],
+  "questions": [
+    {
+      "question_id": "critical_bugs",
+      "slice": "bug",
+      "question": "Собери недельное саммари критичных багов.",
+      "expected_scenario_ids": [
+        "csv_import", "integrations", "notifications", "permissions",
+        "projects", "reports", "search", "sprints", "tasks", "webhooks"
+      ]
+    },
+    {
+      "question_id": "requested_features",
+      "slice": "feature",
+      "question": "Какие фичи просят?",
+      "expected_scenario_ids": [
+        "csv_import", "integrations", "notifications", "permissions",
+        "projects", "reports", "search", "sprints", "tasks", "webhooks"
+      ]
+    }
+  ]
+}

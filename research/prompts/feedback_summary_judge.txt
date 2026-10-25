@@ -1,0 +1,22 @@
+Оцени ответ саммари только по вопросу, контексту и спискам ниже.
+Верни один JSON-объект и ничего больше: без markdown и без пояснений.
+faithfulness и answer_coverage — числа от 0 до 1.
+must_not_present равен true, если в ответе есть хотя бы одна фраза из списка must_not, иначе false.
+scenario_ids — идентификаторы из ответа в порядке появления. Не добавляй id, которых ответ не называет.
+
+Вопрос:
+{question}
+
+Контекст:
+{context}
+
+Ответ:
+{answer}
+
+must_not:
+{must_not}
+
+Ожидаемые scenario_id:
+{expected_scenario_ids}
+
+{"faithfulness": 0.0, "answer_coverage": 0.0, "must_not_present": false, "scenario_ids": []}
